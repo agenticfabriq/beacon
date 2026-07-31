@@ -1,0 +1,18 @@
+db_id: superhero
+postgres_schema: bird_superhero
+
+tables:
+  superhero:
+    description: "Superhero entity records with attributes and publisher references."
+    columns:
+      id:
+        description: "Primary key."
+        business_concept: superhero_id
+      superhero_name:
+        description: "Published superhero name."
+        business_concept: superhero_name
+
+business_concepts: {}
+relationships: []
+
+# TODO(ontology): expand. See README.md.

@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import select
+
+from beacon_storage.models.runs import HarnessMode, Run, RunStatus
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session
+
+
+class RunRepo:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        team_id: UUID,
+        project_id: UUID,
+        solution_id: UUID,
+        suite: str,
+        dataset_version: str,
+        mode: HarnessMode,
+        pass_idx: int,
+        config: dict[str, object],
+        created_by: UUID,
+        parent_sweep_id: UUID | None = None,
+    ) -> Run:
+        """Create a pending run for the given solution/suite and return it."""
+        run = Run(
+            team_id=team_id,
+            project_id=project_id,
+            solution_id=solution_id,
+            suite=suite,
+            dataset_version=dataset_version,
+            mode=mode,
+            pass_idx=pass_idx,
+            parent_sweep_id=parent_sweep_id,
+            config=config,
+            status=RunStatus.PENDING,
+            created_by=created_by,
+        )
+        self.session.add(run)
+        self.session.flush()
+        return run
+
+    def get(self, run_id: UUID) -> Run | None:
+        """Return the run with id ``run_id`` or None."""
+        return self.session.get(Run, run_id)
+
+    def mark_running(self, run_id: UUID) -> None:
+        """Set the run to ``RUNNING`` and stamp ``started_at``."""
+        run = self.session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = RunStatus.RUNNING
+        run.started_at = datetime.now(UTC)
+        self.session.flush()
+
+    def mark_completed(self, run_id: UUID) -> None:
+        """Set the run to ``COMPLETED`` and stamp ``completed_at``."""
+        run = self.session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = RunStatus.COMPLETED
+        run.completed_at = datetime.now(UTC)
+        self.session.flush()
+
+    def mark_failed(self, run_id: UUID, error: str) -> None:
+        """Set the run to ``FAILED``, persist a truncated ``error``, and stamp completion."""
+        run = self.session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = RunStatus.FAILED
+        run.error = error[:4000]
+        run.completed_at = datetime.now(UTC)
+        self.session.flush()
+
+    def list_for_project(
+        self,
+        project_id: UUID,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        solution_id: UUID | None = None,
+        suite: str | None = None,
+        mode: HarnessMode | None = None,
+        status: RunStatus | None = None,
+    ) -> list[Run]:
+        """Return runs in ``project_id`` filtered by optional facets, newest first."""
+        stmt = select(Run).where(Run.project_id == project_id)
+        if solution_id is not None:
+            stmt = stmt.where(Run.solution_id == solution_id)
+        if suite is not None:
+            stmt = stmt.where(Run.suite == suite)
+        if mode is not None:
+            stmt = stmt.where(Run.mode == mode)
+        if status is not None:
+            stmt = stmt.where(Run.status == status)
+        stmt = stmt.order_by(Run.created_at.desc()).offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.session.scalars(stmt))

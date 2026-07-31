@@ -1,0 +1,265 @@
+"""Project run API routes."""
+
+from __future__ import annotations
+
+from statistics import median
+from typing import Annotated, cast
+from uuid import UUID
+
+from beacon_iam.permissions import Permission
+from beacon_storage.ids import uuid7
+from beacon_storage.models.project_solutions import ProjectSolution
+from beacon_storage.models.runs import HarnessMode, Run, RunStatus, VerdictOutcome
+from beacon_storage.models.tenancy import User  # noqa: TC002
+from beacon_storage.repository.projects import ProjectRepo
+from beacon_storage.repository.results import ResultRepo
+from beacon_storage.repository.runs import RunRepo
+from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session  # noqa: TC002
+
+from beacon_ui.api.deps import get_session, require_permission
+from beacon_ui.api.openapi import requires
+from beacon_ui.api.schemas.run import RunCreate, RunOut, RunSummaryOut
+
+router = APIRouter(prefix="/v1/projects", tags=["runs"])
+
+_CONFIG_SUITE_ID_KEY = "_beacon_suite_id"
+
+
+def _run_status(run: Run) -> str:
+    status_value = run.status.value if isinstance(run.status, RunStatus) else str(run.status)
+    if status_value == RunStatus.PENDING.value:
+        return "queued"
+    return status_value
+
+
+def _run_mode(run: Run) -> str:
+    return run.mode.value if isinstance(run.mode, HarnessMode) else str(run.mode)
+
+
+def _parse_status_filter(value: str | None) -> RunStatus | None:
+    if value is None or value == "":
+        return None
+    aliases = {
+        "queued": RunStatus.PENDING,
+        "success": RunStatus.COMPLETED,
+    }
+    if value in aliases:
+        return aliases[value]
+    try:
+        return RunStatus(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"unknown run status {value!r}",
+        ) from exc
+
+
+def _summary(run: Run, session: Session) -> RunSummaryOut:
+    results = ResultRepo(session).list_for_run(run.id)
+    item_ids = {result.item_id for result in results}
+    n_items = len(item_ids)
+    if n_items == 0:
+        return RunSummaryOut(n_items=0)
+
+    passed_items = {result.item_id for result in results if result.outcome == VerdictOutcome.PASS}
+    token_totals = [result.tokens_input + result.tokens_output for result in results]
+    latencies = [result.runtime_ms for result in results]
+    pass_at_1 = len(passed_items) / n_items
+    return RunSummaryOut(
+        pass_at_1=pass_at_1,
+        pass_at_3=pass_at_1,
+        pass_at_5=pass_at_1,
+        pass_hat_3=pass_at_1,
+        median_tokens=float(median(token_totals)) if token_totals else None,
+        median_latency_ms=float(median(latencies)) if latencies else None,
+        n_items=n_items,
+    )
+
+
+def _suite_id_from_config(config: dict[str, object]) -> UUID | None:
+    value = config.get(_CONFIG_SUITE_ID_KEY)
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+def _suite_id_for_run(run: Run, session: Session) -> UUID:
+    if suite_id := _suite_id_from_config(run.config):
+        return suite_id
+
+    suite = SuiteRepo(session).get_by_project_and_name(run.project_id, run.suite)
+    if suite is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"suite {run.suite!r} not found for run {run.id}",
+        )
+    return suite.id
+
+
+def _run_out(run: Run, session: Session) -> RunOut:
+    return RunOut(
+        run_id=run.id,
+        project_id=run.project_id,
+        solution_id=run.solution_id,
+        suite_id=_suite_id_for_run(run, session),
+        mode=_run_mode(run),
+        status=_run_status(run),
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        summary=_summary(run, session),
+    )
+
+
+def _assert_project_solution_linked(
+    session: Session,
+    *,
+    project_id: UUID,
+    solution_id: UUID,
+) -> None:
+    if session.get(ProjectSolution, (project_id, solution_id)) is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "solution is not attached to this project",
+        )
+
+
+def _dataset_version_for_suite(suite_metadata: dict[str, object]) -> str:
+    value = suite_metadata.get("dataset_version")
+    if isinstance(value, str) and value:
+        return value
+    return "v1"
+
+
+@router.post(
+    "/{project_id}/runs",
+    response_model=RunOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Kick off a run",
+)
+@requires(Permission.PROJECT_RUN_EVAL)
+def kick_off_run(
+    project_id: UUID,
+    body: RunCreate,
+    actor: Annotated[
+        User,
+        Depends(require_permission(Permission.PROJECT_RUN_EVAL, scope_kind="project")),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> RunOut:
+    """Queue a new evaluation run for a project solution and suite."""
+    project = ProjectRepo(session).get(project_id)
+    assert project is not None
+
+    solution = SolutionRepo(session).get(body.solution_id)
+    if solution is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"solution {body.solution_id} not found",
+        )
+    if solution.team_id != project.team_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "solution belongs to a different team than this project",
+        )
+    _assert_project_solution_linked(
+        session,
+        project_id=project_id,
+        solution_id=body.solution_id,
+    )
+    if body.mode.value not in solution.supported_modes:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"solution does not support mode {body.mode.value}",
+        )
+
+    suite = SuiteRepo(session).get(body.suite_id)
+    if suite is None or suite.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"suite {body.suite_id} not found")
+
+    config: dict[str, object] = {
+        **cast("dict[str, object]", body.config),
+        _CONFIG_SUITE_ID_KEY: str(suite.id),
+    }
+    run = RunRepo(session).create(
+        team_id=project.team_id,
+        project_id=project_id,
+        solution_id=body.solution_id,
+        suite=suite.name,
+        dataset_version=_dataset_version_for_suite(suite.suite_metadata),
+        mode=body.mode,
+        pass_idx=0,
+        parent_sweep_id=uuid7(),
+        config=config,
+        created_by=actor.id,
+    )
+    return _run_out(run, session)
+
+
+@router.get(
+    "/{project_id}/runs/{run_id}",
+    response_model=RunOut,
+    summary="Get a run's status and summary metrics",
+)
+@requires(Permission.PROJECT_VIEW)
+def get_run(
+    project_id: UUID,
+    run_id: UUID,
+    _actor: Annotated[
+        User,
+        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> RunOut:
+    """Return a run's status and summary metrics."""
+    run = RunRepo(session).get(run_id)
+    if run is None or run.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    return _run_out(run, session)
+
+
+@router.get(
+    "/{project_id}/runs",
+    response_model=list[RunOut],
+    summary="List runs in this project",
+)
+@requires(Permission.PROJECT_VIEW)
+def list_runs(
+    project_id: UUID,
+    _actor: Annotated[
+        User,
+        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    solution_id: UUID | None = None,
+    suite_id: UUID | None = None,
+    mode: HarnessMode | None = None,
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
+) -> list[RunOut]:
+    """List runs in the project with optional solution, suite, mode, and status filters."""
+    suite_name: str | None = None
+    if suite_id is not None:
+        suite = SuiteRepo(session).get(suite_id)
+        if suite is None or suite.project_id != project_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"suite {suite_id} not found")
+        suite_name = suite.name
+
+    runs = RunRepo(session).list_for_project(
+        project_id,
+        limit=limit,
+        offset=offset,
+        solution_id=solution_id,
+        suite=suite_name,
+        mode=mode,
+        status=_parse_status_filter(status_filter),
+    )
+    if suite_id is not None:
+        runs = [run for run in runs if _suite_id_from_config(run.config) in (None, suite_id)]
+    return [_run_out(run, session) for run in runs]

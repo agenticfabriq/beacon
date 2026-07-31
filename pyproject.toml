@@ -1,0 +1,57 @@
+[project]
+name = "beacon"
+version = "0.2.0"
+license = "Apache-2.0"
+description = "Evaluation framework for database-grounded data agents"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=7.0",
+    "pytest-postgresql>=6.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "httpx>=0.27",
+    "statsmodels>=0.14",
+    "responses>=0.25",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = [
+    "packages/beacon_storage/src",
+    "packages/beacon_iam/src",
+    "packages/beacon_ui/src",
+    "packages/beacon_runner/src",
+    "packages/beacon_graders/src",
+    "packages/beacon_ablation/src",
+    "packages/beacon_registry/src",
+    "packages/beacon_sdk/src",
+    "packages/beacon_workers/src",
+    "packages/beacon_benchmarks/src",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "boto3",
+    "botocore",
+    "botocore.*",
+    "uuid_extensions",
+    "uuid_extensions.*",
+    "yaml",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["packages/*/tests", "tests/e2e"]
+addopts = "-v --strict-markers"
+markers = ["integration: requires Postgres", "e2e: full plan-2 stack smoke"]

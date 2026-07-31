@@ -1,0 +1,39 @@
+db_id: california_schools
+postgres_schema: bird_california_schools
+
+tables:
+  schools:
+    description: "California K-12 schools with administrative and demographic metadata."
+    columns:
+      CDSCode:
+        description: "California Department of Schools code; unique school identifier."
+        business_concept: school_identifier
+      County:
+        description: "County the school is in."
+        business_concept: county_name
+  frpm:
+    description: "Free and Reduced-Price Meal eligibility data."
+    columns:
+      CDSCode:
+        description: "Foreign key to schools.CDSCode."
+        business_concept: school_identifier
+      "Free Meal Count (K-12)":
+        description: "Count of K-12 students eligible for free meals."
+        business_concept: free_meal_count
+      "Enrollment (K-12)":
+        description: "Total K-12 enrollment."
+        business_concept: k12_enrollment
+
+business_concepts:
+  eligible_free_rate_k12:
+    formula: '"Free Meal Count (K-12)" / "Enrollment (K-12)"'
+    source_tables: [frpm]
+    description: "Eligible free meal rate for K-12 students as a ratio."
+
+relationships:
+  - from: schools.CDSCode
+    to: frpm.CDSCode
+    kind: one_to_one
+
+# TODO(ontology): expand tables/columns/business_concepts to full
+# coverage before the suite ships to production. See README.md in this dir.

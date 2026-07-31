@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install
+        run: uv sync --all-packages
+      - name: Ruff check
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install
+        run: uv sync --all-packages
+      - name: Mypy
+        run: uv run mypy packages/
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      BEACON_JWT_SIGNING_KEY: ci-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install Postgres binaries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16 postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - name: Install
+        run: uv sync --all-packages
+      - name: Pytest
+        run: uv run pytest -v
+      - name: Smoke alembic against a fresh DB
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres@localhost:5432/beacon_ci
+        run: |
+          sudo install -d -o postgres -g postgres /tmp/ci-pg
+          sudo -u postgres /usr/lib/postgresql/16/bin/initdb -A trust -D /tmp/ci-pg
+          sudo -u postgres /usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ci-pg -l /tmp/ci-pg.log start
+          sudo -u postgres /usr/lib/postgresql/16/bin/createdb beacon_ci
+          uv run alembic -c packages/beacon_storage/src/beacon_storage/migrations/alembic.ini upgrade head
+
+  workers-image:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/workers/Dockerfile
+          tags: beacon-workers:ci
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke entry-points exist
+        run: |
+          for worker in promotion convergence antigoodhart retention; do
+            docker run --rm beacon-workers:ci \
+              python -c "from beacon_workers.${worker}.__main__ import main; print('${worker} OK')"
+          done

@@ -1,0 +1,38 @@
+[project]
+name = "beacon_benchmarks"
+version = "0.2.0"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "beacon_storage",
+    "beacon_runner",
+    "beacon_graders",
+    "beacon_registry",
+    "datasets>=2.20",
+    "huggingface_hub>=0.24",
+    "sqlglot>=25.5",
+    "pyyaml>=6.0",
+    "requests>=2.32",
+    "pandas>=2.2",
+    "pyarrow>=17.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "responses>=0.25",
+    "pytest-recording>=0.13",
+]
+
+[tool.uv.sources]
+beacon_storage = { workspace = true }
+beacon_runner = { workspace = true }
+beacon_graders = { workspace = true }
+beacon_registry = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/beacon_benchmarks"]

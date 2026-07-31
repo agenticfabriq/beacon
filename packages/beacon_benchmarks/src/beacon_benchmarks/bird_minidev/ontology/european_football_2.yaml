@@ -1,0 +1,18 @@
+db_id: european_football_2
+postgres_schema: bird_european_football_2
+
+tables:
+  match:
+    description: "Football match records with participating teams and outcomes."
+    columns:
+      id:
+        description: "Primary key."
+        business_concept: match_id
+      season:
+        description: "Competition season for the match."
+        business_concept: season
+
+business_concepts: {}
+relationships: []
+
+# TODO(ontology): expand. See README.md.

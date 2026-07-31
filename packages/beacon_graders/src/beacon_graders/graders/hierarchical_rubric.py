@@ -1,0 +1,109 @@
+"""LLM-judge grader for hierarchical rubric trees."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any
+
+from beacon_graders.llm.prompts import HIERARCHICAL_RUBRIC_PROMPT, extract_json
+from beacon_graders.llm.provider import JudgeRequest
+from beacon_graders.types import Verdict
+
+if TYPE_CHECKING:
+    from beacon_runner.types import EvalItem, ExecutionResult
+
+    from beacon_graders.llm.provider import JudgeCache
+
+
+class HierarchicalRubricGrader:
+    name = "hierarchical_rubric"
+    version = "v1"
+
+    def __init__(self, *, judge_cache: JudgeCache) -> None:
+        self.cache = judge_cache
+
+    def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:  # noqa: ARG002
+        """Apply when ``item.metadata.rubric`` declares at least one named criterion."""
+        return bool(self._criteria(item))
+
+    def grade(self, item: EvalItem, result: ExecutionResult) -> list[Verdict]:
+        """Ask the LLM judge to score each rubric criterion independently."""
+        rubric = item.metadata.get("rubric")
+        rubric_payload = rubric if isinstance(rubric, dict) else {}
+        criteria = self._criteria(item)
+        prompt = HIERARCHICAL_RUBRIC_PROMPT.format(
+            question=item.query.get("question", "(no question)"),
+            candidate=self._candidate_text(result),
+            gold=json.dumps(item.ground_truth or {}, indent=2),
+            rubric_json=json.dumps(rubric_payload, indent=2),
+        )
+        request = JudgeRequest(prompt=prompt, grader_version=self.version)
+
+        try:
+            response = self.cache.get_or_call(request)
+            parsed = extract_json(response.text)
+        except Exception as exc:
+            return [
+                self._fail(str(criterion["name"]), f"Judge call failed: {exc!r}")
+                for criterion in criteria
+            ]
+
+        criteria_scores = parsed.get("criteria") or {}
+        out: list[Verdict] = []
+        for criterion in criteria:
+            name = str(criterion["name"])
+            payload = criteria_scores.get(name) if isinstance(criteria_scores, dict) else None
+            if not isinstance(payload, dict):
+                out.append(self._fail(name, "Missing criterion in judge output"))
+                continue
+
+            try:
+                value = float(payload.get("score", 0.0))
+            except (TypeError, ValueError):
+                value = 0.0
+            value = max(0.0, min(1.0, value))
+            out.append(
+                Verdict(
+                    grader=self.name,
+                    grader_version=self.version,
+                    criterion=name,
+                    value=value,
+                    justification=str(payload.get("justification", "")),
+                    raw_output={
+                        "model_version": response.model_version,
+                        "tokens_input": response.tokens_input,
+                        "tokens_output": response.tokens_output,
+                    },
+                )
+            )
+        return out
+
+    def _criteria(self, item: EvalItem) -> list[dict[str, Any]]:
+        rubric = item.metadata.get("rubric")
+        if not isinstance(rubric, dict):
+            return []
+        criteria = rubric.get("criteria")
+        if not isinstance(criteria, list):
+            return []
+        return [
+            criterion
+            for criterion in criteria
+            if isinstance(criterion, dict) and criterion.get("name")
+        ]
+
+    def _candidate_text(self, result: ExecutionResult) -> str:
+        if "narrative" in result.output:
+            return str(result.output["narrative"])
+        if "answer" in result.output:
+            return str(result.output["answer"])
+        return json.dumps(result.output, default=str)
+
+    def _fail(self, criterion: str, justification: str) -> Verdict:
+        return Verdict(
+            grader=self.name,
+            grader_version=self.version,
+            criterion=criterion,
+            value=0.0,
+            justification=justification,
+            raw_output=None,
+        )

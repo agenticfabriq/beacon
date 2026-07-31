@@ -1,0 +1,18 @@
+db_id: formula_1
+postgres_schema: bird_formula_1
+
+tables:
+  races:
+    description: "Formula 1 race schedule and event metadata."
+    columns:
+      raceId:
+        description: "Primary key for a race."
+        business_concept: race_id
+      year:
+        description: "Season year."
+        business_concept: season_year
+
+business_concepts: {}
+relationships: []
+
+# TODO(ontology): expand. See README.md.

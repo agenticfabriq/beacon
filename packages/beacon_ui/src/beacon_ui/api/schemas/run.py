@@ -1,0 +1,46 @@
+"""Pydantic schemas for project run APIs."""
+
+from __future__ import annotations
+
+from datetime import datetime  # noqa: TC003
+from typing import Any
+from uuid import UUID  # noqa: TC003
+
+from beacon_storage.models.runs import HarnessMode  # noqa: TC002
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class RunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    solution_id: UUID
+    suite_id: UUID
+    mode: HarnessMode
+    # Runner configs are SUT-defined JSON objects, so the API accepts arbitrary values here.
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunSummaryOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pass_at_1: float | None = None
+    pass_at_3: float | None = None
+    pass_at_5: float | None = None
+    pass_hat_3: float | None = None
+    median_tokens: float | None = None
+    median_latency_ms: float | None = None
+    n_items: int
+
+
+class RunOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    project_id: UUID
+    solution_id: UUID
+    suite_id: UUID
+    mode: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    summary: RunSummaryOut

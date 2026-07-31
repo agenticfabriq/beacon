@@ -1,0 +1,10 @@
+{
+  "benchmark": "dabstep",
+  "fixture": "dabstep_sample.jsonl",
+  "source_type": "hand_curated",
+  "reference_sut": "beacon-offline-reference-v1",
+  "expected_pass_at_1": 0.8,
+  "tolerance_pp": 3.0,
+  "minimum_tasks": 5,
+  "notes": "Offline hand-curated factoid regression baseline used to validate Beacon grader compatibility; not a published leaderboard claim."
+}

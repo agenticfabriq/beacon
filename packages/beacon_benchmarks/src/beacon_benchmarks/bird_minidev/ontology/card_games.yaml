@@ -1,0 +1,18 @@
+db_id: card_games
+postgres_schema: bird_card_games
+
+tables:
+  cards:
+    description: "Magic: The Gathering card definitions."
+    columns:
+      id:
+        description: "Primary key."
+        business_concept: card_id
+      rarity:
+        description: "Rarity tier such as mythic, rare, uncommon, or common."
+        business_concept: card_rarity
+
+business_concepts: {}
+relationships: []
+
+# TODO(ontology): expand. See README.md.

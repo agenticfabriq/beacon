@@ -1,0 +1,10 @@
+{
+  "benchmark": "drbench",
+  "fixture": "drbench_sample.jsonl",
+  "source_type": "hand_curated",
+  "reference_sut": "beacon-offline-reference-v1",
+  "expected_pass_at_1": 0.0,
+  "tolerance_pp": 3.0,
+  "minimum_tasks": 5,
+  "notes": "Offline hand-curated rubric regression baseline. The fixture validates missing-judge-cache failure handling and is not a published leaderboard claim."
+}

@@ -1,0 +1,280 @@
+"""AttributionEngine orchestration for leave-one-out sweeps."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol, TypedDict
+
+import numpy as np
+from beacon_storage.ids import uuid7
+from beacon_storage.models.attribution import Attribution
+
+from beacon_ablation.ablator import Ablator
+from beacon_ablation.errors import InsufficientDataError
+from beacon_ablation.metrics import (
+    median_runtime_ms,
+    median_total_tokens,
+    per_task_pass_at_k,
+    per_task_pass_hat_k,
+    suite_pass_at_k,
+    suite_pass_hat_k,
+)
+from beacon_ablation.stats import (
+    benjamini_hochberg,
+    bootstrap_paired_ci,
+    mcnemar_exact,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from uuid import UUID
+
+    from sqlalchemy.orm import Session
+
+
+class _IdentityLike(Protocol):
+    version: str
+
+
+class _ConfigLike(Protocol):
+    layers_enabled: dict[str, bool]
+
+    def model_copy(self, *, deep: bool = False) -> _ConfigLike:
+        """Return a (deep) copy of the config so its layers_enabled can be mutated."""
+        ...
+
+
+class _SutLike(Protocol):
+    def identity(self) -> _IdentityLike:
+        """Return the SUT identity stamped onto persisted attribution rows."""
+        ...
+
+    def layers(self) -> list[object]:
+        """Return the SUT's declared layer descriptors."""
+        ...
+
+
+class _HarnessRunnerLike(Protocol):
+    def run_single(
+        self,
+        *,
+        sut: _SutLike,
+        config: _ConfigLike,
+        items: Sequence[object],
+        suite: str,
+        dataset_version: str,
+        mode: str,
+        pass_idx: int,
+        parent_sweep_id: UUID,
+        project_id: UUID,
+        team_id: UUID,
+        solution_id: UUID,
+    ) -> UUID:
+        """Execute one harness pass over items and return the persisted run id."""
+        ...
+
+    def list_results_for_run(self, run_id: UUID) -> list[object]:
+        """Return per-item result rows for a previously executed run."""
+        ...
+
+
+class _PerKEntry(TypedDict):
+    delta: float
+    ci_low: float
+    ci_high: float
+    p: float
+
+
+class AttributionEngine:
+    """Computes and persists attribution rows for NIGHTLY_LOO sweeps."""
+
+    def __init__(self, session: Session, *, rng: np.random.Generator | None = None) -> None:
+        self.session = session
+        self.rng = rng if rng is not None else np.random.default_rng()
+        self.ablator = Ablator()
+
+    def sweep(
+        self,
+        *,
+        sut: _SutLike,
+        base_config: _ConfigLike,
+        items: Sequence[object],
+        suite: str,
+        dataset_version: str,
+        K: int,
+        project_id: UUID,
+        team_id: UUID,
+        solution_id: UUID,
+        harness_runner: _HarnessRunnerLike,
+    ) -> list[Attribution]:
+        """Run baseline plus per-layer LOO configs and persist attributions."""
+        if K < 1:
+            raise ValueError(f"K must be >= 1, got {K}")
+        if not items:
+            raise InsufficientDataError("sweep called with empty items list")
+
+        sweep_id = uuid7()
+        configs = self.ablator.enumerate_loo_configs(base_config, sut=sut)
+        if len(configs) < 2:
+            raise InsufficientDataError("sweep needs at least one enabled layer to ablate")
+
+        runs_by_label: dict[str, list[UUID]] = {}
+        results_by_label: dict[str, list[object]] = {}
+        for label, config in configs:
+            runs_by_label[label] = []
+            results_by_label[label] = []
+            for pass_idx in range(K):
+                run_id = harness_runner.run_single(
+                    sut=sut,
+                    config=config,
+                    items=items,
+                    suite=suite,
+                    dataset_version=dataset_version,
+                    mode="NIGHTLY_LOO",
+                    pass_idx=pass_idx,
+                    parent_sweep_id=sweep_id,
+                    project_id=project_id,
+                    team_id=team_id,
+                    solution_id=solution_id,
+                )
+                runs_by_label[label].append(run_id)
+                results_by_label[label].extend(harness_runner.list_results_for_run(run_id))
+
+        identity = sut.identity()
+        baseline_results = results_by_label["baseline"]
+        attributions: list[Attribution] = []
+        for label, _config in configs:
+            if label == "baseline":
+                continue
+            layer_name = label.removeprefix("no_")
+            row = self._build_attribution(
+                sweep_id=sweep_id,
+                project_id=project_id,
+                team_id=team_id,
+                solution_id=solution_id,
+                solution_version=identity.version,
+                suite=suite,
+                dataset_version=dataset_version,
+                layer_name=layer_name,
+                K=K,
+                baseline_results=baseline_results,
+                ablated_results=results_by_label[label],
+                baseline_run_id=runs_by_label["baseline"][0],
+                ablated_run_id=runs_by_label[label][0],
+            )
+            self.session.add(row)
+            attributions.append(row)
+
+        self.session.flush()
+        self._apply_bh_correction(attributions)
+        self.session.flush()
+        return attributions
+
+    def _build_attribution(
+        self,
+        *,
+        sweep_id: UUID,
+        project_id: UUID,
+        team_id: UUID,
+        solution_id: UUID,
+        solution_version: str,
+        suite: str,
+        dataset_version: str,
+        layer_name: str,
+        K: int,
+        baseline_results: list[object],
+        ablated_results: list[object],
+        baseline_run_id: UUID,
+        ablated_run_id: UUID,
+    ) -> Attribution:
+        pass_at_k_baseline: dict[str, float] = {}
+        pass_at_k_ablated: dict[str, float] = {}
+        delta_pass_at_k: dict[str, _PerKEntry] = {}
+        pass_hat_k_baseline: dict[str, float] = {}
+        pass_hat_k_ablated: dict[str, float] = {}
+        delta_pass_hat_k: dict[str, _PerKEntry] = {}
+
+        for k in range(1, K + 1):
+            baseline_at_k = per_task_pass_at_k(baseline_results, k=k)
+            ablated_at_k = per_task_pass_at_k(ablated_results, k=k)
+            pass_at_k_baseline[str(k)] = suite_pass_at_k(baseline_results, k=k)
+            pass_at_k_ablated[str(k)] = suite_pass_at_k(ablated_results, k=k)
+            delta, ci_low, ci_high = bootstrap_paired_ci(
+                baseline_at_k,
+                ablated_at_k,
+                n_resamples=10_000,
+                rng=self.rng,
+            )
+            p = mcnemar_exact(baseline_at_k, ablated_at_k)
+            delta_pass_at_k[str(k)] = {
+                "delta": delta,
+                "ci_low": ci_low,
+                "ci_high": ci_high,
+                "p": p,
+            }
+
+            baseline_hat_k = per_task_pass_hat_k(baseline_results, k=k)
+            ablated_hat_k = per_task_pass_hat_k(ablated_results, k=k)
+            pass_hat_k_baseline[str(k)] = suite_pass_hat_k(baseline_results, k=k)
+            pass_hat_k_ablated[str(k)] = suite_pass_hat_k(ablated_results, k=k)
+            delta_hat, hat_ci_low, hat_ci_high = bootstrap_paired_ci(
+                baseline_hat_k,
+                ablated_hat_k,
+                n_resamples=10_000,
+                rng=self.rng,
+            )
+            p_hat = mcnemar_exact(baseline_hat_k, ablated_hat_k)
+            delta_pass_hat_k[str(k)] = {
+                "delta": delta_hat,
+                "ci_low": hat_ci_low,
+                "ci_high": hat_ci_high,
+                "p": p_hat,
+            }
+
+        token_delta_pct = self._relative_delta(
+            median_total_tokens(baseline_results),
+            median_total_tokens(ablated_results),
+        )
+        runtime_delta_pct = self._relative_delta(
+            median_runtime_ms(baseline_results),
+            median_runtime_ms(ablated_results),
+        )
+
+        headline = delta_pass_at_k[str(min(3, K))]
+        return Attribution(
+            attribution_id=uuid7(),
+            sweep_id=sweep_id,
+            project_id=project_id,
+            team_id=team_id,
+            solution_id=solution_id,
+            solution_version=solution_version,
+            suite=suite,
+            dataset_version=dataset_version,
+            layer_name=layer_name,
+            methodology="LOO",
+            baseline_run_id=baseline_run_id,
+            ablated_run_id=ablated_run_id,
+            pass_at_k_baseline=pass_at_k_baseline,
+            pass_at_k_ablated=pass_at_k_ablated,
+            delta_pass_at_k=delta_pass_at_k,
+            pass_hat_k_baseline=pass_hat_k_baseline,
+            pass_hat_k_ablated=pass_hat_k_ablated,
+            delta_pass_hat_k=delta_pass_hat_k,
+            token_delta_pct=token_delta_pct,
+            runtime_delta_pct=runtime_delta_pct,
+            mcnemar_p=headline["p"],
+            bh_adjusted_p=None,
+            ci_low=headline["ci_low"],
+            ci_high=headline["ci_high"],
+        )
+
+    def _apply_bh_correction(self, attributions: list[Attribution]) -> None:
+        if not attributions:
+            return
+        adjusted = benjamini_hochberg([float(row.mcnemar_p) for row in attributions])
+        for row, p_adjusted in zip(attributions, adjusted, strict=True):
+            row.bh_adjusted_p = p_adjusted
+
+    def _relative_delta(self, baseline: float | None, ablated: float | None) -> float | None:
+        if baseline is None or ablated is None or baseline <= 0.0:
+            return None
+        return (ablated - baseline) / baseline

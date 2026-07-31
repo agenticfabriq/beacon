@@ -1,0 +1,110 @@
+"""Aggregate runner result rows into per-task outcomes and suite rates."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+_MISSING = object()
+
+
+def _get_attr(result: object, primary: str, fallback: str | None = None) -> object:
+    value: object = getattr(result, primary, _MISSING)
+    if value is _MISSING and fallback is not None:
+        value = getattr(result, fallback, _MISSING)
+    if value is _MISSING:
+        names = primary if fallback is None else f"{primary!r} or {fallback!r}"
+        raise AttributeError(f"result row must expose {names}")
+    return value
+
+
+def _task_id(result: object) -> str:
+    return str(_get_attr(result, "task_id", "item_id"))
+
+
+def _attempt_idx(result: object) -> int:
+    value = _get_attr(result, "attempt_idx")
+    if not isinstance(value, int):
+        raise TypeError(f"attempt_idx must be int, got {type(value).__name__}")
+    return value
+
+
+def _is_pass(result: object) -> bool:
+    value = _get_attr(result, "verdict", "outcome")
+    return value is not None and str(value) == "PASS"
+
+
+def _int_attr(result: object, name: str) -> int:
+    value = _get_attr(result, name)
+    if not isinstance(value, int):
+        raise TypeError(f"{name} must be int, got {type(value).__name__}")
+    return value
+
+
+def _group_by_task(results: Iterable[object]) -> dict[str, list[object]]:
+    by_task: dict[str, list[object]] = defaultdict(list)
+    for result in results:
+        by_task[_task_id(result)].append(result)
+    for attempts in by_task.values():
+        attempts.sort(key=_attempt_idx)
+    return dict(by_task)
+
+
+def per_task_pass_at_k(results: Iterable[object], *, k: int) -> dict[str, bool]:
+    """Return whether each task has any PASS verdict among the first k attempts."""
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+    return {
+        task_id: any(_is_pass(result) for result in attempts[:k])
+        for task_id, attempts in _group_by_task(results).items()
+    }
+
+
+def per_task_pass_hat_k(results: Iterable[object], *, k: int) -> dict[str, bool]:
+    """Return whether each task has k available attempts and all first k pass."""
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+
+    out: dict[str, bool] = {}
+    for task_id, attempts in _group_by_task(results).items():
+        out[task_id] = len(attempts) >= k and all(_is_pass(result) for result in attempts[:k])
+    return out
+
+
+def suite_pass_at_k(results: Iterable[object], *, k: int) -> float:
+    """Return suite pass@k as the mean of per-task pass@k booleans."""
+    per_task = per_task_pass_at_k(results, k=k)
+    if not per_task:
+        return 0.0
+    return sum(per_task.values()) / len(per_task)
+
+
+def suite_pass_hat_k(results: Iterable[object], *, k: int) -> float:
+    """Return suite pass^k as the mean of per-task pass^k booleans."""
+    per_task = per_task_pass_hat_k(results, k=k)
+    if not per_task:
+        return 0.0
+    return sum(per_task.values()) / len(per_task)
+
+
+def median_total_tokens(results: Iterable[object]) -> float | None:
+    """Return median input-plus-output tokens, or None for empty input."""
+    totals = [
+        _int_attr(result, "tokens_input") + _int_attr(result, "tokens_output") for result in results
+    ]
+    if not totals:
+        return None
+    return float(np.median(totals))
+
+
+def median_runtime_ms(results: Iterable[object]) -> float | None:
+    """Return median runtime in milliseconds, or None for empty input."""
+    runtimes = [_int_attr(result, "runtime_ms") for result in results]
+    if not runtimes:
+        return None
+    return float(np.median(runtimes))

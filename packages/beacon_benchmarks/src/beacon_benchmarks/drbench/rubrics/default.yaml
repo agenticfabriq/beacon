@@ -1,0 +1,34 @@
+dimensions:
+  insight_recall:
+    weight: 0.30
+    criteria:
+      gold_insights_covered:
+        description: "Each gold insight has a corresponding claim in the response."
+        scale: [0, 5]
+  factuality:
+    weight: 0.25
+    criteria:
+      no_hallucinations:
+        description: "Claims are supported by the private sources."
+        scale: [0, 5]
+  citations:
+    weight: 0.20
+    criteria:
+      sources_cited:
+        description: "Source files are cited at least once per major claim."
+        scale: [0, 5]
+      citation_correctness:
+        description: "Cited content matches the source."
+        scale: [0, 5]
+  coherence:
+    weight: 0.15
+    criteria:
+      structure:
+        description: "Report has clear sections."
+        scale: [0, 5]
+  completeness:
+    weight: 0.10
+    criteria:
+      coverage:
+        description: "All sub-questions are addressed."
+        scale: [0, 5]
