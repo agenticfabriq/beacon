@@ -45,6 +45,8 @@ module = [
     "boto3",
     "botocore",
     "botocore.*",
+    "mnemiq",
+    "mnemiq.*",
     "uuid_extensions",
     "uuid_extensions.*",
     "yaml",
