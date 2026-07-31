@@ -108,6 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", default="mnemiq-bird")
     parser.add_argument("--enrich-cache", default=".local/mnemiq-enrich-cache")
     parser.add_argument("--candidates", type=int, default=3)
+    parser.add_argument(
+        "--disable-layer",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Declared layer to run disabled (repeatable), e.g. --disable-layer verifier.",
+    )
     args = parser.parse_args(argv)
     if not args.database_url:
         parser.error("DATABASE_URL or --database-url is required")
@@ -208,7 +215,9 @@ def main(argv: list[str] | None = None) -> int:
             config=SolutionConfig(
                 model_id=os.environ.get("MNEMIQ_LLM_MODEL", "mnemiq"),
                 prompt_version="v0",
-                layers_enabled={layer.name: True for layer in sut.layers()},
+                layers_enabled={
+                    layer.name: layer.name not in set(args.disable_layer) for layer in sut.layers()
+                },
             ),
             suite=SUITE,
             dataset_version=DATASET_VERSION,
@@ -223,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             results = ResultRepo(session).list_for_run(run_id)
             summary = {
                 "run_id": str(run_id),
+                "disabled_layers": sorted(set(args.disable_layer)),
                 "status": str(run_status),
                 "items": len(results),
                 "outcomes": {},

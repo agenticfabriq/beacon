@@ -111,6 +111,11 @@ class ExecutionGroundedSqlGrader:
         ]
 
     def _exec(self, engine: sa.Engine, sql: str) -> list[tuple[Any, ...]]:
+        # Drivers with %-based paramstyles (e.g. psycopg) parse "%" in the
+        # statement as a placeholder even without bound parameters, so a
+        # literal "%" (LIKE patterns in gold SQL) must be doubled for them.
+        if engine.dialect.paramstyle in ("pyformat", "format"):
+            sql = sql.replace("%", "%%")
         with engine.connect() as connection:
             cursor = connection.exec_driver_sql(sql)
             return [tuple(row) for row in cursor.fetchall()]
