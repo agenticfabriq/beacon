@@ -23,8 +23,11 @@ test:
 lint:
 	$(UV) run ruff check . && $(UV) run ruff format --check .
 
+# scripts/ is in scope deliberately: the ablation runner protocol drifted from
+# HarnessRunner for the repo's whole history because its only implementation
+# lived here, outside the typecheck target.
 typecheck:
-	$(UV) run mypy packages/
+	$(UV) run mypy packages/ scripts/
 
 demo: db-up migrate
 	DATABASE_URL=$(DATABASE_URL) $(UV) run beacon-worker-promotion &

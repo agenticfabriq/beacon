@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from beacon_ablation.engine import AttributionEngine
 from beacon_runner.dummy_sut import DummySUT
@@ -89,18 +90,32 @@ class SweepResult:
     runtime_ms: int
 
 
+def _per_k(entry: object, field_name: str) -> float:
+    """Read one field out of a JSONB per-k attribution entry."""
+    if isinstance(entry, Mapping):
+        value = entry.get(field_name)
+        if isinstance(value, int | float):
+            return float(value)
+    return 0.0
+
+
 @dataclass
 class FakeSweepRunner:
-    """Minimal runner adapter for deterministic DummySUT recovery validation."""
+    """Minimal runner adapter for deterministic DummySUT recovery validation.
+
+    Typed against the ablation port rather than beacon's concrete types so
+    mypy checks the conformance here -- this fake was the port's only
+    implementation, and nothing verified it while scripts/ went unchecked.
+    """
 
     _results_by_run: dict[UUID, list[SweepResult]] = field(default_factory=dict)
 
     def run_single(
         self,
         *,
-        sut: SolutionUnderTest,
-        config: SolutionConfig,
-        items: Sequence[EvalItem],
+        sut: object,
+        config: object,
+        items: Sequence[object],
         suite: str,
         dataset_version: str,
         mode: str,
@@ -123,8 +138,10 @@ class FakeSweepRunner:
         )
         run_id = uuid7()
         rows: list[SweepResult] = []
-        for item in items:
-            result = sut.invoke(item, config)
+        typed_sut = cast("SolutionUnderTest", sut)
+        typed_config = cast("SolutionConfig", config)
+        for item in cast("Sequence[EvalItem]", items):
+            result = typed_sut.invoke(item, typed_config)
             passed = bool(result.output.get("passed"))
             rows.append(
                 SweepResult(
@@ -238,9 +255,9 @@ def main() -> int:
                 "pass_num": args.pass_num,
                 "layers": {
                     row.layer_name: {
-                        "delta_pass_at_k": row.delta_pass_at_k[headline_key]["delta"],
-                        "ci_low": row.delta_pass_at_k[headline_key]["ci_low"],
-                        "ci_high": row.delta_pass_at_k[headline_key]["ci_high"],
+                        "delta_pass_at_k": _per_k(row.delta_pass_at_k.get(headline_key), "delta"),
+                        "ci_low": _per_k(row.delta_pass_at_k.get(headline_key), "ci_low"),
+                        "ci_high": _per_k(row.delta_pass_at_k.get(headline_key), "ci_high"),
                         "mcnemar_p": row.mcnemar_p,
                         "bh_adjusted_p": row.bh_adjusted_p,
                     }

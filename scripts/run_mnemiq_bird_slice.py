@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -66,6 +67,20 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
+
+
+def _per_k(entry: object, field_name: str) -> float:
+    """Read one field out of a JSONB per-k attribution entry."""
+    if isinstance(entry, Mapping):
+        value = entry.get(field_name)
+        if isinstance(value, int | float):
+            return float(value)
+    return 0.0
+
+
+def _rate(value: object) -> float:
+    """Coerce a JSONB pass-rate value to float."""
+    return float(value) if isinstance(value, int | float) else 0.0
 
 
 def _read_only_dsn(dsn: str) -> str:
@@ -140,13 +155,13 @@ def _run_loo_sweep(
         headline = str(min(3, passes))
         layers_summary = {
             row.layer_name: {
-                "delta_pass_at_k": row.delta_pass_at_k[headline]["delta"],
-                "ci_low": row.delta_pass_at_k[headline]["ci_low"],
-                "ci_high": row.delta_pass_at_k[headline]["ci_high"],
+                "delta_pass_at_k": _per_k(row.delta_pass_at_k.get(headline), "delta"),
+                "ci_low": _per_k(row.delta_pass_at_k.get(headline), "ci_low"),
+                "ci_high": _per_k(row.delta_pass_at_k.get(headline), "ci_high"),
                 "mcnemar_p": row.mcnemar_p,
                 "bh_adjusted_p": row.bh_adjusted_p,
-                "pass_at_k_baseline": row.pass_at_k_baseline[headline],
-                "pass_at_k_ablated": row.pass_at_k_ablated[headline],
+                "pass_at_k_baseline": _rate(row.pass_at_k_baseline.get(headline)),
+                "pass_at_k_ablated": _rate(row.pass_at_k_ablated.get(headline)),
             }
             for row in attributions
         }
@@ -365,18 +380,20 @@ def main(argv: list[str] | None = None) -> int:
             run = RunRepo(session).get(run_id)
             run_status = getattr(run.status, "value", run.status) if run else "unknown"
             results = ResultRepo(session).list_for_run(run_id)
-            summary = {
+            outcomes: dict[str, int] = {}
+            per_item: list[dict[str, object]] = []
+            summary: dict[str, object] = {
                 "run_id": str(run_id),
                 "disabled_layers": sorted(set(args.disable_layer)),
                 "status": str(run_status),
                 "items": len(results),
-                "outcomes": {},
-                "per_item": [],
+                "outcomes": outcomes,
+                "per_item": per_item,
             }
             for result in sorted(results, key=lambda r: r.item_id):
                 outcome = str(getattr(result.outcome, "value", result.outcome) or "none")
-                summary["outcomes"][outcome] = summary["outcomes"].get(outcome, 0) + 1
-                summary["per_item"].append(
+                outcomes[outcome] = outcomes.get(outcome, 0) + 1
+                per_item.append(
                     {
                         "item_id": result.item_id,
                         "outcome": outcome,

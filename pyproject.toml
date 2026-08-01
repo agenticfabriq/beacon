@@ -47,6 +47,9 @@ module = [
     "botocore.*",
     "mnemiq",
     "mnemiq.*",
+    # Optional dev-only capture tooling, not a runtime or CI dependency.
+    "playwright",
+    "playwright.*",
     "uuid_extensions",
     "uuid_extensions.*",
     "yaml",
