@@ -93,24 +93,7 @@ def test_renaming_does_not_change_the_declared_kind(adapter_type: type[Any]) -> 
         assert grader.kind is type(grader).kind
 
 
-_EMITS_LIST_ADAPTERS = [
-    pytest.param(
-        adapter,
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason=(
-                "CsvPredictionGrader.grade returns a bare _Verdict, so DSBench-DM "
-                "composes ERROR through VerdictComposer; tracked as its own finding"
-            ),
-        ),
-    )
-    if adapter is DSBenchDMAdapter
-    else pytest.param(adapter)
-    for adapter in _ADAPTERS
-]
-
-
-@pytest.mark.parametrize("adapter_type", _EMITS_LIST_ADAPTERS, ids=lambda t: t.__name__)
+@pytest.mark.parametrize("adapter_type", _ADAPTERS, ids=lambda t: t.__name__)
 def test_every_registered_grader_emits_a_list_of_verdicts(adapter_type: type[Any]) -> None:
     """``compose`` does ``verdicts.extend(grader.grade(...))``.
 

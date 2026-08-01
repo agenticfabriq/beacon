@@ -77,7 +77,10 @@ def test_grader_grade_returns_score() -> None:
         response={"predictions_csv": _csv([["id", "y"], [1, 1.0], [2, 0.5]])},
     )
 
-    verdict = grader.grade(item, result)
+    verdicts = grader.grade(item, result)
 
-    assert verdict.score == 1.0
-    assert verdict.outcome == "PASS"
+    # grade() emits the list[Verdict] VerdictComposer requires (B13): the RPG
+    # lands in `value` and the PASS/FAIL decision in `bool_value`.
+    assert len(verdicts) == 1
+    assert verdicts[0].value == 1.0
+    assert verdicts[0].bool_value is True

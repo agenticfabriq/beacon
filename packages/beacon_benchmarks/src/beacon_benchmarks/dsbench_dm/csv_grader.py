@@ -5,19 +5,13 @@ from __future__ import annotations
 import csv
 import io
 import math
-from dataclasses import dataclass
 from typing import Any
 
-from beacon_graders.types import GraderKind
+from beacon_graders.types import GraderKind, Verdict
 
 _LOWER_IS_BETTER = {"mae", "rmse"}
-
-
-@dataclass(frozen=True)
-class _Verdict:
-    outcome: str
-    score: float
-    justification: str
+# An agent at least halfway from the baseline to the best known score passes.
+_RPG_PASS_THRESHOLD = 0.5
 
 
 def _read_csv_dict(text: str) -> list[dict[str, str]]:
@@ -104,7 +98,25 @@ class CsvPredictionGrader:
         suite = _payload_attr(item, "suite")
         return isinstance(suite, str) and suite == self.suite_filter
 
-    def grade(self, item: Any, result: Any) -> _Verdict:
+    def _verdict(self, *, passed: bool, score: float, justification: str) -> list[Verdict]:
+        """Emit the list shape VerdictComposer requires.
+
+        Returning a bare object here made ``compose``'s ``verdicts.extend`` raise,
+        so every DSBench-DM item composed ERROR. ``bool_value`` is what the
+        execution branch reads; ``value`` carries the RPG for score comparisons.
+        """
+        return [
+            Verdict(
+                grader=self.name,
+                grader_version=self.version,
+                criterion="relative_performance_gap",
+                bool_value=passed,
+                value=score,
+                justification=justification,
+            )
+        ]
+
+    def grade(self, item: Any, result: Any) -> list[Verdict]:
         """Score the agent's ``predictions_csv`` via RPG against baseline/best."""
         ground_truth = _payload_attr(item, "ground_truth") or {}
         truth_csv = ground_truth["test_csv"]
@@ -116,8 +128,8 @@ class CsvPredictionGrader:
         response = _payload_attr(result, "response") or _payload_attr(result, "output") or {}
         pred_csv = response.get("predictions_csv") if isinstance(response, dict) else None
         if not pred_csv:
-            return _Verdict(
-                outcome="FAIL",
+            return self._verdict(
+                passed=False,
                 score=0.0,
                 justification="agent produced no predictions_csv",
             )
@@ -130,8 +142,8 @@ class CsvPredictionGrader:
                 metric=metric,
             )
         except Exception as exc:  # noqa: BLE001
-            return _Verdict(
-                outcome="FAIL",
+            return self._verdict(
+                passed=False,
                 score=0.0,
                 justification=f"scoring failed: {exc}",
             )
@@ -142,9 +154,8 @@ class CsvPredictionGrader:
             best_score=best_score,
             metric=metric,
         )
-        outcome = "PASS" if rpg >= 0.5 else "FAIL"
-        return _Verdict(
-            outcome=outcome,
+        return self._verdict(
+            passed=rpg >= _RPG_PASS_THRESHOLD,
             score=rpg,
             justification=(
                 f"agent_score={agent_score:.4f}, baseline={baseline_score:.4f}, "
