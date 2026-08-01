@@ -91,7 +91,8 @@ def test_deferral_is_a_structured_non_answer(stub_server: _StubServer) -> None:
     stub_server.response_body = {
         "answer": "I cannot answer this from the governed schema.",
         "deferred": True,
-        "deferral_reason": "no_tables",
+        "failed": False,
+        "reason_code": "no_tables",
         "sql": None,
     }
     result = _sut(stub_server).invoke(_item(), SolutionConfig(model_id="m"))
@@ -100,6 +101,24 @@ def test_deferral_is_a_structured_non_answer(stub_server: _StubServer) -> None:
     assert result.output["sql"] == ""
     assert result.output["deferred"] is True
     assert result.output["reason"] == "no_tables"
+
+
+def test_failed_answer_is_a_system_error_not_a_graded_fail(stub_server: _StubServer) -> None:
+    stub_server.response_body = {
+        "answer": "Could not answer: the database rejected every attempt.",
+        "deferred": False,
+        "failed": True,
+        "reason_code": "execution_failed",
+        "sql": None,
+    }
+    result = _sut(stub_server).invoke(_item(), SolutionConfig(model_id="m"))
+
+    assert result.error is not None
+    assert result.error.startswith("mnemiq_execution_failed")
+    assert result.output["sql"] == ""
+    assert result.output["failed"] is True
+    assert result.output["reason"] == "execution_failed"
+    assert result.trace.status == "FAILED"
 
 
 def test_http_error_becomes_transport_error_result(stub_server: _StubServer) -> None:

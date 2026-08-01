@@ -92,6 +92,8 @@ class MnemiqHttpSqlSUT:
         runtime_ms = int((time.monotonic() - started) * 1000)
 
         deferred = bool(body.get("deferred", False))
+        failed = bool(body.get("failed", False))
+        reason = body.get("reason_code")
         sql = str(body.get("sql") or "")
         timing = body.get("timing") or {}
         if isinstance(timing, dict) and "total_ms" in timing:
@@ -101,11 +103,12 @@ class MnemiqHttpSqlSUT:
             uuid=f"root-{item.item_id}",
             name="mnemiq_http_ask",
             level="workflow",
-            status="COMPLETED",
+            status="FAILED" if failed else "COMPLETED",
             outputs={
                 "output_kind": "sql",
                 "deferred": deferred,
-                "reason": body.get("deferral_reason"),
+                "failed": failed,
+                "reason": reason,
                 "mode": body.get("mode"),
                 "cached": body.get("cached"),
                 "agreement": body.get("agreement"),
@@ -116,20 +119,29 @@ class MnemiqHttpSqlSUT:
                 "tables_used": body.get("tables_used"),
             },
         )
-        if deferred:
+        answer_text = str(body.get("answer", ""))
+        if failed:
+            # Source outage, not an abstention (mnemiq M6/M14): a system error,
+            # so beacon composes ERROR rather than a graded FAIL.
             output: dict[str, Any] = {
                 "sql": "",
-                "answer": str(body.get("answer", "")),
-                "deferred": True,
-                "reason": body.get("deferral_reason"),
+                "answer": answer_text,
+                "failed": True,
+                "reason": reason,
             }
+            error: str | None = f"mnemiq_execution_failed: {answer_text[:200]}"
+        elif deferred:
+            output = {"sql": "", "answer": answer_text, "deferred": True, "reason": reason}
+            error = None
         else:
             output = {"sql": sql, "item_id": item.item_id}
+            error = None
         return ExecutionResult(
             output=output,
             output_kind="sql",
             trace=root,
             runtime_ms=runtime_ms,
+            error=error,
         )
 
     def _post_ask(self, payload: dict[str, Any]) -> dict[str, Any]:
