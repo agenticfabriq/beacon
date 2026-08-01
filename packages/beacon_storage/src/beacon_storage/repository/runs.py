@@ -4,8 +4,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
+from beacon_storage.errors import DuplicateRunError
 from beacon_storage.models.runs import HarnessMode, Run, RunStatus
+
+_UNIQUE_RUN_CONSTRAINT = "uq_run_project_pass"
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -32,7 +36,23 @@ class RunRepo:
         parent_sweep_id: UUID | None = None,
         sweep_arm: str | None = None,
     ) -> Run:
-        """Create a pending run for the given solution/suite and return it."""
+        """Create a pending run for the given solution/suite and return it.
+
+        Run identity is ``(project_id, solution_id, suite, dataset_version,
+        mode, pass_idx, parent_sweep_id, sweep_arm)`` and the constraint treats
+        NULLs as equal, so **repeating a run needs something to distinguish it**.
+        Pick deliberately:
+
+        * a fresh ``parent_sweep_id`` (``uuid7()``) groups the runs of one
+          sweep and makes each invocation distinct -- what the API and the
+          benchmark scripts do;
+        * a different ``pass_idx`` records repeated attempts at the same suite;
+        * ``sweep_arm`` distinguishes the arms within one sweep.
+
+        Leaving all of them at their defaults twice raises
+        :class:`~beacon_storage.errors.DuplicateRunError` rather than an
+        ``IntegrityError`` from deep inside persistence.
+        """
         run = Run(
             team_id=team_id,
             project_id=project_id,
@@ -48,7 +68,19 @@ class RunRepo:
             created_by=created_by,
         )
         self.session.add(run)
-        self.session.flush()
+        try:
+            self.session.flush()
+        except IntegrityError as exc:
+            if _UNIQUE_RUN_CONSTRAINT not in str(exc.orig):
+                raise
+            raise DuplicateRunError(
+                f"a run already exists for project={project_id} solution={solution_id} "
+                f"suite={suite!r} dataset_version={dataset_version!r} mode={mode.value} "
+                f"pass_idx={pass_idx} parent_sweep_id={parent_sweep_id} "
+                f"sweep_arm={sweep_arm!r}. Pass a fresh parent_sweep_id (uuid7()) to "
+                "record a new invocation, a different pass_idx for a repeat attempt, "
+                "or a sweep_arm to distinguish arms of one sweep."
+            ) from exc
         return run
 
     def get(self, run_id: UUID) -> Run | None:

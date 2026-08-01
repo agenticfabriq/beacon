@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from beacon_storage.errors import DuplicateRunError
+from beacon_storage.ids import uuid7
 from beacon_storage.models.runs import HarnessMode, ResultStatus, RunStatus, VerdictOutcome
 from beacon_storage.models.tenancy import Project, Team, User
 from beacon_storage.repository.results import ResultRepo
@@ -14,6 +16,7 @@ from beacon_storage.repository.traces import TraceRepo
 from beacon_storage.repository.verdicts import VerdictRepo
 
 if TYPE_CHECKING:
+    from beacon_storage.models.solutions import Solution
     from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
@@ -146,3 +149,80 @@ def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Pr
     assert len(listed) == 1
     vs = VerdictRepo(session).list_for_result(res.id)
     assert len(vs) == 1
+
+
+def _solution(session: Session, team: Team, user: User) -> Solution:
+    return SolutionRepo(session).create(
+        team_id=team.id,
+        solution_id="dup",
+        version="0.1.0",
+        owner_team=team.id,
+        summary="",
+        supported_modes=["EVAL"],
+        layers=[],
+        created_by=user.id,
+    )
+
+
+def test_repeating_a_run_explains_how_to_distinguish_it(
+    session: Session,
+    _ctx: tuple[Team, User, Project],
+) -> None:
+    """The raw IntegrityError said nothing actionable (B7)."""
+    t, u, p = _ctx
+    s = _solution(session, t, u)
+    repo = RunRepo(session)
+    repo.create(
+        team_id=t.id,
+        project_id=p.id,
+        solution_id=s.id,
+        suite="dup-suite",
+        dataset_version="v0",
+        mode=HarnessMode.EVAL,
+        pass_idx=0,
+        config={},
+        created_by=u.id,
+    )
+    session.commit()
+
+    with pytest.raises(DuplicateRunError, match="parent_sweep_id"):
+        repo.create(
+            team_id=t.id,
+            project_id=p.id,
+            solution_id=s.id,
+            suite="dup-suite",
+            dataset_version="v0",
+            mode=HarnessMode.EVAL,
+            pass_idx=0,
+            config={},
+            created_by=u.id,
+        )
+    session.rollback()
+
+
+def test_a_fresh_sweep_id_makes_a_repeat_run_distinct(
+    session: Session,
+    _ctx: tuple[Team, User, Project],
+) -> None:
+    """The documented way out actually works."""
+    t, u, p = _ctx
+    s = _solution(session, t, u)
+    repo = RunRepo(session)
+    made = [
+        repo.create(
+            team_id=t.id,
+            project_id=p.id,
+            solution_id=s.id,
+            suite="sweepid-suite",
+            dataset_version="v0",
+            mode=HarnessMode.EVAL,
+            pass_idx=0,
+            config={},
+            created_by=u.id,
+            parent_sweep_id=uuid7(),
+        )
+        for _ in range(2)
+    ]
+    session.commit()
+
+    assert made[0].id != made[1].id

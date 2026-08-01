@@ -356,3 +356,44 @@ def test_leaderboard_limit_and_authentication(
     assert limited.status_code == 200, limited.text
     assert len(limited.json()["rows"]) == 1
     assert unauthenticated.status_code == 401
+
+
+def test_team_scoped_exclusion_is_reported_not_silent(
+    api_client: TestClient,
+    world: _World,
+    session: Session,
+) -> None:
+    """A team's own items cannot rank, and the response now says how many (B8)."""
+    _seed_private_results(session, world)
+    _seed_single_pass_results(session, world)
+
+    response = api_client.get(
+        "/v1/leaderboards/cost",
+        headers={"X-API-Key": world.alice_key},
+        params={"suite": "bird_minidev_v2"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["scope"] == "shared_items_only"
+    assert isinstance(body["excluded_team_scoped_items"], int)
+
+
+def test_a_suite_of_only_team_scoped_items_explains_the_empty_board(
+    api_client: TestClient,
+    world: _World,
+    session: Session,
+) -> None:
+    """Previously this returned an empty list with no indication why."""
+    _seed_private_results(session, world)
+
+    response = api_client.get(
+        "/v1/leaderboards/cost",
+        headers={"X-API-Key": world.alice_key},
+        params={"suite": "private_team_suite"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["rows"] == []
+    assert body["excluded_team_scoped_items"] >= 1

@@ -29,3 +29,8 @@ class LeaderboardOut(BaseModel):
     suite: str
     metric: str
     rows: list[LeaderboardRow]
+    # Leaderboards rank on shared items only, so teams stay comparable. Without
+    # these two fields a team whose runs all used its own private items saw an
+    # empty board and no reason for it.
+    scope: str = "shared_items_only"
+    excluded_team_scoped_items: int = 0

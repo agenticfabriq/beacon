@@ -57,6 +57,6 @@ module = [
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages/*/tests", "tests/e2e"]
+testpaths = ["packages/*/tests", "tests"]
 addopts = "-v --strict-markers"
 markers = ["integration: requires Postgres", "e2e: full plan-2 stack smoke"]

@@ -17,8 +17,12 @@ db-down:
 migrate:
 	DATABASE_URL=$(DATABASE_URL) $(UV) run alembic -c packages/beacon_storage/src/beacon_storage/migrations/alembic.ini upgrade head
 
+# Deliberately NOT $(DATABASE_URL): the fixtures drop and recreate the public
+# schema, so pointing this at the dev database destroys its run history.
+TEST_DATABASE_URL ?= postgresql+psycopg://beacon:beacon_dev@localhost:$(POSTGRES_PORT)/beacon_test
+
 test:
-	DATABASE_URL=$(DATABASE_URL) $(UV) run pytest
+	DATABASE_URL=$(TEST_DATABASE_URL) $(UV) run pytest
 
 lint:
 	$(UV) run ruff check . && $(UV) run ruff format --check .

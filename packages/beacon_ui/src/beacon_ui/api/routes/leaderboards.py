@@ -17,7 +17,7 @@ from beacon_storage.models.solutions import Solution
 from beacon_storage.models.tenancy import Team, User  # noqa: TC002
 from beacon_storage.rls import clear_current_user
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import String, cast, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_current_user, get_session
@@ -53,6 +53,16 @@ def _safe_ratio(numerator: float, denominator: float | None) -> float | None:
 
 
 def _shared_result_rows(session: Session, *, suite: str) -> list[_ResultRow]:
+    """Return results joined to **shared** eval items for ``suite``.
+
+    ``EvalItem.team_id IS NULL`` restricts the join to items every team can see.
+    This is deliberate -- a cross-team leaderboard must rank on a common set of
+    items, and a team's private items are neither visible nor comparable. The
+    consequence is that runs over team-scoped items appear in the runs panel but
+    never on a leaderboard, which used to happen with no indication why; the
+    response now reports ``scope`` and ``excluded_team_scoped_items`` so the
+    omission is legible rather than silent.
+    """
     stmt = (
         select(
             Run.team_id,
@@ -191,7 +201,28 @@ def _leaderboard(
     # Shared-suite leaderboards are authenticated aggregate views, not team-scoped run views.
     clear_current_user(session)
     rows = _rows_for_metric(_shared_result_rows(session, suite=suite), metric=metric, limit=limit)
-    return LeaderboardOut(suite=suite, metric=metric, rows=rows)
+    return LeaderboardOut(
+        suite=suite,
+        metric=metric,
+        rows=rows,
+        excluded_team_scoped_items=_team_scoped_item_count(session, suite=suite),
+    )
+
+
+def _team_scoped_item_count(session: Session, *, suite: str) -> int:
+    """Count items in ``suite`` a leaderboard cannot rank because they are private."""
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(EvalItem)
+            .where(
+                EvalItem.suite == suite,
+                EvalItem.valid_to.is_(None),
+                EvalItem.team_id.is_not(None),
+            )
+        )
+        or 0
+    )
 
 
 @router.get(
