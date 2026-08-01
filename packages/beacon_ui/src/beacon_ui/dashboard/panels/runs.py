@@ -79,6 +79,8 @@ def render() -> None:
         {
             "run_id": str(run["run_id"])[:8],
             "mode": run["mode"],
+            # Which ablation arm produced this run, for NIGHTLY_LOO sweeps.
+            "arm": run.get("sweep_arm") or "",
             "status": run["status"],
             "pass@1": format_pass_at_k(_summary_value(run, "pass_at_1")),
             "pass@3": format_pass_at_k(_summary_value(run, "pass_at_3")),

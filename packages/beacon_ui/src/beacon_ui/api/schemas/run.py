@@ -46,4 +46,9 @@ class RunOut(BaseModel):
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # Which ablation arm this run is, and the sweep grouping its siblings.
+    # Without these the arm is only recoverable by diffing config.layers_enabled
+    # against a baseline you must separately identify.
+    parent_sweep_id: UUID | None = None
+    sweep_arm: str | None = None
     summary: RunSummaryOut

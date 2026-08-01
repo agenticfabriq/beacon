@@ -143,6 +143,8 @@ def _run_out(run: Run, session: Session) -> RunOut:
         status=_run_status(run),
         started_at=run.started_at,
         completed_at=run.completed_at,
+        parent_sweep_id=run.parent_sweep_id,
+        sweep_arm=run.sweep_arm,
         summary=_summary(run, session),
     )
 
@@ -273,8 +275,10 @@ def list_runs(
     suite_id: UUID | None = None,
     mode: HarnessMode | None = None,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
+    parent_sweep_id: UUID | None = None,
+    sweep_arm: str | None = None,
 ) -> list[RunOut]:
-    """List runs in the project with optional solution, suite, mode, and status filters."""
+    """List runs in the project, filtered by solution, suite, mode, status or sweep arm."""
     suite_name: str | None = None
     if suite_id is not None:
         suite = SuiteRepo(session).get(suite_id)
@@ -293,4 +297,8 @@ def list_runs(
     )
     if suite_id is not None:
         runs = [run for run in runs if _suite_id_from_config(run.config) in (None, suite_id)]
+    if parent_sweep_id is not None:
+        runs = [run for run in runs if run.parent_sweep_id == parent_sweep_id]
+    if sweep_arm is not None:
+        runs = [run for run in runs if run.sweep_arm == sweep_arm]
     return [_run_out(run, session) for run in runs]
