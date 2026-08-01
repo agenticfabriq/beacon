@@ -36,6 +36,11 @@ if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, SolutionConfig
 
 
+_SUPPORTED_MODES = frozenset(
+    {HarnessMode.EVAL, HarnessMode.PR_GATE, HarnessMode.NIGHTLY_LOO},
+)
+
+
 @dataclass(frozen=True)
 class _ItemTask:
     item: EvalItem
@@ -74,9 +79,15 @@ class HarnessRunner:
         pass_idx: int = 0,
         mode: HarnessMode = HarnessMode.EVAL,
         parent_sweep_id: UUID | None = None,
+        sweep_arm: str | None = None,
     ) -> UUID:
-        """Execute one EVAL or PR_GATE pass over ``items`` and persist results."""
-        if mode not in {HarnessMode.EVAL, HarnessMode.PR_GATE}:
+        """Execute one EVAL, PR_GATE or NIGHTLY_LOO pass over ``items`` and persist results.
+
+        ``sweep_arm`` labels which arm of an ablation sweep this pass belongs to
+        (``baseline``, ``no_<layer>``); it is part of the run's identity, so the
+        arms of one sweep no longer collide at the same ``pass_idx``.
+        """
+        if mode not in _SUPPORTED_MODES:
             raise HarnessModeNotSupportedError(
                 f"mode {mode.value} is not supported by HarnessRunner"
             )
@@ -93,6 +104,7 @@ class HarnessRunner:
             pass_idx=pass_idx,
             mode=mode,
             parent_sweep_id=parent_sweep_id,
+            sweep_arm=sweep_arm,
             config=config,
         )
 
@@ -156,6 +168,7 @@ class HarnessRunner:
         pass_idx: int,
         mode: HarnessMode,
         parent_sweep_id: UUID | None,
+        sweep_arm: str | None,
         config: SolutionConfig,
     ) -> UUID:
         with self.session_factory() as session:
@@ -168,6 +181,7 @@ class HarnessRunner:
                 mode=mode,
                 pass_idx=pass_idx,
                 parent_sweep_id=parent_sweep_id,
+                sweep_arm=sweep_arm,
                 config=config.model_dump(),
                 created_by=user_id,
             )

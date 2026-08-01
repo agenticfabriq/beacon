@@ -48,7 +48,7 @@ class _SutLike(Protocol):
         """Return the SUT identity stamped onto persisted attribution rows."""
         ...
 
-    def layers(self) -> list[object]:
+    def layers(self) -> Sequence[object]:
         """Return the SUT's declared layer descriptors."""
         ...
 
@@ -68,11 +68,17 @@ class _HarnessRunnerLike(Protocol):
         project_id: UUID,
         team_id: UUID,
         solution_id: UUID,
+        sweep_arm: str,
     ) -> UUID:
-        """Execute one harness pass over items and return the persisted run id."""
+        """Execute one harness pass over items and return the persisted run id.
+
+        ``sweep_arm`` is the arm label this config represents (``baseline`` or
+        ``no_<layer>``). Runners that persist runs need it to tell the arms of a
+        single sweep apart -- every other identifying field is shared.
+        """
         ...
 
-    def list_results_for_run(self, run_id: UUID) -> list[object]:
+    def list_results_for_run(self, run_id: UUID) -> Sequence[object]:
         """Return per-item result rows for a previously executed run."""
         ...
 
@@ -135,6 +141,7 @@ class AttributionEngine:
                     project_id=project_id,
                     team_id=team_id,
                     solution_id=solution_id,
+                    sweep_arm=label,
                 )
                 runs_by_label[label].append(run_id)
                 results_by_label[label].extend(harness_runner.list_results_for_run(run_id))

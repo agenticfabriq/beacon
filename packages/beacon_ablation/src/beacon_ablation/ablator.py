@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from beacon_ablation.errors import InvalidConfigurationError, LayerNotDeclaredError
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 
 class _HasLayers(Protocol):
-    def layers(self) -> list[Any]:
+    def layers(self) -> Sequence[Any]:
         """Return the SUT's declared layer descriptors."""
         ...
 

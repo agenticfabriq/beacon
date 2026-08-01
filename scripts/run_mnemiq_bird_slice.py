@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import sqlalchemy as sa
+from beacon_ablation.engine import AttributionEngine
 from beacon_benchmarks.bird_minidev.ingest_items import (
     DATASET_VERSION,
     SUITE,
@@ -44,12 +45,13 @@ from beacon_graders.composer import VerdictComposer
 from beacon_graders.graders import ExecutionGroundedSqlGrader
 from beacon_iam.auth.oidc import OidcClaims
 from beacon_iam.service.users import UserService
+from beacon_runner.attribution import AttributionHarnessRunner
 from beacon_runner.harness import HarnessRunner
 from beacon_runner.registry import SutRegistry
 from beacon_runner.sut.mnemiq import MnemiqInProcessSUT, register_mnemiq_solution
 from beacon_runner.types import EvalItem, SolutionConfig
 from beacon_storage.db import make_engine, make_session_factory, session_scope
-from beacon_storage.models.runs import HarnessMode
+from beacon_storage.models.runs import HarnessMode, Run
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
@@ -88,6 +90,96 @@ def _seed_user_id(session: Session) -> UUID:
     return user.id
 
 
+def _run_loo_sweep(
+    *,
+    engine: sa.Engine,
+    runner: HarnessRunner,
+    sut: MnemiqInProcessSUT,
+    items: list[EvalItem],
+    team_id: UUID,
+    project_id: UUID,
+    user_id: UUID,
+    solution_record_id: UUID,
+    loo_layers: list[str],
+    passes: int,
+) -> dict[str, object]:
+    """Drive a NIGHTLY_LOO attribution sweep and summarise the persisted arms."""
+    declared = {layer.name for layer in sut.layers()}
+    unknown = sorted(set(loo_layers) - declared)
+    if unknown:
+        raise SystemExit(f"--loo names undeclared layers {unknown}; declared: {sorted(declared)}")
+
+    factory = make_session_factory(engine)
+    # Only layers listed in layers_enabled are ablated; the rest stay on
+    # (SolutionConfig.is_layer_enabled defaults to True when unset).
+    base_config = SolutionConfig(
+        model_id=os.environ.get("MNEMIQ_LLM_MODEL", "mnemiq"),
+        prompt_version="v0",
+        layers_enabled=dict.fromkeys(sorted(set(loo_layers)), True),
+    )
+    adapter = AttributionHarnessRunner(
+        runner=runner,
+        session_factory=factory,
+        user_id=user_id,
+    )
+
+    with session_scope(factory) as session:
+        attributions = AttributionEngine(session).sweep(
+            sut=sut,
+            base_config=base_config,
+            items=items,
+            suite=SUITE,
+            dataset_version=DATASET_VERSION,
+            K=passes,
+            project_id=project_id,
+            team_id=team_id,
+            solution_id=solution_record_id,
+            harness_runner=adapter,
+        )
+        sweep_id = attributions[0].sweep_id
+        headline = str(min(3, passes))
+        layers_summary = {
+            row.layer_name: {
+                "delta_pass_at_k": row.delta_pass_at_k[headline]["delta"],
+                "ci_low": row.delta_pass_at_k[headline]["ci_low"],
+                "ci_high": row.delta_pass_at_k[headline]["ci_high"],
+                "mcnemar_p": row.mcnemar_p,
+                "bh_adjusted_p": row.bh_adjusted_p,
+                "pass_at_k_baseline": row.pass_at_k_baseline[headline],
+                "pass_at_k_ablated": row.pass_at_k_ablated[headline],
+            }
+            for row in attributions
+        }
+
+    with session_scope(factory) as session:
+        runs = list(session.scalars(sa.select(Run).where(Run.parent_sweep_id == sweep_id)))
+        arms: dict[str, object] = {}
+        for run in sorted(runs, key=lambda r: (str(r.sweep_arm), r.pass_idx)):
+            results = ResultRepo(session).list_for_run(run.id)
+            outcomes: dict[str, int] = {}
+            for result in results:
+                key = str(getattr(result.outcome, "value", result.outcome) or "none")
+                outcomes[key] = outcomes.get(key, 0) + 1
+            arms[f"{run.sweep_arm}#{run.pass_idx}"] = {
+                "run_id": str(run.id),
+                "status": str(getattr(run.status, "value", run.status)),
+                "items": len(results),
+                "outcomes": outcomes,
+            }
+
+    return {
+        "mode": "NIGHTLY_LOO",
+        "sweep_id": str(sweep_id),
+        "passes": passes,
+        "items": len(items),
+        "ablated_layers": sorted(set(loo_layers)),
+        "attribution_rows": len(attributions),
+        "runs": len(runs),
+        "arms": arms,
+        "layers": layers_summary,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry-point."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -115,7 +207,29 @@ def main(argv: list[str] | None = None) -> int:
         metavar="NAME",
         help="Declared layer to run disabled (repeatable), e.g. --disable-layer verifier.",
     )
+    parser.add_argument(
+        "--loo",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "Run a NIGHTLY_LOO attribution sweep ablating this layer (repeatable). "
+            "Produces a baseline arm plus one arm per named layer, and persists "
+            "Attribution rows. Mutually exclusive with --disable-layer."
+        ),
+    )
+    parser.add_argument(
+        "--passes",
+        type=int,
+        default=1,
+        metavar="K",
+        help="Passes per sweep arm (K) when --loo is used.",
+    )
     args = parser.parse_args(argv)
+    if args.loo and args.disable_layer:
+        parser.error("--loo and --disable-layer are mutually exclusive")
+    if args.passes < 1:
+        parser.error("--passes must be >= 1")
     if not args.database_url:
         parser.error("DATABASE_URL or --database-url is required")
     if not args.minidev_dir:
@@ -206,6 +320,27 @@ def main(argv: list[str] | None = None) -> int:
             max_workers=1,
             per_item_timeout_seconds=600.0,
         )
+
+        if args.loo:
+            print(
+                json.dumps(
+                    _run_loo_sweep(
+                        engine=engine,
+                        runner=runner,
+                        sut=sut,
+                        items=items,
+                        team_id=team_id,
+                        project_id=project_id,
+                        user_id=user_id,
+                        solution_record_id=solution_record_id,
+                        loo_layers=args.loo,
+                        passes=args.passes,
+                    ),
+                    indent=2,
+                )
+            )
+            return 0
+
         run_id = runner.run_single(
             team_id=team_id,
             project_id=project_id,

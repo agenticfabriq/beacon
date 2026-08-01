@@ -75,6 +75,7 @@ class Run(Base, IdMixin, TimestampsMixin):
     mode: Mapped[HarnessMode] = mapped_column(String(40), nullable=False)
     pass_idx: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     parent_sweep_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    sweep_arm: Mapped[str | None] = mapped_column(String(100), nullable=True)
     config: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[RunStatus] = mapped_column(String(20), nullable=False, default=RunStatus.PENDING)
     started_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
@@ -91,6 +92,7 @@ class Run(Base, IdMixin, TimestampsMixin):
             "mode",
             "pass_idx",
             "parent_sweep_id",
+            "sweep_arm",
             name="uq_run_project_pass",
             postgresql_nulls_not_distinct=True,
         ),

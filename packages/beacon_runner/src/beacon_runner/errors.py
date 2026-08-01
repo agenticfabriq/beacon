@@ -23,3 +23,7 @@ class HarnessModeNotSupportedError(BeaconRunnerError):
 
 class SutTimeoutError(BeaconRunnerError):
     code = "sut_timeout"
+
+
+class SutIdentityMismatchError(BeaconRunnerError):
+    code = "sut_identity_mismatch"

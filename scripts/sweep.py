@@ -109,8 +109,18 @@ class FakeSweepRunner:
         project_id: UUID,
         team_id: UUID,
         solution_id: UUID,
+        sweep_arm: str,
     ) -> UUID:
-        _ = (suite, dataset_version, mode, parent_sweep_id, project_id, team_id, solution_id)
+        _ = (
+            suite,
+            dataset_version,
+            mode,
+            parent_sweep_id,
+            project_id,
+            team_id,
+            solution_id,
+            sweep_arm,
+        )
         run_id = uuid7()
         rows: list[SweepResult] = []
         for item in items:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from beacon_storage.ids import uuid7
 from beacon_storage.models.runs import (
     HarnessMode,
     Result,
@@ -17,6 +18,7 @@ from beacon_storage.models.runs import (
 )
 from beacon_storage.models.solutions import Solution
 from beacon_storage.models.tenancy import Project, Team, User
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
@@ -91,6 +93,92 @@ def test_unique_run_per_pass(
     session.commit()
     r2 = Run(pass_idx=0, **common)
     session.add(r2)
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+@pytest.mark.integration
+def test_sweep_arms_share_pass_idx_within_one_sweep(
+    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+) -> None:
+    """Two ablation arms of one sweep are distinct runs at the same pass_idx."""
+    t, u, p, s = _bootstrap
+    sweep_id = uuid7()
+    common = {
+        "team_id": t.id,
+        "project_id": p.id,
+        "solution_id": s.id,
+        "suite": "s",
+        "dataset_version": "v0",
+        "mode": HarnessMode.NIGHTLY_LOO,
+        "parent_sweep_id": sweep_id,
+        "pass_idx": 0,
+        "config": {},
+        "status": RunStatus.PENDING,
+        "created_by": u.id,
+    }
+    session.add_all(
+        [
+            Run(sweep_arm="baseline", **common),
+            Run(sweep_arm="no_ontology", **common),
+            Run(sweep_arm="no_retry_loop", **common),
+        ]
+    )
+    session.commit()
+
+    arms = session.scalars(select(Run.sweep_arm).where(Run.parent_sweep_id == sweep_id))
+    assert set(arms) == {"baseline", "no_ontology", "no_retry_loop"}
+
+
+@pytest.mark.integration
+def test_same_arm_twice_in_one_sweep_still_collides(
+    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+) -> None:
+    """The arm discriminator widens run identity; it does not disable the guard."""
+    t, u, p, s = _bootstrap
+    common = {
+        "team_id": t.id,
+        "project_id": p.id,
+        "solution_id": s.id,
+        "suite": "s",
+        "dataset_version": "v0",
+        "mode": HarnessMode.NIGHTLY_LOO,
+        "parent_sweep_id": uuid7(),
+        "pass_idx": 0,
+        "sweep_arm": "no_ontology",
+        "config": {},
+        "status": RunStatus.PENDING,
+        "created_by": u.id,
+    }
+    session.add(Run(**common))
+    session.commit()
+    session.add(Run(**common))
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+@pytest.mark.integration
+def test_null_sweep_arm_still_collides_for_standalone_runs(
+    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+) -> None:
+    """Existing (arm-less) run identity is unchanged: NULL arms are not distinct."""
+    t, u, p, s = _bootstrap
+    common = {
+        "team_id": t.id,
+        "project_id": p.id,
+        "solution_id": s.id,
+        "suite": "s",
+        "dataset_version": "v0",
+        "mode": HarnessMode.EVAL,
+        "parent_sweep_id": None,
+        "pass_idx": 0,
+        "config": {},
+        "status": RunStatus.PENDING,
+        "created_by": u.id,
+    }
+    session.add(Run(**common))
+    session.commit()
+    session.add(Run(**common))
     with pytest.raises(IntegrityError):
         session.commit()
 

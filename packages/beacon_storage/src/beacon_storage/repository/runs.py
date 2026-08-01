@@ -30,6 +30,7 @@ class RunRepo:
         config: dict[str, object],
         created_by: UUID,
         parent_sweep_id: UUID | None = None,
+        sweep_arm: str | None = None,
     ) -> Run:
         """Create a pending run for the given solution/suite and return it."""
         run = Run(
@@ -41,6 +42,7 @@ class RunRepo:
             mode=mode,
             pass_idx=pass_idx,
             parent_sweep_id=parent_sweep_id,
+            sweep_arm=sweep_arm,
             config=config,
             status=RunStatus.PENDING,
             created_by=created_by,

@@ -23,6 +23,7 @@ class _SweepCall(Protocol):
 
 class _SweepRunner(Protocol):
     calls: list[_SweepCall]
+    arms: list[str]
 
 
 class _SweepFixtures(Protocol):
@@ -110,3 +111,19 @@ def test_sweep_runner_calls_share_parent_sweep_id(
     for attr in attributions:
         assert attr.sweep_id == sweep_id
         assert attr.baseline_run_id != attr.ablated_run_id
+
+
+def test_sweep_labels_every_arm_it_dispatches(
+    session: Session,
+    sweep_fixtures: object,
+) -> None:
+    """Each arm is named on the way out, so persisting runners can tell them apart."""
+    fixtures = cast("_SweepFixtures", sweep_fixtures)
+
+    _run_sweep(session, sweep_fixtures, k=2)
+
+    # 3 arms x K=2 passes, each pass carrying its own arm label.
+    assert len(fixtures.runner.arms) == 6
+    assert sorted(set(fixtures.runner.arms)) == ["baseline", "no_ontology", "no_retry_loop"]
+    for arm in ("baseline", "no_ontology", "no_retry_loop"):
+        assert fixtures.runner.arms.count(arm) == 2

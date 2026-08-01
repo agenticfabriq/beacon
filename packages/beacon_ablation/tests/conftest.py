@@ -113,6 +113,7 @@ class SweepResult:
 @dataclass
 class FakeSweepRunner:
     calls: list[SweepCall] = field(default_factory=list)
+    arms: list[str] = field(default_factory=list)
     _results_by_run: dict[UUID, list[SweepResult]] = field(default_factory=dict)
 
     def run_single(
@@ -129,8 +130,10 @@ class FakeSweepRunner:
         project_id: UUID,
         team_id: UUID,
         solution_id: UUID,
+        sweep_arm: str,
     ) -> UUID:
         _ = (suite, dataset_version, mode, project_id, team_id, solution_id)
+        self.arms.append(sweep_arm)
         run_id = uuid7()
         rows: list[SweepResult] = []
         for item in items:
