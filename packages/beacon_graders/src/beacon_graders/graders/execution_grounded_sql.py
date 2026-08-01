@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, ExecutionResult
 
 _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+# Dialects exposing a server-side per-statement timeout via SET LOCAL.
+_STATEMENT_TIMEOUT_DIALECTS = frozenset({"postgresql"})
 
 
 class ExecutionGroundedSqlGrader:
@@ -29,6 +31,7 @@ class ExecutionGroundedSqlGrader:
         statement_timeout_seconds: int = 60,
     ) -> None:
         self.engine_factory = engine_factory
+        # Applied per statement in _exec. Set to 0 to disable the bound.
         self.statement_timeout_seconds = statement_timeout_seconds
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
@@ -117,9 +120,34 @@ class ExecutionGroundedSqlGrader:
         # literal "%" (LIKE patterns in gold SQL) must be doubled for them.
         if engine.dialect.paramstyle in ("pyformat", "format"):
             sql = sql.replace("%", "%%")
-        with engine.connect() as connection:
+        with engine.connect() as connection, connection.begin():
+            # The SQL here is model-generated and arbitrary. Without a bound, a
+            # pathological candidate (a cross join, say) holds this worker and
+            # pins its connection until the harness per-item timeout, which on a
+            # shared benchmark engine serialises the whole run.
+            self._apply_statement_timeout(connection)
             cursor = connection.exec_driver_sql(sql)
             return [tuple(row) for row in cursor.fetchall()]
+
+    def _apply_statement_timeout(self, connection: sa.Connection) -> None:
+        """Bound the next statement on this connection where the dialect allows it.
+
+        ``SET LOCAL`` is scoped to the surrounding transaction, so the bound is
+        undone on rollback and never leaks to the next borrower of a pooled
+        connection. Dialects with no server-side statement timeout (SQLite) are
+        left alone -- see ``supports_statement_timeout``.
+        """
+        if self.statement_timeout_seconds <= 0:
+            return
+        if not self.supports_statement_timeout(connection.dialect.name):
+            return
+        timeout_ms = int(self.statement_timeout_seconds * 1000)
+        connection.exec_driver_sql(f"SET LOCAL statement_timeout = {timeout_ms}")
+
+    @staticmethod
+    def supports_statement_timeout(dialect_name: str) -> bool:
+        """Return whether ``dialect_name`` honours a server-side statement timeout."""
+        return dialect_name in _STATEMENT_TIMEOUT_DIALECTS
 
     def _compare(
         self,

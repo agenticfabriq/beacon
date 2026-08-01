@@ -135,19 +135,34 @@ def test_percent_is_escaped_for_pyformat_drivers(
         def fetchall(self) -> list[tuple[str]]:
             return [("b",)]
 
-    class _Connection:
-        def exec_driver_sql(self, sql: str) -> _Cursor:
-            executed.append(sql)
-            return _Cursor()
-
-        def __enter__(self) -> _Connection:
+    class _Txn:
+        def __enter__(self) -> _Txn:
             return self
 
         def __exit__(self, *args: object) -> None:
             return None
 
     class _Dialect:
+        # pyformat is psycopg's paramstyle, so this stub is a Postgres one --
+        # which is also the dialect that honours SET LOCAL statement_timeout.
         paramstyle = "pyformat"
+        name = "postgresql"
+
+    class _Connection:
+        dialect = _Dialect()
+
+        def exec_driver_sql(self, sql: str) -> _Cursor:
+            executed.append(sql)
+            return _Cursor()
+
+        def begin(self) -> _Txn:
+            return _Txn()
+
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
 
     class _Engine:
         dialect = _Dialect()
@@ -161,8 +176,11 @@ def test_percent_is_escaped_for_pyformat_drivers(
 
     verdict = grader.grade(item, result)[0]
     assert verdict.bool_value is True
+    # Each _exec opens its own connection and bounds its own statement (B6).
     assert executed == [
+        "SET LOCAL statement_timeout = 60000",
         "SELECT name FROM t WHERE val = 20",
+        "SET LOCAL statement_timeout = 60000",
         "SELECT name FROM t WHERE name LIKE '%%b%%'",
     ]
 
