@@ -7,7 +7,7 @@ import re
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
-from beacon_graders.types import Verdict
+from beacon_graders.types import GraderKind, Verdict
 
 if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, ExecutionResult
@@ -20,6 +20,7 @@ _NUMBER_RE = re.compile(r"(-?\d*\.\d+|-?\d+\.?\d*)")
 class DabstepAnswerMatcher:
     name = "dabstep_answer_matcher"
     version = "v1"
+    kind = GraderKind.EXECUTION
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
         """Apply when ``result`` is an answer and the item ships an ``answer`` gold."""

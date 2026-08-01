@@ -8,6 +8,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from beacon_graders.types import GraderKind
+
 _LOWER_IS_BETTER = {"mae", "rmse"}
 
 
@@ -92,6 +94,7 @@ class CsvPredictionGrader:
 
     name = "dsbench_dm.csv.rpg"
     version = "1.0"
+    kind = GraderKind.EXECUTION
 
     def __init__(self, *, suite_filter: str = "dsbench_dm_v1") -> None:
         self.suite_filter = suite_filter

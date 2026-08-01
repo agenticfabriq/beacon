@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from beacon_graders.llm.prompts import HIERARCHICAL_RUBRIC_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
-from beacon_graders.types import Verdict
+from beacon_graders.types import GraderKind, Verdict
 
 if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, ExecutionResult
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 class HierarchicalRubricGrader:
     name = "hierarchical_rubric"
     version = "v1"
+    kind = GraderKind.LLM_JUDGE
 
     def __init__(self, *, judge_cache: JudgeCache) -> None:
         self.cache = judge_cache

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-from beacon_graders import Grader, Verdict, VerdictOutcome
+from beacon_graders import Grader, GraderKind, Verdict, VerdictOutcome
 from beacon_graders.graders.dabstep_answer_matcher import DabstepAnswerMatcher
 from beacon_graders.graders.execution_grounded_sql import ExecutionGroundedSqlGrader
 from beacon_graders.graders.free_text_reference import FreeTextReferenceGrader
@@ -14,6 +14,7 @@ from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 class _SimpleGrader:
     name = "simple"
     version = "v1"
+    kind = GraderKind.EXECUTION
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:  # noqa: ARG002
         return True

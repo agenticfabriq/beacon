@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from beacon_graders.types import Verdict
+from beacon_graders.types import GraderKind, Verdict
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -20,6 +20,7 @@ _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 class ExecutionGroundedSqlGrader:
     name = "execution_grounded_sql"
     version = "v1"
+    kind = GraderKind.EXECUTION
 
     def __init__(
         self,

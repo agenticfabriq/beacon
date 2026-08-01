@@ -15,6 +15,18 @@ class VerdictOutcome(StrEnum):
     TIMEOUT = "TIMEOUT"
 
 
+class GraderKind(StrEnum):
+    """What sort of evidence a grader produces.
+
+    ``VerdictComposer`` precedence depends on this rather than on ``Grader.name``:
+    benchmark adapters rename their grader instances (``bird_minidev_v2.exec_sql``
+    and friends) so the name is a display label, not a stable classification.
+    """
+
+    EXECUTION = "execution"
+    LLM_JUDGE = "llm_judge"
+
+
 class Verdict(BaseModel):
     """One scored criterion emitted by a grader."""
 

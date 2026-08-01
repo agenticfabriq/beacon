@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from beacon_graders.types import Verdict, VerdictOutcome
+from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,9 +38,34 @@ class VerdictComposer:
         llm_pass_threshold: float = 0.8,
     ) -> None:
         self.graders = list(graders)
+        # Fallback classification for graders that declare no ``kind``. Built-in
+        # graders do declare one, and benchmark adapters rename their instances,
+        # so these name sets must not be the primary signal -- see _kind_of.
         self.execution_grader_names = execution_grader_names
         self.llm_judge_grader_names = llm_judge_grader_names
         self.threshold = llm_pass_threshold
+
+    def _kind_of(self, grader_name: str) -> GraderKind | None:
+        """Classify a verdict's emitting grader by what it declares, not its name.
+
+        Adapters rewrite ``grader.name`` per suite (``bird_minidev_v2.exec_sql``,
+        ``spider2_lite.exec_sql``, 13 sites), so matching the name against a
+        frozen set silently composed ERROR for every real execution verdict.
+        The instances the composer holds are the ones that were renamed, so
+        their declared ``kind`` is looked up through the current name.
+        """
+        for grader in self.graders:
+            if grader.name != grader_name:
+                continue
+            kind = getattr(grader, "kind", None)
+            if isinstance(kind, GraderKind):
+                return kind
+            break
+        if grader_name in self.execution_grader_names:
+            return GraderKind.EXECUTION
+        if grader_name in self.llm_judge_grader_names:
+            return GraderKind.LLM_JUDGE
+        return None
 
     def compose(
         self,
@@ -86,7 +111,9 @@ class VerdictComposer:
             return verdicts, VerdictOutcome.TIMEOUT
 
         for verdict in verdicts:
-            if verdict.grader in self.execution_grader_names and verdict.bool_value is not None:
+            if self._kind_of(verdict.grader) is GraderKind.EXECUTION and (
+                verdict.bool_value is not None
+            ):
                 return (
                     verdicts,
                     VerdictOutcome.PASS if verdict.bool_value else VerdictOutcome.FAIL,
@@ -95,7 +122,7 @@ class VerdictComposer:
         llm_values = [
             verdict.value
             for verdict in verdicts
-            if verdict.grader in self.llm_judge_grader_names and verdict.value is not None
+            if self._kind_of(verdict.grader) is GraderKind.LLM_JUDGE and verdict.value is not None
         ]
         if llm_values:
             composite = sum(llm_values) / len(llm_values)

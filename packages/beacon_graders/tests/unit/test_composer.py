@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from beacon_graders.composer import VerdictComposer
-from beacon_graders.types import Verdict, VerdictOutcome
+from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -12,7 +12,13 @@ if TYPE_CHECKING:
 
 
 class _Fixed:
-    """Test-double grader that declares applicability and returns canned verdicts."""
+    """Test-double grader that declares applicability and returns canned verdicts.
+
+    ``kind`` matters whenever a canned verdict carries this double's own ``name``:
+    composition looks the emitting grader up by name and trusts what it declares.
+    Where the verdict names a different grader, classification falls back to the
+    legacy name sets and this value is not consulted.
+    """
 
     version = "v1"
 
@@ -23,8 +29,10 @@ class _Fixed:
         verdicts: list[Verdict] | None = None,
         applies: bool = True,
         raises: Exception | None = None,
+        kind: GraderKind = GraderKind.EXECUTION,
     ) -> None:
         self.name = name
+        self.kind = kind
         self._verdicts = verdicts or []
         self._applies = applies
         self._raises = raises
@@ -156,6 +164,7 @@ def test_llm_fallback_when_no_execution_grader(
     composer = VerdictComposer(
         graders=[
             _Fixed(
+                kind=GraderKind.LLM_JUDGE,
                 name="hierarchical_rubric",
                 verdicts=[
                     _v("hierarchical_rubric", "completeness", value=0.9),
@@ -177,6 +186,7 @@ def test_llm_fallback_below_threshold(
     composer = VerdictComposer(
         graders=[
             _Fixed(
+                kind=GraderKind.LLM_JUDGE,
                 name="hierarchical_rubric",
                 verdicts=[
                     _v("hierarchical_rubric", "completeness", value=0.6),
@@ -202,6 +212,7 @@ def test_execution_grader_wins_over_llm(
                 verdicts=[_v("execution_grounded_sql", "correctness", bool_value=False, value=0.0)],
             ),
             _Fixed(
+                kind=GraderKind.LLM_JUDGE,
                 name="hierarchical_rubric",
                 verdicts=[_v("hierarchical_rubric", "completeness", value=1.0)],
             ),
@@ -225,6 +236,7 @@ def test_skips_inapplicable_graders(
                 verdicts=[_v("execution_grounded_sql", "correctness", bool_value=False, value=0.0)],
             ),
             _Fixed(
+                kind=GraderKind.LLM_JUDGE,
                 name="hierarchical_rubric",
                 verdicts=[_v("hierarchical_rubric", "completeness", value=0.95)],
             ),
@@ -245,6 +257,7 @@ def test_error_outcome_takes_precedence_over_llm_pass(
         graders=[
             _Fixed(name="boom", raises=RuntimeError("x")),
             _Fixed(
+                kind=GraderKind.LLM_JUDGE,
                 name="hierarchical_rubric",
                 verdicts=[_v("hierarchical_rubric", "completeness", value=1.0)],
             ),

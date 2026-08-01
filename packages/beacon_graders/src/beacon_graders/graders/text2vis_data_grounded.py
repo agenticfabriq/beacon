@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from beacon_graders.types import Verdict
+from beacon_graders.types import GraderKind, Verdict
 
 if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, ExecutionResult
@@ -39,6 +39,7 @@ _Row = tuple[tuple[str, Any], ...]
 class Text2VisDataGroundedGrader:
     name = "text2vis_data_grounded"
     version = "v1"
+    kind = GraderKind.EXECUTION
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
         """Apply when ``result`` is a chart and the item ships a gold ``data_table``."""

@@ -8,13 +8,14 @@ from beacon_graders.errors import (
     GraderTimeoutError,
 )
 from beacon_graders.grader import Grader
-from beacon_graders.types import Verdict, VerdictOutcome
+from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 
 __all__ = [
     "BeaconGraderError",
     "Grader",
     "GraderConfigError",
     "GraderJudgeError",
+    "GraderKind",
     "GraderTimeoutError",
     "Verdict",
     "VerdictComposer",
