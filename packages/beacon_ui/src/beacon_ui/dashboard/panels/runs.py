@@ -86,6 +86,9 @@ def render() -> None:
             "median_tokens": _summary_value(run, "median_tokens"),
             "median_latency_ms": _summary_value(run, "median_latency_ms"),
             "n_items": _summary_value(run, "n_items"),
+            # Errored items are excluded from the pass rates above, so this
+            # column is what stops a mostly-broken run from reading well.
+            "n_errors": _summary_value(run, "n_errors"),
             "started_at": run.get("started_at"),
         }
         for run in runs

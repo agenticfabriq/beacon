@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from statistics import median
 from typing import TYPE_CHECKING, Annotated, Literal
 
+from beacon_ablation.metrics import (
+    gradeable_results,
+    min_attempts_per_task,
+    suite_pass_at_k,
+)
 from beacon_storage.models.eval_items import EvalItem
 from beacon_storage.models.runs import Result, Run, RunStatus, VerdictOutcome
 from beacon_storage.models.solutions import Solution
@@ -20,6 +25,8 @@ from beacon_ui.api.schemas.leaderboard import LeaderboardOut, LeaderboardRow
 
 router = APIRouter(prefix="/v1/leaderboards", tags=["leaderboards"])
 
+_K_LEADERBOARD = 3
+
 if TYPE_CHECKING:
     from uuid import UUID
 
@@ -32,17 +39,11 @@ class _ResultRow:
     solution_name: str
     solution_version: str
     item_id: str
+    attempt_idx: int
     tokens_input: int
     tokens_output: int
     runtime_ms: int
     outcome: VerdictOutcome | str | None
-
-
-def _is_pass(outcome: VerdictOutcome | str | None) -> bool:
-    if outcome is None:
-        return False
-    value = outcome.value if isinstance(outcome, VerdictOutcome) else str(outcome)
-    return value == VerdictOutcome.PASS.value
 
 
 def _safe_ratio(numerator: float, denominator: float | None) -> float | None:
@@ -60,6 +61,7 @@ def _shared_result_rows(session: Session, *, suite: str) -> list[_ResultRow]:
             Solution.solution_id.label("solution_name"),
             Solution.version.label("solution_version"),
             Result.item_id,
+            Result.attempt_idx,
             Result.tokens_input,
             Result.tokens_output,
             Result.runtime_ms,
@@ -85,6 +87,7 @@ def _shared_result_rows(session: Session, *, suite: str) -> list[_ResultRow]:
             solution_name=row.solution_name,
             solution_version=row.solution_version,
             item_id=row.item_id,
+            attempt_idx=row.attempt_idx,
             tokens_input=row.tokens_input,
             tokens_output=row.tokens_output,
             runtime_ms=row.runtime_ms,
@@ -122,15 +125,28 @@ def _rows_for_metric(
         item_ids = {row.item_id for row in group_rows}
         if not item_ids:
             continue
-        passed_items = {row.item_id for row in group_rows if _is_pass(row.outcome)}
-        pass_at_3 = len(passed_items) / len(item_ids)
+        # Attempts are pooled across every completed run of this suite for the
+        # solution, so k>1 is answerable here in a way it is not for one run.
+        graded = gradeable_results(group_rows)
+        n_errors = len(item_ids) - len({row.item_id for row in graded})
+        pass_at_3 = (
+            suite_pass_at_k(graded, k=_K_LEADERBOARD)
+            if min_attempts_per_task(graded) >= _K_LEADERBOARD
+            else None
+        )
         token_totals = [row.tokens_input + row.tokens_output for row in group_rows]
         latencies = [row.runtime_ms for row in group_rows]
         median_tokens = float(median(token_totals)) if token_totals else None
         median_latency_ms = float(median(latencies)) if latencies else None
-        cost_adjusted = _safe_ratio(pass_at_3, median_tokens) if metric == "cost" else None
+        cost_adjusted = (
+            _safe_ratio(pass_at_3, median_tokens)
+            if metric == "cost" and pass_at_3 is not None
+            else None
+        )
         latency_adjusted = (
-            _safe_ratio(pass_at_3, median_latency_ms) if metric == "latency" else None
+            _safe_ratio(pass_at_3, median_latency_ms)
+            if metric == "latency" and pass_at_3 is not None
+            else None
         )
         rows.append(
             LeaderboardRow(
@@ -145,6 +161,7 @@ def _rows_for_metric(
                 cost_adjusted_score=cost_adjusted,
                 latency_adjusted_score=latency_adjusted,
                 n_items=len(item_ids),
+                n_errors=n_errors,
             )
         )
 
@@ -153,7 +170,8 @@ def _rows_for_metric(
         key=lambda row: (
             getattr(row, score_field) is None,
             -(getattr(row, score_field) or 0.0),
-            -row.pass_at_3,
+            row.pass_at_3 is None,
+            -(row.pass_at_3 or 0.0),
             -row.n_items,
             row.team_name,
             row.solution_name,

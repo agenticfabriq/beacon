@@ -30,6 +30,9 @@ class RunSummaryOut(BaseModel):
     median_tokens: float | None = None
     median_latency_ms: float | None = None
     n_items: int
+    # Items whose every attempt errored. They are excluded from the pass rates
+    # above, so this count is what keeps a mostly-broken run from reading well.
+    n_errors: int = 0
 
 
 class RunOut(BaseModel):

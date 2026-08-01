@@ -32,6 +32,8 @@ def _row(row: dict[str, Any], *, metric: str) -> dict[str, Any]:
         "median_latency_ms": _format_number(row.get("median_latency_ms")),
         "score": _format_number(_score(row, metric=metric)),
         "n_items": row.get("n_items"),
+        # Errored items are excluded from pass_at_3, so surface the count.
+        "n_errors": row.get("n_errors"),
     }
 
 

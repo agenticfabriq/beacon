@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 _MISSING = object()
+_ResultT = TypeVar("_ResultT")
 
 
 def _get_attr(result: object, primary: str, fallback: str | None = None) -> object:
@@ -44,6 +45,33 @@ def _int_attr(result: object, name: str) -> int:
     if not isinstance(value, int):
         raise TypeError(f"{name} must be int, got {type(value).__name__}")
     return value
+
+
+def gradeable_results(results: Iterable[_ResultT]) -> list[_ResultT]:
+    """Return only the attempts that actually produced a grade.
+
+    An ``ERROR`` outcome means the harness or the endpoint failed, not that the
+    solution answered wrongly, so counting it as a failure lets an outage read
+    as a quality regression. Dropping those attempts also drops any item whose
+    every attempt errored -- such an item leaves the denominator entirely
+    rather than scoring zero. Report the number of excluded items alongside the
+    rate, or a mostly-broken run looks healthy.
+
+    ``TIMEOUT`` is deliberately kept: it is an outcome of the attempt itself.
+    """
+    return [result for result in results if str(_get_attr(result, "verdict", "outcome")) != "ERROR"]
+
+
+def min_attempts_per_task(results: Iterable[object]) -> int:
+    """Return the fewest attempts any single task has, or 0 when there are none.
+
+    ``pass@k`` is only answerable for a suite once every task has at least ``k``
+    attempts; below that the helpers silently degrade to ``pass@(available)``.
+    """
+    by_task = _group_by_task(results)
+    if not by_task:
+        return 0
+    return min(len(attempts) for attempts in by_task.values())
 
 
 def _group_by_task(results: Iterable[object]) -> dict[str, list[object]]:

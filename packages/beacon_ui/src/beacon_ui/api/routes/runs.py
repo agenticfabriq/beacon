@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence  # noqa: TC003
 from statistics import median
 from typing import Annotated, cast
 from uuid import UUID
 
+from beacon_ablation.metrics import (
+    gradeable_results,
+    min_attempts_per_task,
+    suite_pass_at_k,
+    suite_pass_hat_k,
+)
 from beacon_iam.permissions import Permission
 from beacon_storage.ids import uuid7
 from beacon_storage.models.project_solutions import ProjectSolution
-from beacon_storage.models.runs import HarnessMode, Run, RunStatus, VerdictOutcome
+from beacon_storage.models.runs import HarnessMode, Run, RunStatus
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
@@ -58,25 +65,49 @@ def _parse_status_filter(value: str | None) -> RunStatus | None:
 
 
 def _summary(run: Run, session: Session) -> RunSummaryOut:
+    """Summarise one run using the real pass@k statistics.
+
+    A run records one attempt per item (``HarnessRunner`` fans out a single
+    ``_ItemTask`` per item at ``attempt_idx=pass_idx``), so ``pass@3``/``pass@5``
+    and ``pass^3`` are usually not answerable from a single run and come back as
+    ``None`` rather than a stand-in for ``pass@1``. Repeated attempts live in
+    sibling runs sharing a ``parent_sweep_id``.
+    """
     results = ResultRepo(session).list_for_run(run.id)
     item_ids = {result.item_id for result in results}
     n_items = len(item_ids)
     if n_items == 0:
         return RunSummaryOut(n_items=0)
 
-    passed_items = {result.item_id for result in results if result.outcome == VerdictOutcome.PASS}
+    graded = gradeable_results(results)
+    n_errors = n_items - len({result.item_id for result in graded})
     token_totals = [result.tokens_input + result.tokens_output for result in results]
     latencies = [result.runtime_ms for result in results]
-    pass_at_1 = len(passed_items) / n_items
+
     return RunSummaryOut(
-        pass_at_1=pass_at_1,
-        pass_at_3=pass_at_1,
-        pass_at_5=pass_at_1,
-        pass_hat_3=pass_at_1,
+        pass_at_1=_pass_at_k(graded, k=1),
+        pass_at_3=_pass_at_k(graded, k=3),
+        pass_at_5=_pass_at_k(graded, k=5),
+        pass_hat_3=_pass_hat_k(graded, k=3),
         median_tokens=float(median(token_totals)) if token_totals else None,
         median_latency_ms=float(median(latencies)) if latencies else None,
         n_items=n_items,
+        n_errors=n_errors,
     )
+
+
+def _pass_at_k(graded: Sequence[object], *, k: int) -> float | None:
+    """Return suite pass@k, or None when some task has fewer than k attempts."""
+    if min_attempts_per_task(graded) < k:
+        return None
+    return suite_pass_at_k(graded, k=k)
+
+
+def _pass_hat_k(graded: Sequence[object], *, k: int) -> float | None:
+    """Return suite pass^k, or None when some task has fewer than k attempts."""
+    if min_attempts_per_task(graded) < k:
+        return None
+    return suite_pass_hat_k(graded, k=k)
 
 
 def _suite_id_from_config(config: dict[str, object]) -> UUID | None:

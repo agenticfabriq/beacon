@@ -81,14 +81,24 @@ def render() -> None:
             st.caption("Baseline run not accessible.")
         else:
             baseline_summary = baseline.get("summary", {})
-            latest_pass_at_3 = latest_summary.get("pass_at_3") or 0.0
-            baseline_pass_at_3 = baseline_summary.get("pass_at_3") or 0.0
-            delta_3 = latest_pass_at_3 - baseline_pass_at_3
-            st.metric(
-                "Delta pass@3 vs baseline",
-                format_pass_at_k(delta_3),
-                delta=format_delta(delta_3),
-            )
+            latest_pass_at_3 = latest_summary.get("pass_at_3")
+            baseline_pass_at_3 = baseline_summary.get("pass_at_3")
+            # pass@3 is None unless every item has three attempts. Treating that
+            # as 0.0 would render a fabricated "no change" against the baseline.
+            if isinstance(latest_pass_at_3, int | float) and isinstance(
+                baseline_pass_at_3, int | float
+            ):
+                delta_3 = latest_pass_at_3 - baseline_pass_at_3
+                st.metric(
+                    "Delta pass@3 vs baseline",
+                    format_pass_at_k(delta_3),
+                    delta=format_delta(delta_3),
+                )
+            else:
+                st.caption(
+                    "Delta pass@3 unavailable: needs three attempts per item "
+                    "in both the latest and baseline runs."
+                )
     elif "baseline_run_id" in project:
         st.info("No baseline pinned. Set one in Settings > baseline.")
 

@@ -25,6 +25,7 @@ class _World(Protocol):
     chat_to_data_id: UUID
     globex_research_id: UUID
     acme_solution_id: UUID
+    globex_solution_id: UUID
     chat_to_data_run_id: UUID
     globex_research_run_id: UUID
     alice_id: UUID
@@ -33,42 +34,97 @@ class _World(Protocol):
     carol_key: str
 
 
+_PASSES = 3
+
+
+def _extra_pass_runs(
+    session: Session,
+    *,
+    team_id: UUID,
+    project_id: UUID,
+    solution_id: UUID,
+    created_by: UUID,
+    first_run_id: UUID,
+) -> list[UUID]:
+    """Return one run id per pass, reusing the seeded run for pass 0.
+
+    A run holds one attempt per item, so a real pass@3 needs three runs -- which
+    is exactly the cross-run pooling the leaderboard depends on.
+    """
+    repo = RunRepo(session)
+    run_ids = [first_run_id]
+    for pass_idx in range(1, _PASSES):
+        run = repo.create(
+            team_id=team_id,
+            project_id=project_id,
+            solution_id=solution_id,
+            suite="bird_minidev_v2",
+            dataset_version="v2",
+            mode=HarnessMode.EVAL,
+            pass_idx=pass_idx,
+            config={"seeded": True},
+            created_by=created_by,
+        )
+        repo.mark_completed(run.id)
+        run_ids.append(run.id)
+    return run_ids
+
+
 def _seed_shared_results(session: Session, world: _World) -> None:
+    """Seed a 3-pass benchmark: acme passes 2 of 3 items, globex passes all 3."""
     items = EvalItemRepo(session).list_active(suite="bird_minidev_v2", team_id=None)
     assert len(items) >= 3
 
+    acme_runs = _extra_pass_runs(
+        session,
+        team_id=world.acme_team_id,
+        project_id=world.chat_to_data_id,
+        solution_id=world.acme_solution_id,
+        created_by=world.alice_id,
+        first_run_id=world.chat_to_data_run_id,
+    )
+    globex_runs = _extra_pass_runs(
+        session,
+        team_id=world.globex_team_id,
+        project_id=world.globex_research_id,
+        solution_id=world.globex_solution_id,
+        created_by=world.carol_id,
+        first_run_id=world.globex_research_run_id,
+    )
+
     repo = ResultRepo(session)
     for idx, item in enumerate(items[:3]):
-        repo.create(
-            team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
-            run_id=world.chat_to_data_run_id,
-            item_id=str(item.item_id),
-            attempt_idx=0,
-            output={"answer": f"acme-{idx}"},
-            output_kind="answer",
-            tokens_input=60,
-            tokens_output=40,
-            runtime_ms=300 + idx * 10,
-            status=ResultStatus.COMPLETED,
-            outcome=VerdictOutcome.PASS if idx < 2 else VerdictOutcome.FAIL,
-            error=None,
-        )
-        repo.create(
-            team_id=world.globex_team_id,
-            project_id=world.globex_research_id,
-            run_id=world.globex_research_run_id,
-            item_id=str(item.item_id),
-            attempt_idx=0,
-            output={"answer": f"globex-{idx}"},
-            output_kind="answer",
-            tokens_input=120,
-            tokens_output=80,
-            runtime_ms=100 + idx * 10,
-            status=ResultStatus.COMPLETED,
-            outcome=VerdictOutcome.PASS,
-            error=None,
-        )
+        for pass_idx in range(_PASSES):
+            repo.create(
+                team_id=world.acme_team_id,
+                project_id=world.chat_to_data_id,
+                run_id=acme_runs[pass_idx],
+                item_id=str(item.item_id),
+                attempt_idx=pass_idx,
+                output={"answer": f"acme-{idx}"},
+                output_kind="answer",
+                tokens_input=60,
+                tokens_output=40,
+                runtime_ms=300 + idx * 10,
+                status=ResultStatus.COMPLETED,
+                outcome=VerdictOutcome.PASS if idx < 2 else VerdictOutcome.FAIL,
+                error=None,
+            )
+            repo.create(
+                team_id=world.globex_team_id,
+                project_id=world.globex_research_id,
+                run_id=globex_runs[pass_idx],
+                item_id=str(item.item_id),
+                attempt_idx=pass_idx,
+                output={"answer": f"globex-{idx}"},
+                output_kind="answer",
+                tokens_input=120,
+                tokens_output=80,
+                runtime_ms=100 + idx * 10,
+                status=ResultStatus.COMPLETED,
+                outcome=VerdictOutcome.PASS,
+                error=None,
+            )
     session.commit()
 
 
@@ -170,6 +226,80 @@ def test_latency_leaderboard_returns_latency_adjusted_rows(
     assert first["median_latency_ms"] == pytest.approx(110.0)
     assert first["latency_adjusted_score"] == pytest.approx(1 / 110)
     assert first["cost_adjusted_score"] is None
+
+
+def _seed_single_pass_results(
+    session: Session,
+    world: _World,
+    *,
+    error_items: int = 0,
+) -> None:
+    """Seed one attempt per item, optionally erroring the first ``error_items``."""
+    items = EvalItemRepo(session).list_active(suite="bird_minidev_v2", team_id=None)
+    assert len(items) >= 3
+
+    repo = ResultRepo(session)
+    for idx, item in enumerate(items[:3]):
+        repo.create(
+            team_id=world.acme_team_id,
+            project_id=world.chat_to_data_id,
+            run_id=world.chat_to_data_run_id,
+            item_id=str(item.item_id),
+            attempt_idx=0,
+            output={"answer": f"acme-{idx}"},
+            output_kind="answer",
+            tokens_input=60,
+            tokens_output=40,
+            runtime_ms=300,
+            status=ResultStatus.COMPLETED,
+            outcome=VerdictOutcome.ERROR if idx < error_items else VerdictOutcome.PASS,
+            error=None,
+        )
+    session.commit()
+
+
+def test_pass_at_3_is_null_when_the_suite_has_only_one_attempt(
+    api_client: TestClient,
+    world: _World,
+    session: Session,
+) -> None:
+    """One attempt per item cannot answer pass@3; it must not stand in for pass@1."""
+    _seed_single_pass_results(session, world)
+
+    response = api_client.get(
+        "/v1/leaderboards/cost",
+        headers={"X-API-Key": world.alice_key},
+        params={"suite": "bird_minidev_v2"},
+    )
+
+    assert response.status_code == 200, response.text
+    rows = response.json()["rows"]
+    assert rows, "expected the acme row"
+    acme = next(row for row in rows if row["team_name"] == "acme")
+    # Previously this reported 1.0 and ranked on it.
+    assert acme["pass_at_3"] is None
+    assert acme["cost_adjusted_score"] is None
+    assert acme["n_items"] == 3
+
+
+def test_errored_items_leave_the_leaderboard_denominator(
+    api_client: TestClient,
+    world: _World,
+    session: Session,
+) -> None:
+    """A partial outage is reported as n_errors, not as a lower pass rate (B3)."""
+    _seed_single_pass_results(session, world, error_items=2)
+
+    response = api_client.get(
+        "/v1/leaderboards/cost",
+        headers={"X-API-Key": world.alice_key},
+        params={"suite": "bird_minidev_v2"},
+    )
+
+    assert response.status_code == 200, response.text
+    acme = next(row for row in response.json()["rows"] if row["team_name"] == "acme")
+    assert acme["n_items"] == 3
+    assert acme["n_errors"] == 2
 
 
 def test_leaderboard_includes_cross_team_shared_suite_rows(
