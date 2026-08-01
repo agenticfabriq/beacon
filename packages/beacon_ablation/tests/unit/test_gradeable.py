@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
 from beacon_ablation.metrics import (
     gradeable_results,
     min_attempts_per_task,
+    restrict_to_k_attempts,
     suite_pass_at_k,
 )
 
@@ -73,3 +75,35 @@ def test_min_attempts_per_task_uses_the_worst_covered_task() -> None:
 def test_min_attempts_per_task_counts_uniform_coverage() -> None:
     rows = [_Row(item, idx, "PASS") for item in ("a", "b") for idx in range(3)]
     assert min_attempts_per_task(rows) == 3
+
+
+def test_restrict_to_k_attempts_drops_short_tasks() -> None:
+    rows = [
+        _Row("a", 0, "PASS"),
+        _Row("a", 1, "PASS"),
+        _Row("b", 0, "FAIL"),
+    ]
+    kept = restrict_to_k_attempts(rows, k=2)
+    assert {row.item_id for row in kept} == {"a"}
+
+
+def test_restrict_to_k_attempts_keeps_everything_at_k_1() -> None:
+    rows = [_Row("a", 0, "PASS"), _Row("b", 0, "FAIL")]
+    assert len(restrict_to_k_attempts(rows, k=1)) == 2
+
+
+def test_restrict_to_k_attempts_stops_pass_at_k_degrading_silently() -> None:
+    """Without the guard, a 1-attempt task answers pass@3 from one attempt."""
+    rows = [
+        _Row("a", 0, "FAIL"),
+        _Row("a", 1, "FAIL"),
+        _Row("a", 2, "PASS"),
+        _Row("b", 0, "FAIL"),
+    ]
+    # 'b' would otherwise contribute a pass@3 of False computed from one attempt.
+    assert suite_pass_at_k(restrict_to_k_attempts(rows, k=3), k=3) == 1.0
+
+
+def test_restrict_to_k_attempts_rejects_k_below_one() -> None:
+    with pytest.raises(ValueError, match="k must be >= 1"):
+        restrict_to_k_attempts([], k=0)

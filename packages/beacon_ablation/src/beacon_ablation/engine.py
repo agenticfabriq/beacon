@@ -11,10 +11,12 @@ from beacon_storage.models.attribution import Attribution
 from beacon_ablation.ablator import Ablator
 from beacon_ablation.errors import InsufficientDataError
 from beacon_ablation.metrics import (
+    gradeable_results,
     median_runtime_ms,
     median_total_tokens,
     per_task_pass_at_k,
     per_task_pass_hat_k,
+    restrict_to_k_attempts,
     suite_pass_at_k,
     suite_pass_hat_k,
 )
@@ -200,11 +202,19 @@ class AttributionEngine:
         pass_hat_k_ablated: dict[str, float] = {}
         delta_pass_hat_k: dict[str, _PerKEntry] = {}
 
+        # An ERROR is the harness or the endpoint failing, not the layer. Left in,
+        # an endpoint blip during one arm depresses that arm and manufactures a
+        # delta -- an infra hiccup reading as "this layer matters".
+        baseline_graded = gradeable_results(baseline_results)
+        ablated_graded = gradeable_results(ablated_results)
+
         for k in range(1, K + 1):
-            baseline_at_k = per_task_pass_at_k(baseline_results, k=k)
-            ablated_at_k = per_task_pass_at_k(ablated_results, k=k)
-            pass_at_k_baseline[str(k)] = suite_pass_at_k(baseline_results, k=k)
-            pass_at_k_ablated[str(k)] = suite_pass_at_k(ablated_results, k=k)
+            baseline_k = restrict_to_k_attempts(baseline_graded, k=k)
+            ablated_k = restrict_to_k_attempts(ablated_graded, k=k)
+            baseline_at_k = per_task_pass_at_k(baseline_k, k=k)
+            ablated_at_k = per_task_pass_at_k(ablated_k, k=k)
+            pass_at_k_baseline[str(k)] = suite_pass_at_k(baseline_k, k=k)
+            pass_at_k_ablated[str(k)] = suite_pass_at_k(ablated_k, k=k)
             delta, ci_low, ci_high = bootstrap_paired_ci(
                 baseline_at_k,
                 ablated_at_k,
@@ -219,10 +229,10 @@ class AttributionEngine:
                 "p": p,
             }
 
-            baseline_hat_k = per_task_pass_hat_k(baseline_results, k=k)
-            ablated_hat_k = per_task_pass_hat_k(ablated_results, k=k)
-            pass_hat_k_baseline[str(k)] = suite_pass_hat_k(baseline_results, k=k)
-            pass_hat_k_ablated[str(k)] = suite_pass_hat_k(ablated_results, k=k)
+            baseline_hat_k = per_task_pass_hat_k(baseline_k, k=k)
+            ablated_hat_k = per_task_pass_hat_k(ablated_k, k=k)
+            pass_hat_k_baseline[str(k)] = suite_pass_hat_k(baseline_k, k=k)
+            pass_hat_k_ablated[str(k)] = suite_pass_hat_k(ablated_k, k=k)
             delta_hat, hat_ci_low, hat_ci_high = bootstrap_paired_ci(
                 baseline_hat_k,
                 ablated_hat_k,
@@ -237,13 +247,15 @@ class AttributionEngine:
                 "p": p_hat,
             }
 
+        # Cost is measured on attempts that did the work; an errored attempt
+        # records whatever it spent before failing and would skew both medians.
         token_delta_pct = self._relative_delta(
-            median_total_tokens(baseline_results),
-            median_total_tokens(ablated_results),
+            median_total_tokens(baseline_graded),
+            median_total_tokens(ablated_graded),
         )
         runtime_delta_pct = self._relative_delta(
-            median_runtime_ms(baseline_results),
-            median_runtime_ms(ablated_results),
+            median_runtime_ms(baseline_graded),
+            median_runtime_ms(ablated_graded),
         )
 
         headline = delta_pass_at_k[str(min(3, K))]

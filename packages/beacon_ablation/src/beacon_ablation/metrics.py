@@ -62,6 +62,26 @@ def gradeable_results(results: Iterable[_ResultT]) -> list[_ResultT]:
     return [result for result in results if str(_get_attr(result, "verdict", "outcome")) != "ERROR"]
 
 
+def restrict_to_k_attempts(results: Iterable[_ResultT], *, k: int) -> list[_ResultT]:
+    """Drop tasks with fewer than ``k`` attempts so ``pass@k`` means what it says.
+
+    ``per_task_pass_at_k`` slices ``attempts[:k]``, which silently degrades to
+    ``pass@(available)`` for a short task. Dropping the task instead also keeps
+    the paired statistics honest: ``bootstrap_paired_ci`` and ``mcnemar_exact``
+    both compare on the intersection of task ids, so a task that falls out of
+    one arm leaves the comparison rather than being scored against an arm that
+    never managed to grade it.
+    """
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+    return [
+        result
+        for attempts in _group_by_task(results).values()
+        if len(attempts) >= k
+        for result in attempts
+    ]
+
+
 def min_attempts_per_task(results: Iterable[object]) -> int:
     """Return the fewest attempts any single task has, or 0 when there are none.
 
@@ -74,8 +94,8 @@ def min_attempts_per_task(results: Iterable[object]) -> int:
     return min(len(attempts) for attempts in by_task.values())
 
 
-def _group_by_task(results: Iterable[object]) -> dict[str, list[object]]:
-    by_task: dict[str, list[object]] = defaultdict(list)
+def _group_by_task(results: Iterable[_ResultT]) -> dict[str, list[_ResultT]]:
+    by_task: dict[str, list[_ResultT]] = defaultdict(list)
     for result in results:
         by_task[_task_id(result)].append(result)
     for attempts in by_task.values():
