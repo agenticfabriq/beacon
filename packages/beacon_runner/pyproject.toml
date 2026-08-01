@@ -11,6 +11,18 @@ dependencies = [
     "click>=8.1",
 ]
 
+# SUTs beacon ships, discoverable via `beacon suts list`. A SUT beacon does not
+# ship is reachable without packaging metadata via `--sut-factory module:attr`.
+# The mnemiq entries import cleanly without mnemiq installed; that package is
+# imported lazily inside the SUT, and is deliberately not a beacon dependency.
+[project.entry-points."beacon.suts"]
+dummy = "beacon_runner.dummy_sut:DummySUT"
+mnemiq-inprocess = "beacon_runner.sut.mnemiq:MnemiqInProcessSUT"
+mnemiq-http-sql = "beacon_runner.sut.mnemiq:MnemiqHttpSqlSUT"
+reference-langchain-sql = "beacon_runner.sut.reference:LangchainSqlSUT"
+reference-llama-index-sql = "beacon_runner.sut.reference:LlamaIndexSqlSUT"
+reference-spider-agent-lite = "beacon_runner.sut.reference:SpiderAgentLiteSUT"
+
 [tool.uv.sources]
 beacon_storage = { workspace = true }
 beacon_iam = { workspace = true }
