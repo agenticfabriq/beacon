@@ -121,12 +121,13 @@ def test_suite_pass_hat_k_averages_across_tasks() -> None:
     assert suite_pass_hat_k(results, k=2) == pytest.approx(1 / 3)
 
 
-def test_suite_pass_at_k_empty_returns_zero() -> None:
-    assert suite_pass_at_k([], k=1) == 0.0
+def test_suite_pass_at_k_empty_is_unknown() -> None:
+    """No tasks means the rate is undefined, not zero (B15)."""
+    assert suite_pass_at_k([], k=1) is None
 
 
-def test_suite_pass_hat_k_empty_returns_zero() -> None:
-    assert suite_pass_hat_k([], k=1) == 0.0
+def test_suite_pass_hat_k_empty_is_unknown() -> None:
+    assert suite_pass_hat_k([], k=1) is None
 
 
 def test_median_total_tokens() -> None:

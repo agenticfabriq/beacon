@@ -143,6 +143,31 @@ class GateService:
         p_value = mcnemar_exact(baseline_outcomes, new_outcomes)
         adjusted_p = benjamini_hochberg([p_value])[0]
 
+        if (
+            baseline_pass_at_3 is None
+            or new_pass_at_3 is None
+            or baseline_pass_hat_3 is None
+            or new_pass_hat_3 is None
+        ):
+            # No gradeable task on one side, so there is nothing to compare. The
+            # rates used to come back as 0.0 here, making both deltas 0.0 and
+            # every block condition false -- the gate passed a change on zero
+            # evaluation data. A gate that cannot judge must not approve.
+            return GateResult(
+                outcome="FAIL",
+                delta_pass_at_3=0.0,
+                delta_pass_hat_3=0.0,
+                mcnemar_p=p_value,
+                bh_adjusted_p=adjusted_p,
+                new_run_id=new_run_ids[0],
+                baseline_run_id=baseline_run.id,
+                reason=(
+                    "no gradeable results to compare "
+                    f"(baseline pass@{K_GATE}={baseline_pass_at_3}, "
+                    f"new pass@{K_GATE}={new_pass_at_3}); refusing to judge"
+                ),
+            )
+
         delta_pass_at_3 = new_pass_at_3 - baseline_pass_at_3
         delta_pass_hat_3 = new_pass_hat_3 - baseline_pass_hat_3
         outcome, reason = self._decide(

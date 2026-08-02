@@ -348,3 +348,29 @@ def test_gate_raises_when_no_baseline_set(session: Session) -> None:
             commit_sha="abc126",
             baseline_run_id=None,
         )
+
+
+def test_gate_refuses_to_judge_when_there_is_nothing_to_compare(session: Session) -> None:
+    """A gate with no gradeable results must not approve (B15).
+
+    The suite rates used to come back as 0.0 for an empty task set, making both
+    deltas 0.0 and every block condition false -- so the gate passed a change on
+    zero evaluation data.
+    """
+    world = _world(session, slug="gate-empty", baseline=[], candidate=[])
+    svc = GateService(
+        world.session,
+        registry=world.registry,
+        composer=VerdictComposer(graders=[DabstepAnswerMatcher()]),
+    )
+
+    res = svc.run_gate(
+        project_id=world.project_id,
+        sut_id=world.new_sut_id,
+        suite_id=world.curated_suite_id,
+        commit_sha="empty123",
+        baseline_run_id=world.baseline_run_id,
+    )
+
+    assert res.outcome == "FAIL"
+    assert "refusing to judge" in res.reason

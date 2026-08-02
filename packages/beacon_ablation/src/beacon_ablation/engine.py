@@ -195,11 +195,11 @@ class AttributionEngine:
         baseline_run_id: UUID,
         ablated_run_id: UUID,
     ) -> Attribution:
-        pass_at_k_baseline: dict[str, float] = {}
-        pass_at_k_ablated: dict[str, float] = {}
+        pass_at_k_baseline: dict[str, float | None] = {}
+        pass_at_k_ablated: dict[str, float | None] = {}
         delta_pass_at_k: dict[str, _PerKEntry] = {}
-        pass_hat_k_baseline: dict[str, float] = {}
-        pass_hat_k_ablated: dict[str, float] = {}
+        pass_hat_k_baseline: dict[str, float | None] = {}
+        pass_hat_k_ablated: dict[str, float | None] = {}
         delta_pass_hat_k: dict[str, _PerKEntry] = {}
 
         # An ERROR is the harness or the endpoint failing, not the layer. Left in,

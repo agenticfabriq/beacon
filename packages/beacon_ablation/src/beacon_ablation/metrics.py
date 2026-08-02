@@ -124,19 +124,28 @@ def per_task_pass_hat_k(results: Iterable[object], *, k: int) -> dict[str, bool]
     return out
 
 
-def suite_pass_at_k(results: Iterable[object], *, k: int) -> float:
-    """Return suite pass@k as the mean of per-task pass@k booleans."""
+def suite_pass_at_k(results: Iterable[object], *, k: int) -> float | None:
+    """Return suite pass@k as the mean of per-task pass@k booleans.
+
+    ``None`` when there are no tasks to average. A mean over an empty set is
+    undefined, and returning 0.0 made "nothing was gradeable" indistinguishable
+    from "everything failed" -- which is how an arm wiped out by an endpoint
+    outage came to be recorded as having scored zero.
+    """
     per_task = per_task_pass_at_k(results, k=k)
     if not per_task:
-        return 0.0
+        return None
     return sum(per_task.values()) / len(per_task)
 
 
-def suite_pass_hat_k(results: Iterable[object], *, k: int) -> float:
-    """Return suite pass^k as the mean of per-task pass^k booleans."""
+def suite_pass_hat_k(results: Iterable[object], *, k: int) -> float | None:
+    """Return suite pass^k as the mean of per-task pass^k booleans.
+
+    ``None`` when there are no tasks to average -- see :func:`suite_pass_at_k`.
+    """
     per_task = per_task_pass_hat_k(results, k=k)
     if not per_task:
-        return 0.0
+        return None
     return sum(per_task.values()) / len(per_task)
 
 
