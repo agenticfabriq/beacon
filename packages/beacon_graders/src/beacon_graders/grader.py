@@ -18,6 +18,13 @@ class Grader(Protocol):
     # adapters rewrite per suite, so composition precedence keys on this.
     kind: GraderKind
 
+    # Graders may also declare ``metric: str | None`` -- the named metric they
+    # contribute ("ex", "got_facts"). Deliberately not required here: unlike
+    # ``kind``, which every grader needs because it decides composition, a
+    # grader may legitimately contribute no named metric. VerdictComposer reads
+    # it defensively, and the shipped graders default it to None so callers can
+    # set it per instance the way benchmark adapters set ``name``.
+
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
         """Return whether this grader can score ``item``/``result``."""
         ...

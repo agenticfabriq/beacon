@@ -21,6 +21,7 @@ class DabstepAnswerMatcher:
     name = "dabstep_answer_matcher"
     version = "v1"
     kind = GraderKind.EXECUTION
+    metric: str | None = None
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
         """Apply when ``result`` is an answer and the item ships an ``answer`` gold."""

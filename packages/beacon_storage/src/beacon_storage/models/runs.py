@@ -149,6 +149,7 @@ class Verdict(Base, IdMixin, TimestampsMixin):
     )
     grader: Mapped[str] = mapped_column(String(100), nullable=False)
     grader_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    metric: Mapped[str | None] = mapped_column(String(100), nullable=True)
     criterion: Mapped[str] = mapped_column(String(100), nullable=False)
     bool_value: Mapped[bool | None] = mapped_column(nullable=True)
     value: Mapped[float | None] = mapped_column(nullable=True)
@@ -162,6 +163,7 @@ class Verdict(Base, IdMixin, TimestampsMixin):
         Index("ix_verdict_result", "result_id"),
         Index("ix_verdict_team", "team_id"),
         Index("ix_verdict_answer_hash", "answer_hash"),
+        Index("ix_verdict_metric", "metric"),
         CheckConstraint(
             "value IS NULL OR (value >= 0 AND value <= 1)",
             name="ck_verdict_value_range",

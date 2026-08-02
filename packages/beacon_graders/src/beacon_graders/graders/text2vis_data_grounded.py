@@ -40,6 +40,7 @@ class Text2VisDataGroundedGrader:
     name = "text2vis_data_grounded"
     version = "v1"
     kind = GraderKind.EXECUTION
+    metric: str | None = None
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
         """Apply when ``result`` is a chart and the item ships a gold ``data_table``."""

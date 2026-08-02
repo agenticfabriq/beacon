@@ -19,6 +19,7 @@ class HierarchicalRubricGrader:
     name = "hierarchical_rubric"
     version = "v1"
     kind = GraderKind.LLM_JUDGE
+    metric: str | None = None
 
     def __init__(self, *, judge_cache: JudgeCache) -> None:
         self.cache = judge_cache

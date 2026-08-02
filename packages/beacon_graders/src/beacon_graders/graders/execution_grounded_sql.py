@@ -28,6 +28,7 @@ class ExecutionGroundedSqlGrader:
     name = "execution_grounded_sql"
     version = "v1"
     kind = GraderKind.EXECUTION
+    metric: str | None = None
 
     def __init__(
         self,

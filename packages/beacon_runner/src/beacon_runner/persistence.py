@@ -67,6 +67,7 @@ def persist_result(
             grader=verdict.grader,
             grader_version=verdict.grader_version,
             criterion=verdict.criterion,
+            metric=verdict.metric,
             bool_value=verdict.bool_value,
             value=verdict.value,
             justification=verdict.justification,

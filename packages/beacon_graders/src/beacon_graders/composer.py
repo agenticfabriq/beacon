@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from beacon_graders.errors import BeaconGraderError
 from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 
 if TYPE_CHECKING:
@@ -39,6 +40,12 @@ def _is_deferred(result: ExecutionResult) -> bool:
     return bool(result.output.get("deferred", False))
 
 
+class AmbiguousPrimaryMetricError(BeaconGraderError):
+    """Raised when the composer cannot tell which metric decides the outcome."""
+
+    code = "ambiguous_primary_metric"
+
+
 class VerdictComposer:
     def __init__(
         self,
@@ -47,14 +54,77 @@ class VerdictComposer:
         execution_grader_names: frozenset[str] = _DEFAULT_EXECUTION_GRADERS,
         llm_judge_grader_names: frozenset[str] = _DEFAULT_LLM_GRADERS,
         llm_pass_threshold: float = 0.8,
+        primary_metric: str | None = None,
     ) -> None:
         self.graders = list(graders)
+        self.primary_metric = self._resolve_primary_metric(primary_metric)
         # Fallback classification for graders that declare no ``kind``. Built-in
         # graders do declare one, and benchmark adapters rename their instances,
         # so these name sets must not be the primary signal -- see _kind_of.
         self.execution_grader_names = execution_grader_names
         self.llm_judge_grader_names = llm_judge_grader_names
         self.threshold = llm_pass_threshold
+
+    @staticmethod
+    def _stamp_metric(grader: object, emitted: list[Verdict]) -> list[Verdict]:
+        """Label each verdict with the metric its grader declares.
+
+        Stamped here rather than in every grader so a grader cannot emit a
+        verdict whose metric disagrees with what it declared, and so existing
+        graders need no change to participate.
+        """
+        metric = getattr(grader, "metric", None)
+        if metric is None:
+            return emitted
+        return [
+            v if v.metric is not None else v.model_copy(update={"metric": metric}) for v in emitted
+        ]
+
+    def _resolve_primary_metric(self, requested: str | None) -> str | None:
+        """Decide which metric's verdict determines PASS/FAIL.
+
+        Two execution graders are two readings of correctness -- a strict one
+        and a tolerant one -- and both belong in the record. Only one can decide
+        the outcome, and picking whichever the caller happened to list first
+        made the same result compose PASS or FAIL by argument order. So an
+        explicit choice is required as soon as the answer is not obvious.
+        """
+        declared = [
+            metric
+            for grader in self.graders
+            if (metric := getattr(grader, "metric", None)) is not None
+        ]
+        if requested is not None:
+            if requested not in declared:
+                raise AmbiguousPrimaryMetricError(
+                    f"primary_metric {requested!r} has no grader declaring it; "
+                    f"declared metrics: {sorted(set(declared)) or '(none)'}"
+                )
+            return requested
+
+        deciding = [
+            grader for grader in self.graders if self._declared_kind(grader) is GraderKind.EXECUTION
+        ]
+        if len(deciding) > 1:
+            names = sorted({getattr(g, "metric", None) or g.name for g in deciding})
+            raise AmbiguousPrimaryMetricError(
+                f"{len(deciding)} execution graders and no primary_metric: {names}. "
+                "Pass primary_metric to say which one decides the outcome."
+            )
+        return None
+
+    @staticmethod
+    def _declared_kind(grader: object) -> GraderKind | None:
+        kind = getattr(grader, "kind", None)
+        return kind if isinstance(kind, GraderKind) else None
+
+    def _decides_outcome(self, verdict: Verdict) -> bool:
+        """Return whether this verdict is the one the outcome follows."""
+        if self._kind_of(verdict.grader) is not GraderKind.EXECUTION:
+            return False
+        if self.primary_metric is None:
+            return True
+        return verdict.metric == self.primary_metric
 
     def _kind_of(self, grader_name: str) -> GraderKind | None:
         """Classify a verdict's emitting grader by what it declares, not its name.
@@ -98,7 +168,7 @@ class VerdictComposer:
             try:
                 if not grader.applicable(item, result):
                     continue
-                emitted = grader.grade(item, result)
+                emitted = self._stamp_metric(grader, grader.grade(item, result))
                 verdicts.extend(emitted)
                 if any(self._is_timeout_verdict(verdict) for verdict in emitted):
                     any_timeout = True
@@ -128,9 +198,7 @@ class VerdictComposer:
             return verdicts, VerdictOutcome.DEFER
 
         for verdict in verdicts:
-            if self._kind_of(verdict.grader) is GraderKind.EXECUTION and (
-                verdict.bool_value is not None
-            ):
+            if self._decides_outcome(verdict) and verdict.bool_value is not None:
                 return (
                     verdicts,
                     VerdictOutcome.PASS if verdict.bool_value else VerdictOutcome.FAIL,

@@ -38,6 +38,10 @@ class Verdict(BaseModel):
 
     grader: str
     grader_version: str
+    # Which named metric this verdict measures ("ex", "got_facts"). Benchmark
+    # adapters rename graders per suite, so the grader name is a display label;
+    # this is the stable key a persisted verdict is aggregated under.
+    metric: str | None = None
     criterion: str
     bool_value: bool | None = None
     value: float | None = None
