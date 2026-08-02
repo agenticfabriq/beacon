@@ -7,6 +7,7 @@ from collections import Counter
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from beacon_graders.tolerance import Tolerance
 from beacon_graders.types import GraderKind, Verdict
 
 if TYPE_CHECKING:
@@ -16,12 +17,20 @@ if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, ExecutionResult
 
 _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+
+
+def _is_number(value: Any) -> bool:
+    """Return whether a cell is a real number. Bools are not: True is not 1."""
+    return isinstance(value, Decimal | float | int) and not isinstance(value, bool)
+
+
+def _sort_key(row: tuple[Any, ...]) -> tuple[str, ...]:
+    """Order rows for order-insensitive comparison without comparing mixed types."""
+    return tuple(repr(v) for v in row)
+
+
 # Dialects exposing a server-side per-statement timeout via SET LOCAL.
 _STATEMENT_TIMEOUT_DIALECTS = frozenset({"postgresql"})
-# Decimal places at which two numeric results are considered the same value.
-# Wide enough to absorb DECIMAL-vs-REAL cast differences, tight enough that
-# genuinely different answers stay different.
-_NUMERIC_COMPARISON_DECIMALS = 6
 
 
 class ExecutionGroundedSqlGrader:
@@ -100,7 +109,11 @@ class ExecutionGroundedSqlGrader:
                 )
             ]
 
-        passed = self._compare(candidate_rows, gold_rows, order_sensitive)
+        tolerance = Tolerance.for_item(item)
+        if tolerance.row_order_insensitive is not None:
+            # Curated gold outranks the ORDER BY heuristic.
+            order_sensitive = not tolerance.row_order_insensitive
+        passed = self._compare(candidate_rows, gold_rows, order_sensitive, tolerance)
         return [
             self._verdict(
                 passed=passed,
@@ -160,41 +173,45 @@ class ExecutionGroundedSqlGrader:
         candidate: list[tuple[Any, ...]],
         gold: list[tuple[Any, ...]],
         order_sensitive: bool,
+        tolerance: Tolerance | None = None,
     ) -> bool:
-        normalised_candidate = [self._normalise_row(row) for row in candidate]
-        normalised_gold = [self._normalise_row(row) for row in gold]
+        tol = tolerance or Tolerance()
+        if len(candidate) != len(gold):
+            return False
         if order_sensitive:
-            return normalised_candidate == normalised_gold
+            return self._rows_match(candidate, gold, tol)
         try:
-            return sorted(normalised_candidate) == sorted(normalised_gold)
+            ordered_candidate = sorted(candidate, key=_sort_key)
+            ordered_gold = sorted(gold, key=_sort_key)
         except TypeError:
-            return Counter(normalised_candidate) == Counter(normalised_gold)
+            return Counter(map(repr, candidate)) == Counter(map(repr, gold))
+        return self._rows_match(ordered_candidate, ordered_gold, tol)
 
-    def _normalise_row(self, row: tuple[Any, ...]) -> tuple[Any, ...]:
-        return tuple(self._normalise_value(value) for value in row)
+    def _rows_match(
+        self,
+        candidate: list[tuple[Any, ...]],
+        gold: list[tuple[Any, ...]],
+        tolerance: Tolerance,
+    ) -> bool:
+        return all(self._row_matches(c, g, tolerance) for c, g in zip(candidate, gold, strict=True))
 
-    def _normalise_value(self, value: Any) -> Any:
-        """Put numbers on a common footing before comparing.
+    def _row_matches(
+        self,
+        candidate: tuple[Any, ...],
+        gold: tuple[Any, ...],
+        tolerance: Tolerance,
+    ) -> bool:
+        if len(candidate) != len(gold):
+            return False
+        return all(
+            self._values_match(c, g, tolerance) for c, g in zip(candidate, gold, strict=True)
+        )
 
-        Candidate and gold routinely cast the same quantity differently --
-        ``CAST(x AS DECIMAL)`` against ``CAST(x AS REAL)`` -- and the driver
-        then hands back ``Decimal('0.90490797546012269939')`` for one and
-        ``0.904908`` for the other. Compared as Python objects those are
-        unequal, so a numerically correct answer scored FAIL. BIRD is full of
-        ratio and average questions that hit this.
-
-        Only real numbers are touched: strings, booleans, NULLs, row counts,
-        column arity and column order all stay exact.
-        """
-        if isinstance(value, bool):
-            # bool subclasses int, so it would otherwise be rounded into a
-            # float. Kept as-is; it still compares equal to 1/0 through
-            # Python's own ==, which is the tolerant reading given drivers
-            # disagree on how a boolean column comes back.
-            return value
-        if isinstance(value, Decimal | float):
-            return round(float(value), _NUMERIC_COMPARISON_DECIMALS)
-        return value
+    def _values_match(self, candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
+        """Compare one cell, numbers within tolerance and everything else exactly."""
+        if _is_number(candidate) and _is_number(gold):
+            return tolerance.numbers_match(float(candidate), float(gold))
+        return bool(candidate == gold)
 
     def _verdict(self, *, passed: bool, justification: str, raw: dict[str, Any]) -> Verdict:
         return Verdict(

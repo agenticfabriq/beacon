@@ -78,15 +78,18 @@ def test_numeric_strings_are_not_treated_as_numbers(
 def test_booleans_are_left_out_of_the_numeric_path(
     grader: ExecutionGroundedSqlGrader,
 ) -> None:
-    """Bools are not rounded into floats.
+    """Bools never enter the numeric-tolerance path.
 
-    They still compare equal to 1/0 because that is Python's own ``==`` and was
-    true before this change; drivers differ on whether a boolean column comes
-    back as True or as 1, so equating them is the tolerant reading. What this
-    pins is that a bool never enters the rounding path.
+    They still compare equal to 1/0 through Python's own ``==``, which predates
+    this and is the tolerant reading given drivers disagree on how a boolean
+    column comes back. What this pins is that a bool is never treated as a
+    number to be compared within a tolerance.
     """
-    assert grader._normalise_value(True) is True  # noqa: SLF001
-    assert grader._normalise_value(False) is False  # noqa: SLF001
+    from beacon_graders.graders.execution_grounded_sql import _is_number
+
+    assert _is_number(True) is False
+    assert _is_number(False) is False
+    assert _is_number(1.0) is True
 
 
 def test_extra_columns_still_fail(grader: ExecutionGroundedSqlGrader) -> None:
