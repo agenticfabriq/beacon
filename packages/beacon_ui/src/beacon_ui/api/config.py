@@ -12,6 +12,10 @@ class ApiConfig(BaseSettings):
         validation_alias=AliasChoices("BEACON_DATABASE_URL", "DATABASE_URL"),
     )
     object_storage: str = "local:///tmp/beacon-objects"
+    # Suite name -> database the suite's execution graders run candidate and
+    # gold SQL against, as a JSON object. Ingestion grades server-side, so a
+    # suite whose graders execute SQL cannot be graded without one.
+    benchmark_db_urls: dict[str, str] = Field(default_factory=dict)
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
