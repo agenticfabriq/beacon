@@ -94,6 +94,10 @@ class ExecutionResult(BaseModel):
     tokens_output: int = 0
     runtime_ms: int = 0
     error: str | None = None
+    # The solution was asked and chose not to answer. Distinct from `error`,
+    # which means the attempt never ran, and from a wrong answer. Composes to
+    # DEFER so over-deferral stays visible instead of reading as failure.
+    deferred: bool = False
 
 
 class EvalItem(BaseModel):

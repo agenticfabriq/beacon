@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 _OUTCOME_TO_STATUS: dict[GraderOutcome, ResultStatus] = {
     GraderOutcome.PASS: ResultStatus.COMPLETED,
     GraderOutcome.FAIL: ResultStatus.COMPLETED,
+    # The attempt completed; the solution declined. Not an error status.
+    GraderOutcome.DEFER: ResultStatus.COMPLETED,
     GraderOutcome.ERROR: ResultStatus.ERROR,
     GraderOutcome.TIMEOUT: ResultStatus.TIMEOUT,
 }

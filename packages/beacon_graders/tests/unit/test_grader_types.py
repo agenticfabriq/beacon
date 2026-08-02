@@ -57,7 +57,13 @@ def _result() -> ExecutionResult:
 
 
 def test_verdict_outcome_values_match_storage_contract() -> None:
-    assert [outcome.value for outcome in VerdictOutcome] == ["PASS", "FAIL", "ERROR", "TIMEOUT"]
+    assert [outcome.value for outcome in VerdictOutcome] == [
+        "PASS",
+        "FAIL",
+        "DEFER",
+        "ERROR",
+        "TIMEOUT",
+    ]
 
 
 def test_verdict_defaults_optional_fields() -> None:

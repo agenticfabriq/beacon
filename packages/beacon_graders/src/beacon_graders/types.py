@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict
 class VerdictOutcome(StrEnum):
     PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
+    # Asked, and declined to answer. Not a failure: counting it as one hides
+    # over-deferral, which is the difference between a cautious system and a
+    # wrong one. Stays in the denominator, unlike ERROR.
+    DEFER = "DEFER"
     ERROR = "ERROR"
     TIMEOUT = "TIMEOUT"
 

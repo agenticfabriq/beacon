@@ -16,7 +16,7 @@ from beacon_ablation.metrics import (
 from beacon_iam.permissions import Permission
 from beacon_storage.ids import uuid7
 from beacon_storage.models.project_solutions import ProjectSolution
-from beacon_storage.models.runs import HarnessMode, Run, RunStatus
+from beacon_storage.models.runs import HarnessMode, Run, RunStatus, VerdictOutcome
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
@@ -81,6 +81,7 @@ def _summary(run: Run, session: Session) -> RunSummaryOut:
 
     graded = gradeable_results(results)
     n_errors = n_items - len({result.item_id for result in graded})
+    n_deferred = len({r.item_id for r in graded if r.outcome == VerdictOutcome.DEFER})
     token_totals = [result.tokens_input + result.tokens_output for result in results]
     latencies = [result.runtime_ms for result in results]
 
@@ -93,6 +94,7 @@ def _summary(run: Run, session: Session) -> RunSummaryOut:
         median_latency_ms=float(median(latencies)) if latencies else None,
         n_items=n_items,
         n_errors=n_errors,
+        n_deferred=n_deferred,
     )
 
 

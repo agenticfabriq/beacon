@@ -28,6 +28,17 @@ _DEFAULT_LLM_GRADERS = frozenset(
 )
 
 
+def _is_deferred(result: ExecutionResult) -> bool:
+    """Return whether the solution declined to answer.
+
+    Prefers the first-class ``deferred`` field; falls back to an
+    ``output["deferred"]`` flag for solutions that report it that way.
+    """
+    if getattr(result, "deferred", False):
+        return True
+    return bool(result.output.get("deferred", False))
+
+
 class VerdictComposer:
     def __init__(
         self,
@@ -109,6 +120,12 @@ class VerdictComposer:
             return verdicts, VerdictOutcome.ERROR
         if any_timeout:
             return verdicts, VerdictOutcome.TIMEOUT
+
+        # Checked after error/timeout — an attempt that never ran cannot be
+        # said to have declined — but before pass/fail, because there is no
+        # answer to grade. Grader verdicts are still recorded as evidence.
+        if _is_deferred(result):
+            return verdicts, VerdictOutcome.DEFER
 
         for verdict in verdicts:
             if self._kind_of(verdict.grader) is GraderKind.EXECUTION and (

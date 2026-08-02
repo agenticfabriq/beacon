@@ -33,6 +33,9 @@ class RunSummaryOut(BaseModel):
     # Items whose every attempt errored. They are excluded from the pass rates
     # above, so this count is what keeps a mostly-broken run from reading well.
     n_errors: int = 0
+    # Items the solution declined to answer. Unlike n_errors these stay in the
+    # pass-rate denominator: declining is an outcome, not a missing measurement.
+    n_deferred: int = 0
 
 
 class RunOut(BaseModel):

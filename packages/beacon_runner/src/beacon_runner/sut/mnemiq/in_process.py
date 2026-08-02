@@ -304,4 +304,5 @@ class MnemiqInProcessSUT:
             tokens_output=max(tokens_used, 0),
             runtime_ms=runtime_ms,
             error=error,
+            deferred=deferred,
         )
