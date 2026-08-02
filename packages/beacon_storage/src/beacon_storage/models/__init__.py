@@ -1,8 +1,3 @@
-from beacon_storage.models.antigoodhart import (
-    AntigoodhartFinding,
-    AntigoodhartKind,
-    AntigoodhartSeverity,
-)
 from beacon_storage.models.attribution import Attribution
 from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
 from beacon_storage.models.dataset_loads import DatasetLoad
@@ -26,9 +21,6 @@ from beacon_storage.models.tenancy import ApiKey, Membership, Project, Role, Sco
 from beacon_storage.models.worker_state import WorkerState
 
 __all__ = [
-    "AntigoodhartFinding",
-    "AntigoodhartKind",
-    "AntigoodhartSeverity",
     "ApiKey",
     "Attribution",
     "ActorType",

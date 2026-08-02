@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 _WORKERS_ROOT = Path(__file__).resolve().parents[2] / "src" / "beacon_workers"
-_WORKER_SUBPACKAGES = ("promotion", "convergence", "antigoodhart", "retention")
+_WORKER_SUBPACKAGES = ("promotion", "convergence", "retention")
 _FORBIDDEN_TOP_LEVEL = frozenset(
     {
         "beacon_ablation",
@@ -22,10 +22,9 @@ _FORBIDDEN_TOP_LEVEL = frozenset(
     }
 )
 _FORBIDDEN_CROSS_WORKER = {
-    "promotion": ("convergence", "antigoodhart", "retention"),
-    "convergence": ("promotion", "antigoodhart", "retention"),
-    "antigoodhart": ("promotion", "convergence", "retention"),
-    "retention": ("promotion", "convergence", "antigoodhart"),
+    "promotion": ("convergence", "retention"),
+    "convergence": ("promotion", "retention"),
+    "retention": ("promotion", "convergence"),
 }
 _ALLOWED_TOP_LEVEL = {
     "__future__",

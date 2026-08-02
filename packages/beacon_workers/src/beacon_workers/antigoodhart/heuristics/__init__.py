@@ -1,1 +1,0 @@
-"""Anti-Goodhart heuristic implementations."""

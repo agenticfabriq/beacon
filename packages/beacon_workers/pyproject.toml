@@ -20,7 +20,6 @@ dependencies = [
 [project.scripts]
 beacon-worker-promotion = "beacon_workers.promotion.__main__:main"
 beacon-worker-convergence = "beacon_workers.convergence.__main__:main"
-beacon-worker-antigoodhart = "beacon_workers.antigoodhart.__main__:main"
 beacon-worker-retention = "beacon_workers.retention.__main__:main"
 
 [tool.uv.sources]

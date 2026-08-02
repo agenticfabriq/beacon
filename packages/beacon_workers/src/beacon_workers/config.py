@@ -22,7 +22,6 @@ class WorkerConfig(BaseSettings):
 
     promotion_interval_seconds: int = 3600
     convergence_interval_seconds: int = 30
-    antigoodhart_interval_seconds: int = 300
     retention_interval_seconds: int = 86400
     retention_days: int = 90
 
@@ -33,9 +32,6 @@ class WorkerConfig(BaseSettings):
 
     convergence_min_suts: int = 3
     convergence_min_confidence: float = 0.85
-
-    antigoodhart_sql_ngram_size: int = 5
-    antigoodhart_skew_team_share_threshold: float = 0.6
 
     llm_provider: str = "anthropic"
     embedding_provider: str = "anthropic"
@@ -53,7 +49,6 @@ class WorkerConfig(BaseSettings):
 _DEFAULT_HEALTH_PORTS = {
     "promotion": 9101,
     "convergence": 9102,
-    "antigoodhart": 9103,
     "retention": 9104,
 }
 

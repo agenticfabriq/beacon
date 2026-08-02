@@ -51,15 +51,6 @@ def review_item_gold(item: dict[str, Any]) -> Any:
     return item.get("gold_answer")
 
 
-def review_item_flags(item: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return anti-Goodhart findings attached to a review-queue item."""
-    flags = _dict_list(item.get("anti_goodhart"))
-    if flags:
-        return flags
-    metadata = _dict_value(item.get("metadata"))
-    return _dict_list(metadata.get("anti_goodhart"))
-
-
 def _review_item_candidates(item: dict[str, Any]) -> list[dict[str, Any]]:
     candidates = _dict_list(item.get("candidates"))
     if candidates:
@@ -74,19 +65,6 @@ def _reviewer_history(item: dict[str, Any]) -> list[dict[str, Any]]:
         return history
     metadata = _dict_value(item.get("metadata"))
     return _dict_list(metadata.get("reviewer_history"))
-
-
-def _render_flags(item: dict[str, Any]) -> None:
-    flags = review_item_flags(item)
-    if not flags:
-        return
-
-    st.warning("Anti-Goodhart findings require review before accepting.")
-    for flag in flags:
-        severity = str(flag.get("severity") or "info").upper()
-        kind = str(flag.get("kind") or "finding")
-        detail = str(flag.get("detail") or "")
-        st.markdown(f"- **{severity} {kind}**: {detail}")
 
 
 def _render_history(item: dict[str, Any]) -> None:
@@ -171,8 +149,6 @@ def _render_item(*, client: Any, project_id: str, item: dict[str, Any]) -> None:
                 st.caption("No gold answer recorded.")
             else:
                 st.json(gold)
-
-        _render_flags(item)
 
         st.markdown("**Candidate outputs**")
         render_candidates_side_by_side(_review_item_candidates(item))

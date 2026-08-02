@@ -16,7 +16,6 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.health_port == 0
     assert cfg.promotion_interval_seconds == 3600
     assert cfg.convergence_interval_seconds == 30
-    assert cfg.antigoodhart_interval_seconds == 300
     assert cfg.retention_interval_seconds == 86400
     assert cfg.retention_days == 90
 
@@ -39,7 +38,6 @@ def test_health_port_default_per_worker() -> None:
 
     assert default_health_port("promotion") == 9101
     assert default_health_port("convergence") == 9102
-    assert default_health_port("antigoodhart") == 9103
     assert default_health_port("retention") == 9104
     with pytest.raises(ValueError, match="unknown worker_name"):
         default_health_port("unknown")

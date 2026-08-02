@@ -1,4 +1,3 @@
-from beacon_storage.repository.antigoodhart import AntigoodhartRepo
 from beacon_storage.repository.api_keys import ApiKeyRepo
 from beacon_storage.repository.attributions import AttributionRepo
 from beacon_storage.repository.dataset_loads import DatasetLoadRepo
@@ -19,7 +18,6 @@ from beacon_storage.repository.verdicts import VerdictRepo
 from beacon_storage.repository.worker_state import WorkerStateRepo
 
 __all__ = [
-    "AntigoodhartRepo",
     "ApiKeyRepo",
     "AttributionRepo",
     "DatasetLoadRepo",

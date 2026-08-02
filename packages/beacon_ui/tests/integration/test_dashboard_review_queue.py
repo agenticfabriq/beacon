@@ -5,7 +5,6 @@ import pytest
 from beacon_storage.models.eval_items import EvalItem, EvalItemTier
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_ui.dashboard.panels.review_queue import (
-    review_item_flags,
     review_item_gold,
     review_item_question,
 )
@@ -31,13 +30,6 @@ def _seed_pending(session: Session, world: _World) -> EvalItem:
         item_input={"question": "Which city has the highest revenue?"},
         gold_answer={"sql": "SELECT city FROM revenue ORDER BY amount DESC LIMIT 1"},
         item_metadata={
-            "anti_goodhart": [
-                {
-                    "severity": "warn",
-                    "kind": "metadata_bleed",
-                    "detail": "Gold hint appears in metadata.",
-                }
-            ],
             "candidates": [
                 {
                     "solution_name": "dummy-runner",
@@ -57,16 +49,11 @@ def test_review_item_helpers_handle_current_and_enriched_shapes() -> None:
         "item_id": "12345678-0000-0000-0000-000000000000",
         "item_input": {"question": "What changed?"},
         "gold_answer": {"answer": "revenue"},
-        "metadata": {
-            "anti_goodhart": [{"severity": "warn", "kind": "leak", "detail": "possible leak"}]
-        },
+        "metadata": {},
     }
 
     assert review_item_question(item) == "What changed?"
     assert review_item_gold(item) == {"answer": "revenue"}
-    assert review_item_flags(item) == [
-        {"severity": "warn", "kind": "leak", "detail": "possible leak"}
-    ]
 
 
 def test_review_queue_panel_renders_empty(

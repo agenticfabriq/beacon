@@ -54,14 +54,6 @@ def _load_items(*, team_id: str, suite: str | None, tier: str | None) -> list[di
     return _dict_list(body.get("items"))
 
 
-def _load_findings(team_id: str) -> list[dict[str, Any]]:
-    client = client_from_state()
-    body = client._get(f"/v1/teams/{team_id}/anti-goodhart", limit=50)  # noqa: SLF001
-    if not isinstance(body, dict):
-        return []
-    return _dict_list(body.get("findings"))
-
-
 def render() -> None:
     """Render the team Eval Items view with tier and suite filters."""
     state = _state()
@@ -84,7 +76,6 @@ def render() -> None:
             suite=suite.strip() or None,
             tier=tier or None,
         )
-        findings = _load_findings(state.current_team_id)
     except BeaconApiError as exc:
         st.error(f"Failed to load eval items: {exc.message}")
         return
@@ -98,26 +89,6 @@ def render() -> None:
         )
     else:
         st.caption("No eval items match these filters.")
-
-    st.subheader("Anti-Goodhart findings")
-    if not findings:
-        st.success("No active anti-Goodhart findings for this team.")
-        return
-
-    st.dataframe(
-        [
-            {
-                "severity": finding.get("severity"),
-                "kind": finding.get("kind"),
-                "eval_item_id": finding.get("eval_item_id"),
-                "detail": finding.get("detail"),
-                "created_at": finding.get("created_at"),
-            }
-            for finding in findings
-        ],
-        width="stretch",
-        hide_index=True,
-    )
 
 
 if __name__ == "__main__":  # pragma: no cover
