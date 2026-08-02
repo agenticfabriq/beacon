@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from beacon_graders.types import GraderKind, Verdict
@@ -17,6 +18,10 @@ if TYPE_CHECKING:
 _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 # Dialects exposing a server-side per-statement timeout via SET LOCAL.
 _STATEMENT_TIMEOUT_DIALECTS = frozenset({"postgresql"})
+# Decimal places at which two numeric results are considered the same value.
+# Wide enough to absorb DECIMAL-vs-REAL cast differences, tight enough that
+# genuinely different answers stay different.
+_NUMERIC_COMPARISON_DECIMALS = 6
 
 
 class ExecutionGroundedSqlGrader:
@@ -155,12 +160,40 @@ class ExecutionGroundedSqlGrader:
         gold: list[tuple[Any, ...]],
         order_sensitive: bool,
     ) -> bool:
+        normalised_candidate = [self._normalise_row(row) for row in candidate]
+        normalised_gold = [self._normalise_row(row) for row in gold]
         if order_sensitive:
-            return candidate == gold
+            return normalised_candidate == normalised_gold
         try:
-            return sorted(candidate) == sorted(gold)
+            return sorted(normalised_candidate) == sorted(normalised_gold)
         except TypeError:
-            return Counter(candidate) == Counter(gold)
+            return Counter(normalised_candidate) == Counter(normalised_gold)
+
+    def _normalise_row(self, row: tuple[Any, ...]) -> tuple[Any, ...]:
+        return tuple(self._normalise_value(value) for value in row)
+
+    def _normalise_value(self, value: Any) -> Any:
+        """Put numbers on a common footing before comparing.
+
+        Candidate and gold routinely cast the same quantity differently --
+        ``CAST(x AS DECIMAL)`` against ``CAST(x AS REAL)`` -- and the driver
+        then hands back ``Decimal('0.90490797546012269939')`` for one and
+        ``0.904908`` for the other. Compared as Python objects those are
+        unequal, so a numerically correct answer scored FAIL. BIRD is full of
+        ratio and average questions that hit this.
+
+        Only real numbers are touched: strings, booleans, NULLs, row counts,
+        column arity and column order all stay exact.
+        """
+        if isinstance(value, bool):
+            # bool subclasses int, so it would otherwise be rounded into a
+            # float. Kept as-is; it still compares equal to 1/0 through
+            # Python's own ==, which is the tolerant reading given drivers
+            # disagree on how a boolean column comes back.
+            return value
+        if isinstance(value, Decimal | float):
+            return round(float(value), _NUMERIC_COMPARISON_DECIMALS)
+        return value
 
     def _verdict(self, *, passed: bool, justification: str, raw: dict[str, Any]) -> Verdict:
         return Verdict(
