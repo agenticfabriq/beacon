@@ -22,7 +22,7 @@ class AttributionRepo:
     def latest_for(
         self,
         *,
-        project_id: UUID,
+        team_id: UUID,
         solution_id: UUID,
         suite: str,
     ) -> list[Attribution]:
@@ -37,7 +37,7 @@ class AttributionRepo:
         latest_sweep_id = self.session.scalar(
             select(Attribution.sweep_id)
             .where(
-                Attribution.project_id == project_id,
+                Attribution.team_id == team_id,
                 Attribution.solution_id == solution_id,
                 Attribution.suite == suite,
                 Attribution.baseline_run_id.not_in(invalidated),
@@ -53,7 +53,7 @@ class AttributionRepo:
             self.session.scalars(
                 select(Attribution)
                 .where(
-                    Attribution.project_id == project_id,
+                    Attribution.team_id == team_id,
                     Attribution.solution_id == solution_id,
                     Attribution.suite == suite,
                     Attribution.sweep_id == latest_sweep_id,

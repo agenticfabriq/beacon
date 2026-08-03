@@ -13,7 +13,6 @@ runner = CliRunner()
 def test_ctx_show_starts_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BEACON_CTX_FILE", str(tmp_path / "c.json"))
     monkeypatch.delenv("BEACON_TEAM", raising=False)
-    monkeypatch.delenv("BEACON_PROJECT", raising=False)
     monkeypatch.delenv("BEACON_API_KEY", raising=False)
 
     result = runner.invoke(app, ["ctx", "show"])
@@ -26,9 +25,8 @@ def test_ctx_set_persists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     path = tmp_path / "c.json"
     monkeypatch.setenv("BEACON_CTX_FILE", str(path))
 
-    result = runner.invoke(app, ["ctx", "set", "--team", "t1", "--project", "p1"])
+    result = runner.invoke(app, ["ctx", "set", "--team", "t1"])
 
     assert result.exit_code == 0, result.stdout
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["team_id"] == "t1"
-    assert saved["project_id"] == "p1"

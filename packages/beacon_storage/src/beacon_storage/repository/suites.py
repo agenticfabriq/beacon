@@ -22,7 +22,6 @@ class SuiteRepo:
     def create(
         self,
         *,
-        project_id: UUID,
         team_id: UUID,
         name: str,
         description: str,
@@ -30,9 +29,8 @@ class SuiteRepo:
         suite_metadata: dict[str, Any],
         created_by: UUID,
     ) -> Suite:
-        """Persist a new suite under ``project_id`` and return it."""
+        """Persist a new suite under ``team_id`` and return it."""
         suite = Suite(
-            project_id=project_id,
             team_id=team_id,
             name=name,
             description=description,
@@ -44,25 +42,30 @@ class SuiteRepo:
         self.session.flush()
         return suite
 
+    def set_baseline(self, suite_id: UUID, run_id: UUID | None) -> None:
+        """Pin (or clear) the reference run every other run is read against."""
+        suite = self.get(suite_id)
+        if suite is not None:
+            suite.baseline_run_id = run_id
+            self.session.flush()
+
     def get(self, suite_id: UUID) -> Suite | None:
         """Return the suite with id ``suite_id`` or None."""
         return self.session.get(Suite, suite_id)
 
-    def get_by_project_and_name(self, project_id: UUID, name: str) -> Suite | None:
-        """Return the suite identified by ``(project_id, name)`` or None."""
+    def get_by_team_and_name(self, team_id: UUID, name: str) -> Suite | None:
+        """Return the suite identified by ``(team_id, name)`` or None."""
         return self.session.scalar(
             select(Suite).where(
-                Suite.project_id == project_id,
+                Suite.team_id == team_id,
                 Suite.name == name,
             )
         )
 
-    def list_for_project(self, project_id: UUID) -> list[Suite]:
-        """Return suites under ``project_id`` ordered by name."""
+    def list_for_team(self, team_id: UUID) -> list[Suite]:
+        """Return suites owned by ``team_id`` ordered by name."""
         return list(
-            self.session.scalars(
-                select(Suite).where(Suite.project_id == project_id).order_by(Suite.name)
-            )
+            self.session.scalars(select(Suite).where(Suite.team_id == team_id).order_by(Suite.name))
         )
 
     def add_items(self, *, suite_id: UUID, item_ids: list[UUID]) -> int:

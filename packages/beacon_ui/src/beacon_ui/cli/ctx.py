@@ -15,7 +15,6 @@ DEFAULT_API_BASE = "http://localhost:8000"
 @dataclass
 class Context:
     team_id: str | None = None
-    project_id: str | None = None
     api_base: str = DEFAULT_API_BASE
     api_key: str | None = None
 
@@ -41,15 +40,12 @@ def load_context(*, path: Path | None = None) -> Context:
     api_base = data.get("api_base")
     ctx = Context(
         team_id=data.get("team_id") if isinstance(data.get("team_id"), str) else None,
-        project_id=data.get("project_id") if isinstance(data.get("project_id"), str) else None,
         api_base=api_base if isinstance(api_base, str) else DEFAULT_API_BASE,
         api_key=data.get("api_key") if isinstance(data.get("api_key"), str) else None,
     )
 
     if team_id := os.environ.get("BEACON_TEAM"):
         ctx.team_id = team_id
-    if project_id := os.environ.get("BEACON_PROJECT"):
-        ctx.project_id = project_id
     if api_base := os.environ.get("BEACON_API_BASE"):
         ctx.api_base = api_base
     if api_key := os.environ.get("BEACON_API_KEY"):

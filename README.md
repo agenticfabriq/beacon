@@ -14,21 +14,25 @@ verdict is computed here.
 ## The flow
 
 ```
-  1. register        POST /v1/projects/{id}/runs
+  1. register        POST /v1/suites/{suite_id}/runs
      a run           declare your system, version, model and config
                      -> run_id
                                 │
   2. execute         your runner, your hardware, your model.
      elsewhere       beacon is not involved and does not want to be
                                 │
-  3. push            POST /v1/projects/{id}/runs/{run_id}/results   (per item)
-     outputs         POST /v1/projects/{id}/runs/{run_id}/complete
+  3. push            POST /v1/runs/{run_id}/results   (per item)
+     outputs         POST /v1/runs/{run_id}/complete
                      beacon grades each one on arrival
                                 │
-  4. read            GET  .../runs/{run_id}/results         which went which way
-     the answer      GET  .../runs/{run_id}/results/{item}  yours beside gold
-                     GET  .../projects/{id}/attribution     what each layer did
+  4. read            GET  /v1/runs/{run_id}/results          which went which way
+     the answer      GET  /v1/runs/{run_id}/results/{item}   yours beside gold
+                     GET  /v1/suites/{suite_id}/attribution  what each layer did
 ```
+
+Two levels, no more: a **team** is the access boundary, a **suite** is the
+benchmark. Runs hang off the benchmark, and each benchmark can pin one run as
+the reference everything else is read against.
 
 Four things that shape the whole design:
 
@@ -119,9 +123,9 @@ talks to the API using the context from `beacon login`.
 |---|---|
 | `beacon login` | Authenticate and store credentials in `~/.beacon/ctx.json` |
 | `beacon ctx` | Show, set, or clear that context |
-| `beacon teams` / `projects` | List and create |
+| `beacon teams` | List teams |
 | `beacon suts register` \| `list` | Register a system under test from a Python file |
-| `beacon suites create` | Create a suite — the set of questions a run is scored over |
+| `beacon suites create` | Create a benchmark — the set of questions a run is scored over |
 | `beacon eval run` | Register a run for a solution and suite |
 | `beacon attribution sweep` \| `show` | Leave-one-out layer sweep, and its latest snapshot |
 | `beacon benchmarks list` \| `download` \| `ingest` | Benchmark adapters and their data |
@@ -141,7 +145,7 @@ A runner that writes JSONL rather than calling the API can use:
 ```bash
 BEACON_API_KEY=bcn_... DATABASE_URL=... \
 uv run python scripts/load_eval_reports.py \
-  --project <uuid> --solution <uuid> --suite <uuid> \
+  --solution <uuid> --suite <uuid> \
   --manifest reports.json --reports-dir path/to/reports
 ```
 
@@ -203,7 +207,7 @@ change has to be argued.
 | `beacon_registry` | Suites and item selectors |
 | `beacon_benchmarks` | Benchmark adapters, and the importer for curated gold |
 | `beacon_workers` | Retention |
-| `beacon_ui` | FastAPI routes, CLI, Streamlit dashboard |
+| `beacon_ui` | FastAPI routes, CLI, and the single-page web UI |
 | `scripts` | Sweep driver, benchmark ingest, eval-report loader, repo guard |
 
 ## Notes

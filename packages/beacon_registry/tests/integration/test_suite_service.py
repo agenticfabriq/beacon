@@ -9,7 +9,7 @@ import pytest
 from beacon_registry.errors import DuplicateSuiteError, SuiteNotFoundError
 from beacon_registry.suites import SuiteService
 from beacon_storage.models.eval_items import EvalItemTier
-from beacon_storage.models.tenancy import Project, Team, User
+from beacon_storage.models.tenancy import Team, User
 from beacon_storage.repository.eval_items import EvalItemRepo
 
 if TYPE_CHECKING:
@@ -22,15 +22,12 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def _ctx(session: Session) -> tuple[Team, User, Project]:
+def _ctx(session: Session) -> tuple[Team, User]:
     team = Team(name="ss-team")
     user = User(email="ss@example.com", name="S")
     session.add_all([team, user])
     session.flush()
-    project = Project(team_id=team.id, name="ss-proj", created_by=user.id)
-    session.add(project)
-    session.flush()
-    return team, user, project
+    return team, user
 
 
 def _make_items(
@@ -59,10 +56,9 @@ def _make_items(
     return item_ids
 
 
-def test_create_suite(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_create_suite(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     suite = SuiteService(session).create(
-        project_id=project.id,
         team_id=team.id,
         name="curated-50",
         description="d",
@@ -74,11 +70,10 @@ def test_create_suite(session: Session, _ctx: tuple[Team, User, Project]) -> Non
     assert suite.name == "curated-50"
 
 
-def test_duplicate_suite_name_raises(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_duplicate_suite_name_raises(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     service = SuiteService(session)
     service.create(
-        project_id=project.id,
         team_id=team.id,
         name="dupe",
         description="",
@@ -90,7 +85,6 @@ def test_duplicate_suite_name_raises(session: Session, _ctx: tuple[Team, User, P
 
     with pytest.raises(DuplicateSuiteError):
         service.create(
-            project_id=project.id,
             team_id=team.id,
             name="dupe",
             description="",
@@ -100,12 +94,11 @@ def test_duplicate_suite_name_raises(session: Session, _ctx: tuple[Team, User, P
         )
 
 
-def test_add_items_idempotent(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_add_items_idempotent(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     suite_service = SuiteService(session)
     item_repo = EvalItemRepo(session)
     suite = suite_service.create(
-        project_id=project.id,
         team_id=team.id,
         name="x",
         description="",
@@ -123,11 +116,10 @@ def test_add_items_idempotent(session: Session, _ctx: tuple[Team, User, Project]
     assert len(suite_service.list_item_ids(suite.id)) == 3
 
 
-def test_list_suites_for_project(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_list_suites_for_project(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     service = SuiteService(session)
     service.create(
-        project_id=project.id,
         team_id=team.id,
         name="b",
         description="",
@@ -136,7 +128,6 @@ def test_list_suites_for_project(session: Session, _ctx: tuple[Team, User, Proje
         created_by=user.id,
     )
     service.create(
-        project_id=project.id,
         team_id=team.id,
         name="a",
         description="",
@@ -145,7 +136,7 @@ def test_list_suites_for_project(session: Session, _ctx: tuple[Team, User, Proje
         created_by=user.id,
     )
 
-    names = [suite.name for suite in service.list_for_project(project.id)]
+    names = [suite.name for suite in service.list_for_team(team.id)]
 
     assert names == ["a", "b"]
 
@@ -155,12 +146,11 @@ def test_get_suite_not_found_raises(session: Session) -> None:
         SuiteService(session).get_or_raise(uuid4())
 
 
-def test_replace_items_overwrites(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_replace_items_overwrites(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     suite_service = SuiteService(session)
     item_repo = EvalItemRepo(session)
     suite = suite_service.create(
-        project_id=project.id,
         team_id=team.id,
         name="cur",
         description="",

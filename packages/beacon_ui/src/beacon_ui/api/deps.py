@@ -12,10 +12,11 @@ from beacon_iam.errors import AuthenticationError
 from beacon_iam.permissions import Permission, effective_permissions
 from beacon_iam.service.users import UserService
 from beacon_storage.db import make_engine, make_session_factory
-from beacon_storage.models.tenancy import ScopeKind, User  # noqa: TC002
+from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.api_keys import ApiKeyRepo
 from beacon_storage.repository.memberships import MembershipRepo
-from beacon_storage.repository.projects import ProjectRepo
+from beacon_storage.repository.runs import RunRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from beacon_storage.rls import set_current_user
@@ -27,7 +28,7 @@ from beacon_ui.api.config import ApiConfig
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from beacon_storage.models.tenancy import Project, Team
+    from beacon_storage.models.tenancy import Team
     from sqlalchemy.orm import sessionmaker
 
 _factory: sessionmaker[Session] | None = None
@@ -110,25 +111,19 @@ def get_team_or_404(
     return team
 
 
-def get_project_or_404(
-    project_id: Annotated[UUID, Path()],
-    session: Annotated[Session, Depends(get_session)],
-) -> Project:
-    """Load the project referenced by the path parameter or raise 404."""
-    project = ProjectRepo(session).get(project_id)
-    if project is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"project {project_id} not found")
-    return project
-
-
 def require_permission(
     permission: Permission,
     *,
     scope_kind: str,
     path_param: str | None = None,
 ) -> Callable[..., User]:
-    """Require the current user to hold a permission for a path-scoped resource."""
-    target_scope = ScopeKind(scope_kind)
+    """Require ``permission`` within the team that owns the path's resource.
+
+    ``scope_kind`` names what the path identifies — "team", "suite" or "run" —
+    and the dependency resolves it to the owning team. Permissions themselves
+    are team-scoped: the team is the access boundary, and there is no narrower
+    scope to check.
+    """
     resolved_path_param = path_param or f"{scope_kind}_id"
 
     def _dependency(
@@ -142,23 +137,29 @@ def require_permission(
                 status.HTTP_400_BAD_REQUEST,
                 f"missing path param {resolved_path_param}",
             )
-
         scope_id = UUID(str(raw_scope_id))
-        project_team_id: UUID | None = None
-        if target_scope == ScopeKind.PROJECT:
-            project = ProjectRepo(session).get(scope_id)
-            if project is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, f"project {scope_id} not found")
-            project_team_id = project.team_id
-        elif target_scope == ScopeKind.TEAM and TeamRepo(session).get(scope_id) is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, f"team {scope_id} not found")
+
+        if scope_kind == "team":
+            if TeamRepo(session).get(scope_id) is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"team {scope_id} not found")
+            team_id = scope_id
+        elif scope_kind == "suite":
+            suite = SuiteRepo(session).get(scope_id)
+            if suite is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"suite {scope_id} not found")
+            team_id = suite.team_id
+        elif scope_kind == "run":
+            run = RunRepo(session).get(scope_id)
+            if run is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {scope_id} not found")
+            team_id = run.team_id
+        else:  # pragma: no cover - a route author error, not a request error
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "bad scope_kind")
 
         permissions = effective_permissions(
             user.id,
             MembershipRepo(session).list_for_user(user.id),
-            target_scope_kind=target_scope,
-            target_scope_id=scope_id,
-            target_project_team_id=project_team_id,
+            team_id=team_id,
         )
         if permission not in permissions:
             raise HTTPException(
@@ -167,19 +168,18 @@ def require_permission(
             )
         return user
 
-    signature = inspect.signature(_dependency)
     parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind is not inspect.Parameter.VAR_KEYWORD
-    ]
-    parameters.append(
         inspect.Parameter(
-            resolved_path_param,
+            "session",
             inspect.Parameter.KEYWORD_ONLY,
-            default=Path(...),
-            annotation=UUID,
-        )
-    )
-    _dependency.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
+            annotation=Annotated[Session, Depends(get_session)],
+        ),
+        inspect.Parameter(
+            "user",
+            inspect.Parameter.KEYWORD_ONLY,
+            annotation=Annotated[User, Depends(get_current_user)],
+        ),
+        inspect.Parameter(resolved_path_param, inspect.Parameter.KEYWORD_ONLY, annotation=UUID),
+    ]
+    _dependency.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
     return _dependency

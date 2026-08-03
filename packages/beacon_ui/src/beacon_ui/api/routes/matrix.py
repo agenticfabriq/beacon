@@ -19,7 +19,7 @@ from beacon_storage.models.runs import Result, Run, Verdict
 from beacon_storage.models.solutions import Solution
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.suites import SuiteRepo
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_session, require_permission
@@ -31,7 +31,7 @@ from beacon_ui.api.schemas.matrix import (
     SuiteItemRowOut,
 )
 
-router = APIRouter(prefix="/v1/projects", tags=["matrix"])
+router = APIRouter(prefix="/v1", tags=["matrix"])
 
 _GRADED = ("PASS", "FAIL", "DEFER")
 
@@ -50,31 +50,25 @@ def _rate(part: int, whole: int) -> float | None:
 
 
 @router.get(
-    "/{project_id}/results-matrix",
+    "/suites/{suite_id}/results-matrix",
     response_model=MatrixOut,
     summary="Aggregate results, one row per system · version · model · config",
 )
-@requires(Permission.PROJECT_VIEW)
+@requires(Permission.EVAL_VIEW)
 def results_matrix(
-    project_id: UUID,
+    suite_id: UUID,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_VIEW, scope_kind="suite")),
     ],
     session: Annotated[Session, Depends(get_session)],
-    suite_id: UUID | None = None,
     difficulty: Annotated[str | None, Query()] = None,
 ) -> MatrixOut:
     """Group valid runs by configuration identity and aggregate their results."""
     filters: list[sa.ColumnElement[bool]] = [
-        Run.project_id == project_id,
+        Run.suite_id == suite_id,
         Run.invalidated_at.is_(None),
     ]
-    if suite_id is not None:
-        suite = SuiteRepo(session).get(suite_id)
-        if suite is None or suite.project_id != project_id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, f"suite {suite_id} not found")
-        filters.append(Run.suite == suite.name)
 
     stmt = (
         sa.select(
@@ -180,17 +174,16 @@ def results_matrix(
 
 
 @router.get(
-    "/{project_id}/suites/{suite_id}/items",
+    "/suites/{suite_id}/items",
     response_model=SuiteItemListOut,
     summary="The questions a benchmark scores against",
 )
-@requires(Permission.PROJECT_VIEW)
+@requires(Permission.EVAL_VIEW)
 def suite_items(
-    project_id: UUID,
     suite_id: UUID,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_VIEW, scope_kind="suite")),
     ],
     session: Annotated[Session, Depends(get_session)],
     difficulty: Annotated[str | None, Query()] = None,
@@ -205,8 +198,7 @@ def suite_items(
     Visibility is the suite's own team plus shared items.
     """
     suite = SuiteRepo(session).get(suite_id)
-    if suite is None or suite.project_id != project_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"suite {suite_id} not found")
+    assert suite is not None  # the permission dependency 404s first
 
     base = sa.select(EvalItem).where(
         EvalItem.valid_to.is_(None),

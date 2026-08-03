@@ -20,10 +20,10 @@ from beacon_runner.types import (
 from beacon_storage.db import make_session_factory
 from beacon_storage.models.runs import HarnessMode, ResultStatus, RunStatus
 from beacon_storage.models.runs import VerdictOutcome as StorageOutcome
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 
@@ -59,8 +59,13 @@ def _bootstrap_dummy(
     with factory() as session:
         user = UserRepo(session).create(email=user_email, name=user_email.split("@")[0])
         team = TeamRepo(session).create(name=team_name)
-        project = ProjectRepo(session).create(
-            team_id=team.id, name=project_name, created_by=user.id
+        suite_record = SuiteRepo(session).create(
+            team_id=team.id,
+            name=project_name,
+            description="",
+            method="manual",
+            suite_metadata={},
+            created_by=user.id,
         )
         solution = SolutionRepo(session).create(
             team_id=team.id,
@@ -73,12 +78,12 @@ def _bootstrap_dummy(
             created_by=user.id,
         )
         session.commit()
-        return team.id, user.id, project.id, solution.id
+        return team.id, user.id, suite_record.id, solution.id
 
 
 def test_harness_runs_dummy_sut_end_to_end(engine: Engine) -> None:
     factory = make_session_factory(engine)
-    team_id, user_id, project_id, solution_record_id = _bootstrap_dummy(
+    team_id, user_id, suite_id, solution_record_id = _bootstrap_dummy(
         engine,
         user_email="h@example.com",
         team_name="harness-team",
@@ -96,7 +101,7 @@ def test_harness_runs_dummy_sut_end_to_end(engine: Engine) -> None:
 
     run_id = runner.run_single(
         team_id=team_id,
-        project_id=project_id,
+        suite_id=suite_id,
         user_id=user_id,
         solution_record_id=solution_record_id,
         items=_items(20),
@@ -116,7 +121,7 @@ def test_harness_runs_dummy_sut_end_to_end(engine: Engine) -> None:
 
 def test_harness_rejects_unsupported_mode(engine: Engine) -> None:
     factory = make_session_factory(engine)
-    team_id, user_id, project_id, solution_record_id = _bootstrap_dummy(
+    team_id, user_id, suite_id, solution_record_id = _bootstrap_dummy(
         engine,
         user_email="m@example.com",
         team_name="mode-team",
@@ -133,7 +138,7 @@ def test_harness_rejects_unsupported_mode(engine: Engine) -> None:
     with pytest.raises(HarnessModeNotSupportedError):
         runner.run_single(
             team_id=team_id,
-            project_id=project_id,
+            suite_id=suite_id,
             user_id=user_id,
             solution_record_id=solution_record_id,
             items=_items(1),
@@ -179,7 +184,14 @@ def test_a_non_eval_mode_runs_the_same_loop_and_honours_pass_idx(engine: Engine)
     with factory() as session:
         user = UserRepo(session).create(email="pg@example.com", name="PG")
         team = TeamRepo(session).create(name="pr-gate-team")
-        project = ProjectRepo(session).create(team_id=team.id, name="pgp", created_by=user.id)
+        suite_record = SuiteRepo(session).create(
+            team_id=team.id,
+            name="pgp",
+            description="",
+            method="manual",
+            suite_metadata={},
+            created_by=user.id,
+        )
         solution = SolutionRepo(session).create(
             team_id=team.id,
             solution_id="pr-gate",
@@ -191,10 +203,10 @@ def test_a_non_eval_mode_runs_the_same_loop_and_honours_pass_idx(engine: Engine)
             created_by=user.id,
         )
         session.commit()
-        team_id, user_id, project_id, solution_record_id = (
+        team_id, user_id, suite_id, solution_record_id = (
             team.id,
             user.id,
-            project.id,
+            suite_record.id,
             solution.id,
         )
 
@@ -208,7 +220,7 @@ def test_a_non_eval_mode_runs_the_same_loop_and_honours_pass_idx(engine: Engine)
 
     run_id = runner.run_single(
         team_id=team_id,
-        project_id=project_id,
+        suite_id=suite_id,
         user_id=user_id,
         solution_record_id=solution_record_id,
         items=_items(2),
@@ -231,7 +243,7 @@ def test_a_non_eval_mode_runs_the_same_loop_and_honours_pass_idx(engine: Engine)
 
 def test_harness_marks_failed_when_validate_config_returns_errors(engine: Engine) -> None:
     factory = make_session_factory(engine)
-    team_id, user_id, project_id, solution_record_id = _bootstrap_dummy(
+    team_id, user_id, suite_id, solution_record_id = _bootstrap_dummy(
         engine,
         user_email="v@example.com",
         team_name="val-team",
@@ -253,7 +265,7 @@ def test_harness_marks_failed_when_validate_config_returns_errors(engine: Engine
     with pytest.raises(SutValidationError):
         runner.run_single(
             team_id=team_id,
-            project_id=project_id,
+            suite_id=suite_id,
             user_id=user_id,
             solution_record_id=solution_record_id,
             items=_items(1),
@@ -296,7 +308,14 @@ def test_harness_continues_after_individual_item_error(engine: Engine) -> None:
     with factory() as session:
         user = UserRepo(session).create(email="f@example.com", name="F")
         team = TeamRepo(session).create(name="flaky-team")
-        project = ProjectRepo(session).create(team_id=team.id, name="fp", created_by=user.id)
+        suite_record = SuiteRepo(session).create(
+            team_id=team.id,
+            name="fp",
+            description="",
+            method="manual",
+            suite_metadata={},
+            created_by=user.id,
+        )
         solution = SolutionRepo(session).create(
             team_id=team.id,
             solution_id="flaky",
@@ -308,10 +327,10 @@ def test_harness_continues_after_individual_item_error(engine: Engine) -> None:
             created_by=user.id,
         )
         session.commit()
-        team_id, user_id, project_id, solution_record_id = (
+        team_id, user_id, suite_id, solution_record_id = (
             team.id,
             user.id,
-            project.id,
+            suite_record.id,
             solution.id,
         )
     registry = SutRegistry()
@@ -325,7 +344,7 @@ def test_harness_continues_after_individual_item_error(engine: Engine) -> None:
 
     run_id = runner.run_single(
         team_id=team_id,
-        project_id=project_id,
+        suite_id=suite_id,
         user_id=user_id,
         solution_record_id=solution_record_id,
         items=_items(3),

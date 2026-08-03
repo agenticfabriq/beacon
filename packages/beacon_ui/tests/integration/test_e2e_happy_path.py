@@ -1,4 +1,4 @@
-"""Full happy path: admin login, team creation, member project creation."""
+"""Full happy path: admin login, team creation, team-admin benchmark creation."""
 
 from unittest.mock import Mock, patch
 from uuid import UUID
@@ -68,28 +68,28 @@ def test_full_admin_to_member_flow(
         user_id=member.id,
         scope_kind=ScopeKind.TEAM,
         scope_id=UUID(team_id),
-        role=Role.TEAM_MEMBER,
+        role=Role.TEAM_ADMIN,
     )
     session.commit()
 
     response = api_client.post(
-        f"/v1/projects?team_id={team_id}",
-        json={"name": "schema-linker-tuning"},
+        f"/v1/teams/{team_id}/suites",
+        json={"name": "schema-linker-tuning", "method": "manual"},
         headers={"X-API-Key": member_key},
     )
     assert response.status_code == 201, response.text
-    project_id = response.json()["id"]
+    assert response.json()["team_id"] == team_id
 
     response = api_client.get("/v1/me", headers={"X-API-Key": member_key})
     assert response.status_code == 200, response.text
     body = response.json()
-    project_role = next(
+    team_role = next(
         (
             membership
             for membership in body["memberships"]
-            if membership["scope_kind"] == "project" and membership["scope_id"] == project_id
+            if membership["scope_kind"] == "team" and membership["scope_id"] == team_id
         ),
         None,
     )
-    assert project_role is not None
-    assert project_role["role"] == "project_owner"
+    assert team_role is not None
+    assert team_role["role"] == "team_admin"

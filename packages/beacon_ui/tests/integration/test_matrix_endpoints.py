@@ -31,7 +31,6 @@ SUITE = "matrix_v1"
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
     alice_id: UUID
     alice_key: str
 
@@ -55,7 +54,6 @@ def seeded(session: Session, world: _World) -> Seeded:
         created_by=world.alice_id,
     )
     suite = SuiteRepo(session).create(
-        project_id=world.chat_to_data_id,
         team_id=world.acme_team_id,
         name=SUITE,
         description="",
@@ -80,7 +78,7 @@ def seeded(session: Session, world: _World) -> Seeded:
     def _run(model: str, outcomes: list[VerdictOutcome | None], *, pass_idx: int) -> str:
         run = RunRepo(session).create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
+            suite_id=suite.id,
             solution_id=solution.id,
             suite=SUITE,
             dataset_version="v1",
@@ -101,7 +99,6 @@ def seeded(session: Session, world: _World) -> Seeded:
                 continue
             ResultRepo(session).create(
                 team_id=world.acme_team_id,
-                project_id=world.chat_to_data_id,
                 run_id=run.id,
                 item_id=str(item.item_id),
                 attempt_idx=0,
@@ -131,8 +128,8 @@ def seeded(session: Session, world: _World) -> Seeded:
 
 def _matrix(api_client: TestClient, world: _World, seeded: Seeded, **params: str) -> dict[str, Any]:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/results-matrix",
-        params={"suite_id": seeded.suite_id, **params},
+        f"/v1/suites/{seeded.suite_id}/results-matrix",
+        params=params,
         headers={"X-API-Key": world.alice_key},
     )
     assert response.status_code == 200, response.text
@@ -212,7 +209,7 @@ def test_the_questions_listing_carries_facets_and_tolerance(
     api_client: TestClient, world: _World, seeded: Seeded
 ) -> None:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/suites/{seeded.suite_id}/items",
+        f"/v1/suites/{seeded.suite_id}/items",
         headers={"X-API-Key": world.alice_key},
     )
 
@@ -229,7 +226,7 @@ def test_the_questions_listing_filters_by_difficulty(
     api_client: TestClient, world: _World, seeded: Seeded
 ) -> None:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/suites/{seeded.suite_id}/items",
+        f"/v1/suites/{seeded.suite_id}/items",
         params={"difficulty": "challenging"},
         headers={"X-API-Key": world.alice_key},
     )
@@ -251,14 +248,13 @@ def test_got_facts_is_reported_beside_exact_match(
     from sqlalchemy import select
 
     results = session.scalars(
-        select(Result).where(Result.project_id == world.chat_to_data_id)
+        select(Result).where(Result.team_id == world.acme_team_id)
     ).all()
     for result in results:
         if str(result.outcome) not in ("PASS", "FAIL"):
             continue
         VerdictRepo(session).create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
             result_id=result.id,
             grader="execution_grounded_sql",
             grader_version="v1",

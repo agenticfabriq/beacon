@@ -14,8 +14,8 @@ from beacon_graders.llm.anthropic_provider import AnthropicLLMProvider
 from beacon_graders.llm.provider import JudgeCache
 from beacon_storage.db import make_engine, make_session_factory
 from beacon_storage.models.runs import HarnessMode
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from beacon_storage.rls import set_current_user
@@ -155,7 +155,7 @@ def eval_group() -> None:
 
 
 @eval_group.command("run")
-@click.option("--project-id", required=True, type=click.UUID)
+@click.option("--suite-id", "suite_ref", required=True, type=click.UUID)
 @click.option("--as", "actor_email", required=True)
 @click.option("--solution-id", required=True)
 @click.option("--version", required=True)
@@ -185,7 +185,7 @@ def eval_group() -> None:
     help="Database the suite's execution graders run candidate and gold SQL against.",
 )
 def eval_run(
-    project_id: UUID,
+    suite_ref: UUID,
     actor_email: str,
     solution_id: str,
     version: str,
@@ -207,20 +207,20 @@ def eval_run(
         if actor is None:
             raise click.ClickException(f"user {actor_email} not found")
         set_current_user(session, actor.id)
-        project = ProjectRepo(session).get(project_id)
-        if project is None:
-            raise click.ClickException(f"project {project_id} not found")
+        suite_record = SuiteRepo(session).get(suite_ref)
+        if suite_record is None:
+            raise click.ClickException(f"suite {suite_ref} not found")
         solution = SolutionRepo(session).get_by_team_and_solution(
-            project.team_id,
+            suite_record.team_id,
             solution_id,
             version,
         )
         if solution is None:
             raise click.ClickException(
-                f"solution {solution_id}@{version} not registered for team {project.team_id}"
+                f"solution {solution_id}@{version} not registered for team {suite_record.team_id}"
             )
-        ids = (project.team_id, actor.id, project.id, solution.id)
-    team_id, user_id, project_record_id, solution_record_id = ids
+        ids = (suite_record.team_id, actor.id, suite_record.id, solution.id)
+    team_id, user_id, suite_record_id, solution_record_id = ids
 
     registry = default_registry()
     try:
@@ -248,7 +248,7 @@ def eval_run(
         try:
             run_id = runner.run_single(
                 team_id=team_id,
-                project_id=project_record_id,
+                suite_id=suite_record_id,
                 user_id=user_id,
                 solution_record_id=solution_record_id,
                 items=items,

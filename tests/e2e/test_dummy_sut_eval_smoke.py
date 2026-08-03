@@ -18,10 +18,10 @@ from beacon_storage.db import make_engine, make_session_factory
 from beacon_storage.models.runs import HarnessMode, ResultStatus, RunStatus, VerdictOutcome
 from beacon_storage.models.tenancy import Role, ScopeKind
 from beacon_storage.repository.memberships import MembershipRepo
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.traces import TraceRepo
 from beacon_storage.repository.users import UserRepo
@@ -115,21 +115,18 @@ def test_dummy_sut_eval_smoke(engine: Engine) -> None:
             scope_id=team.id,
             role=Role.TEAM_MEMBER,
         )
-        project = ProjectRepo(session).create(
+        suite_record = SuiteRepo(session).create(
             team_id=team.id,
-            name="e2e-proj",
+            name="dummy_smoke_v1",
+            description="",
+            method="manual",
+            suite_metadata={},
             created_by=runner_user.id,
-        )
-        MembershipRepo(session).grant(
-            user_id=runner_user.id,
-            scope_kind=ScopeKind.PROJECT,
-            scope_id=project.id,
-            role=Role.PROJECT_OWNER,
         )
         session.commit()
         team_id = team.id
         runner_id = runner_user.id
-        project_id = project.id
+        suite_id = suite_record.id
 
     with factory() as session:
         set_current_user(session, runner_id)
@@ -167,7 +164,7 @@ def test_dummy_sut_eval_smoke(engine: Engine) -> None:
     ]
     run_id: UUID = runner.run_single(
         team_id=team_id,
-        project_id=project_id,
+        suite_id=suite_id,
         user_id=runner_id,
         solution_record_id=solution_record_id,
         items=items,
@@ -212,4 +209,4 @@ def test_dummy_sut_eval_smoke(engine: Engine) -> None:
         _use_app_role(session)
         set_current_user(session, outsider_id)
         assert ResultRepo(session).list_for_run(run_id) == []
-        assert RunRepo(session).list_for_project(project_id) == []
+        assert RunRepo(session).list_for_suite(suite_id) == []

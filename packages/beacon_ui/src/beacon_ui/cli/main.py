@@ -9,7 +9,6 @@ from beacon_ui.cli.commands import attribution as attribution_cmd
 from beacon_ui.cli.commands import benchmarks as benchmarks_cmd
 from beacon_ui.cli.commands import ctx_cmd, eval_cmd
 from beacon_ui.cli.commands import login as login_cmd
-from beacon_ui.cli.commands import projects as projects_cmd
 from beacon_ui.cli.commands import suts as suts_cmd
 from beacon_ui.cli.commands import teams as teams_cmd
 from beacon_ui.cli.gold import gold_group
@@ -24,7 +23,6 @@ def app() -> None:
 app.add_command(login_cmd.login, name="login")
 app.add_command(ctx_cmd.cli, name="ctx")
 app.add_command(teams_cmd.cli, name="teams")
-app.add_command(projects_cmd.cli, name="projects")
 app.add_command(suts_cmd.cli, name="suts")
 app.add_command(eval_cmd.cli, name="eval")
 app.add_command(attribution_cmd.cli, name="attribution")

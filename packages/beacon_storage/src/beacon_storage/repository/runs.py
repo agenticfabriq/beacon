@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from beacon_storage.errors import DuplicateRunError
 from beacon_storage.models.runs import HarnessMode, Run, RunStatus
 
-_UNIQUE_RUN_CONSTRAINT = "uq_run_project_pass"
+_UNIQUE_RUN_CONSTRAINT = "uq_run_suite_pass"
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -25,8 +25,8 @@ class RunRepo:
         self,
         *,
         team_id: UUID,
-        project_id: UUID,
         solution_id: UUID,
+        suite_id: UUID,
         suite: str,
         dataset_version: str,
         mode: HarnessMode,
@@ -41,7 +41,7 @@ class RunRepo:
     ) -> Run:
         """Create a pending run for the given solution/suite and return it.
 
-        Run identity is ``(project_id, solution_id, suite, dataset_version,
+        Run identity is ``(suite_id, solution_id, dataset_version,
         mode, pass_idx, parent_sweep_id, sweep_arm)`` and the constraint treats
         NULLs as equal, so **repeating a run needs something to distinguish it**.
         Pick deliberately:
@@ -58,8 +58,8 @@ class RunRepo:
         """
         run = Run(
             team_id=team_id,
-            project_id=project_id,
             solution_id=solution_id,
+            suite_id=suite_id,
             suite=suite,
             dataset_version=dataset_version,
             mode=mode,
@@ -80,7 +80,7 @@ class RunRepo:
             if _UNIQUE_RUN_CONSTRAINT not in str(exc.orig):
                 raise
             raise DuplicateRunError(
-                f"a run already exists for project={project_id} solution={solution_id} "
+                f"a run already exists for suite={suite_id} solution={solution_id} "
                 f"suite={suite!r} dataset_version={dataset_version!r} mode={mode.value} "
                 f"pass_idx={pass_idx} parent_sweep_id={parent_sweep_id} "
                 f"sweep_arm={sweep_arm!r}. Pass a fresh parent_sweep_id (uuid7()) to "
@@ -153,33 +153,30 @@ class RunRepo:
         run.completed_at = datetime.now(UTC)
         self.session.flush()
 
-    def list_for_project(
+    def list_for_suite(
         self,
-        project_id: UUID,
+        suite_id: UUID,
         *,
         limit: int | None = None,
         offset: int = 0,
         solution_id: UUID | None = None,
-        suite: str | None = None,
         mode: HarnessMode | None = None,
         status: RunStatus | None = None,
         model_id: str | None = None,
         config_digest: str | None = None,
         include_invalidated: bool = False,
     ) -> list[Run]:
-        """Return runs in ``project_id`` filtered by optional facets, newest first.
+        """Return runs in ``suite_id`` filtered by optional facets, newest first.
 
         Invalidated runs are excluded unless asked for: a retired experiment
         that still showed up in the default listing would go on being read as a
         result.
         """
-        stmt = select(Run).where(Run.project_id == project_id)
+        stmt = select(Run).where(Run.suite_id == suite_id)
         if not include_invalidated:
             stmt = stmt.where(Run.invalidated_at.is_(None))
         if solution_id is not None:
             stmt = stmt.where(Run.solution_id == solution_id)
-        if suite is not None:
-            stmt = stmt.where(Run.suite == suite)
         if mode is not None:
             stmt = stmt.where(Run.mode == mode)
         if status is not None:

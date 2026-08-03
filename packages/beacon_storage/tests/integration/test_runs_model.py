@@ -17,7 +17,8 @@ from beacon_storage.models.runs import (
     VerdictOutcome,
 )
 from beacon_storage.models.solutions import Solution
-from beacon_storage.models.tenancy import Project, Team, User
+from beacon_storage.models.suites import Suite
+from beacon_storage.models.tenancy import Team, User
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -26,12 +27,19 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def _bootstrap(session: Session) -> tuple[Team, User, Project, Solution]:
+def _bootstrap(session: Session) -> tuple[Team, User, Suite, Solution]:
     t = Team(name="runs-team")
     u = User(email="runs@example.com", name="R")
     session.add_all([t, u])
     session.flush()
-    p = Project(team_id=t.id, name="proj", created_by=u.id)
+    p = Suite(
+        team_id=t.id,
+        name="proj",
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=u.id,
+    )
     session.add(p)
     session.flush()
     s = Solution(
@@ -50,11 +58,11 @@ def _bootstrap(session: Session) -> tuple[Team, User, Project, Solution]:
 
 
 @pytest.mark.integration
-def test_create_run(session: Session, _bootstrap: tuple[Team, User, Project, Solution]) -> None:
+def test_create_run(session: Session, _bootstrap: tuple[Team, User, Suite, Solution]) -> None:
     t, u, p, s = _bootstrap
     r = Run(
         team_id=t.id,
-        project_id=p.id,
+        suite_id=p.id,
         solution_id=s.id,
         suite="dummy_smoke_v1",
         dataset_version="v0",
@@ -73,12 +81,12 @@ def test_create_run(session: Session, _bootstrap: tuple[Team, User, Project, Sol
 
 @pytest.mark.integration
 def test_unique_run_per_pass(
-    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+    session: Session, _bootstrap: tuple[Team, User, Suite, Solution]
 ) -> None:
     t, u, p, s = _bootstrap
     common = {
         "team_id": t.id,
-        "project_id": p.id,
+        "suite_id": p.id,
         "solution_id": s.id,
         "suite": "s",
         "dataset_version": "v0",
@@ -99,14 +107,14 @@ def test_unique_run_per_pass(
 
 @pytest.mark.integration
 def test_sweep_arms_share_pass_idx_within_one_sweep(
-    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+    session: Session, _bootstrap: tuple[Team, User, Suite, Solution]
 ) -> None:
     """Two ablation arms of one sweep are distinct runs at the same pass_idx."""
     t, u, p, s = _bootstrap
     sweep_id = uuid7()
     common = {
         "team_id": t.id,
-        "project_id": p.id,
+        "suite_id": p.id,
         "solution_id": s.id,
         "suite": "s",
         "dataset_version": "v0",
@@ -132,13 +140,13 @@ def test_sweep_arms_share_pass_idx_within_one_sweep(
 
 @pytest.mark.integration
 def test_same_arm_twice_in_one_sweep_still_collides(
-    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+    session: Session, _bootstrap: tuple[Team, User, Suite, Solution]
 ) -> None:
     """The arm discriminator widens run identity; it does not disable the guard."""
     t, u, p, s = _bootstrap
     common = {
         "team_id": t.id,
-        "project_id": p.id,
+        "suite_id": p.id,
         "solution_id": s.id,
         "suite": "s",
         "dataset_version": "v0",
@@ -159,13 +167,13 @@ def test_same_arm_twice_in_one_sweep_still_collides(
 
 @pytest.mark.integration
 def test_null_sweep_arm_still_collides_for_standalone_runs(
-    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+    session: Session, _bootstrap: tuple[Team, User, Suite, Solution]
 ) -> None:
     """Existing (arm-less) run identity is unchanged: NULL arms are not distinct."""
     t, u, p, s = _bootstrap
     common = {
         "team_id": t.id,
-        "project_id": p.id,
+        "suite_id": p.id,
         "solution_id": s.id,
         "suite": "s",
         "dataset_version": "v0",
@@ -185,12 +193,12 @@ def test_null_sweep_arm_still_collides_for_standalone_runs(
 
 @pytest.mark.integration
 def test_result_and_verdict_cascade(
-    session: Session, _bootstrap: tuple[Team, User, Project, Solution]
+    session: Session, _bootstrap: tuple[Team, User, Suite, Solution]
 ) -> None:
     t, u, p, s = _bootstrap
     r = Run(
         team_id=t.id,
-        project_id=p.id,
+        suite_id=p.id,
         solution_id=s.id,
         suite="s",
         dataset_version="v0",
@@ -205,7 +213,6 @@ def test_result_and_verdict_cascade(
     session.flush()
     res = Result(
         team_id=t.id,
-        project_id=p.id,
         run_id=r.id,
         item_id="item-1",
         attempt_idx=0,
@@ -221,7 +228,6 @@ def test_result_and_verdict_cascade(
     session.flush()
     v = Verdict(
         team_id=t.id,
-        project_id=p.id,
         result_id=res.id,
         grader="dabstep_matcher",
         grader_version="v1",
@@ -233,7 +239,6 @@ def test_result_and_verdict_cascade(
     )
     tr = Trace(
         team_id=t.id,
-        project_id=p.id,
         result_id=res.id,
         step_tree={"name": "root", "level": "workflow", "children": []},
     )

@@ -12,7 +12,6 @@ pytestmark = pytest.mark.integration
 class _World(Protocol):
     acme_team_id: UUID
     globex_team_id: UUID
-    chat_to_data_id: UUID
     alice_id: UUID
     carol_id: UUID
     alice_key: str
@@ -43,22 +42,15 @@ def _setup_runnable(api_client: TestClient, session: Session, world: _World) -> 
     sut = _ensure_solution(session, world)
     session.commit()
 
-    attach_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/solutions",
-        headers={"X-API-Key": world.alice_key},
-        json={"solution_id": str(sut.id)},
-    )
-    assert attach_response.status_code in (200, 201), attach_response.text
-
     suite_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
         json={"name": "tiny-run-suite", "kind": "manual", "item_ids": []},
     )
     assert suite_response.status_code in (201, 409), suite_response.text
     if suite_response.status_code == 409:
         list_response = api_client.get(
-            f"/v1/projects/{world.chat_to_data_id}/suites",
+            f"/v1/teams/{world.acme_team_id}/suites",
             headers={"X-API-Key": world.alice_key},
         )
         suite_id = next(
@@ -73,11 +65,10 @@ def test_kick_off_run_returns_202(api_client: TestClient, world: _World, session
     solution_id, suite_id = _setup_runnable(api_client, session, world)
 
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {"k": 1},
         },
@@ -91,17 +82,14 @@ def test_kick_off_run_returns_202(api_client: TestClient, world: _World, session
     assert body["status"] in ("queued", "running")
 
 
-def test_contributor_can_kick_off_run(
-    api_client: TestClient, world: _World, session: Session
-) -> None:
+def test_member_can_kick_off_run(api_client: TestClient, world: _World, session: Session) -> None:
     solution_id, suite_id = _setup_runnable(api_client, session, world)
 
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.bob_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {"k": 1},
         },
@@ -116,28 +104,26 @@ def test_outsider_cannot_kick_off_run(
     solution_id, suite_id = _setup_runnable(api_client, session, world)
 
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.carol_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {"k": 1},
         },
     )
 
-    assert response.status_code == 403
+    assert response.status_code in (403, 404)
 
 
 def test_invalid_mode_rejected(api_client: TestClient, world: _World, session: Session) -> None:
     solution_id, suite_id = _setup_runnable(api_client, session, world)
 
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "NOT_A_MODE",
             "config": {},
         },
@@ -149,11 +135,10 @@ def test_invalid_mode_rejected(api_client: TestClient, world: _World, session: S
 def test_get_run_status(api_client: TestClient, world: _World, session: Session) -> None:
     solution_id, suite_id = _setup_runnable(api_client, session, world)
     create_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {},
         },
@@ -161,7 +146,7 @@ def test_get_run_status(api_client: TestClient, world: _World, session: Session)
     run_id = create_response.json()["run_id"]
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{run_id}",
+        f"/v1/runs/{run_id}",
         headers={"X-API-Key": world.alice_key},
     )
 
@@ -176,11 +161,10 @@ def test_get_run_status(api_client: TestClient, world: _World, session: Session)
 def test_list_runs(api_client: TestClient, world: _World, session: Session) -> None:
     solution_id, suite_id = _setup_runnable(api_client, session, world)
     create_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {},
         },
@@ -188,9 +172,9 @@ def test_list_runs(api_client: TestClient, world: _World, session: Session) -> N
     run_id = create_response.json()["run_id"]
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
-        params={"solution_id": solution_id, "suite_id": suite_id, "status": "queued"},
+        params={"solution_id": solution_id, "status": "queued"},
     )
 
     assert response.status_code == 200, response.text

@@ -16,9 +16,9 @@ from beacon_runner.registry import SutRegistry
 from beacon_runner.types import EvalItem, SolutionConfig
 from beacon_storage.db import make_session_factory
 from beacon_storage.models.runs import HarnessMode, Run, RunStatus
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from sqlalchemy import select
@@ -58,8 +58,13 @@ def _bootstrap(
     with factory() as session:
         user = UserRepo(session).create(email=f"{slug}@example.com", name=slug)
         team = TeamRepo(session).create(name=f"{slug}-team")
-        project = ProjectRepo(session).create(
-            team_id=team.id, name=f"{slug}-proj", created_by=user.id
+        project = SuiteRepo(session).create(
+            team_id=team.id,
+            name=f"{slug}-proj",
+            description="",
+            method="manual",
+            suite_metadata={},
+            created_by=user.id,
         )
         sut = DummySUT(owner_team_id=team.id)
         solution = SolutionRepo(session).create(
@@ -101,7 +106,7 @@ def _make_adapter(
 def test_loo_sweep_through_real_harness_persists_attributions(engine: Engine) -> None:
     """The shipped attribution engine drives the shipped harness end to end (B2)."""
     factory = make_session_factory(engine)
-    team_id, user_id, project_id, solution_record_id = _bootstrap(engine, slug="loo")
+    team_id, user_id, suite_id, solution_record_id = _bootstrap(engine, slug="loo")
     adapter = _make_adapter(engine, team_id=team_id, user_id=user_id)
     sut = DummySUT(owner_team_id=team_id)
     k = 2
@@ -118,7 +123,7 @@ def test_loo_sweep_through_real_harness_persists_attributions(engine: Engine) ->
             suite=SUITE,
             dataset_version=DATASET_VERSION,
             K=k,
-            project_id=project_id,
+            suite_id=suite_id,
             team_id=team_id,
             solution_id=solution_record_id,
             harness_runner=adapter,
@@ -148,7 +153,7 @@ def test_loo_sweep_through_real_harness_persists_attributions(engine: Engine) ->
 
 def test_adapter_lists_persisted_results_for_a_run(engine: Engine) -> None:
     """list_results_for_run returns the rows the metrics helpers duck-type."""
-    team_id, user_id, project_id, solution_record_id = _bootstrap(engine, slug="listres")
+    team_id, user_id, suite_id, solution_record_id = _bootstrap(engine, slug="listres")
     adapter = _make_adapter(engine, team_id=team_id, user_id=user_id)
     sut = DummySUT(owner_team_id=team_id)
 
@@ -165,7 +170,7 @@ def test_adapter_lists_persisted_results_for_a_run(engine: Engine) -> None:
         mode="NIGHTLY_LOO",
         pass_idx=1,
         parent_sweep_id=solution_record_id,
-        project_id=project_id,
+        suite_id=suite_id,
         team_id=team_id,
         solution_id=solution_record_id,
         sweep_arm="baseline",
@@ -183,7 +188,7 @@ def test_adapter_lists_persisted_results_for_a_run(engine: Engine) -> None:
 
 def test_adapter_rejects_sut_that_does_not_match_the_solution_record(engine: Engine) -> None:
     """The engine's sut argument is cross-checked, not silently ignored."""
-    team_id, user_id, project_id, solution_record_id = _bootstrap(
+    team_id, user_id, suite_id, solution_record_id = _bootstrap(
         engine,
         slug="mismatch",
         version="9.9.9",
@@ -200,7 +205,7 @@ def test_adapter_rejects_sut_that_does_not_match_the_solution_record(engine: Eng
             mode="NIGHTLY_LOO",
             pass_idx=0,
             parent_sweep_id=solution_record_id,
-            project_id=project_id,
+            suite_id=suite_id,
             team_id=team_id,
             solution_id=solution_record_id,
             sweep_arm="baseline",

@@ -17,21 +17,21 @@ pytestmark = pytest.mark.integration
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
+    acme_suite_id: UUID
     acme_solution_id: UUID
     alice_id: UUID
     alice_key: str
 
 
 def _seed_attributions(session: Session, world: _World) -> UUID:
-    suite = SuiteRepo(session).get_by_project_and_name(world.chat_to_data_id, "bird_minidev_v2")
+    suite = SuiteRepo(session).get(world.acme_suite_id)
     assert suite is not None
 
     run_repo = RunRepo(session)
     sweep_id = uuid7()
     baseline = run_repo.create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=suite.id,
         solution_id=world.acme_solution_id,
         suite=suite.name,
         dataset_version="v2",
@@ -43,7 +43,7 @@ def _seed_attributions(session: Session, world: _World) -> UUID:
     )
     ablated = run_repo.create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=suite.id,
         solution_id=world.acme_solution_id,
         suite=suite.name,
         dataset_version="v2",
@@ -64,7 +64,6 @@ def _seed_attributions(session: Session, world: _World) -> UUID:
             Attribution(
                 attribution_id=uuid7(),
                 sweep_id=sweep_id,
-                project_id=world.chat_to_data_id,
                 team_id=world.acme_team_id,
                 solution_id=world.acme_solution_id,
                 solution_version="0.1",
@@ -131,14 +130,13 @@ def test_get_attribution_latest_snapshot(
     suite_id = _seed_attributions(session, world)
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/attribution",
+        f"/v1/suites/{suite_id}/attribution",
         headers={"X-API-Key": world.alice_key},
-        params={"sut": str(world.acme_solution_id), "suite": str(suite_id)},
+        params={"sut": str(world.acme_solution_id)},
     )
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["project_id"] == str(world.chat_to_data_id)
     assert body["solution_id"] == str(world.acme_solution_id)
     assert body["suite_id"] == str(suite_id)
     assert body["supported"] is True
@@ -157,15 +155,15 @@ def test_get_attribution_layerless_solution_is_unsupported(
     world: _World,
     session: Session,
 ) -> None:
-    suite = SuiteRepo(session).get_by_project_and_name(world.chat_to_data_id, "bird_minidev_v2")
+    suite = SuiteRepo(session).get(world.acme_suite_id)
     assert suite is not None
     solution = _ensure_layerless_solution(session, world)
     session.commit()
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/attribution",
+        f"/v1/suites/{suite.id}/attribution",
         headers={"X-API-Key": world.alice_key},
-        params={"sut": str(solution.id), "suite": str(suite.id)},
+        params={"sut": str(solution.id)},
     )
 
     assert response.status_code == 200, response.text

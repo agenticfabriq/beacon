@@ -28,7 +28,7 @@ _ARMS = ("baseline", "no_ontology", "no_retry_loop")
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
+    acme_suite_id: UUID
     alice_id: UUID
     alice_key: str
 
@@ -50,7 +50,7 @@ def _seed_sweep(session: Session, world: _World) -> UUID:
     for arm in _ARMS:
         run = repo.create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
+            suite_id=world.acme_suite_id,
             solution_id=solution.id,
             suite=SUITE,
             dataset_version="v0",
@@ -58,7 +58,7 @@ def _seed_sweep(session: Session, world: _World) -> UUID:
             pass_idx=0,
             parent_sweep_id=sweep_id,
             sweep_arm=arm,
-            config={"_beacon_suite_id": str(world.chat_to_data_id)},
+            config={},
             created_by=world.alice_id,
         )
         repo.mark_completed(run.id)
@@ -68,7 +68,7 @@ def _seed_sweep(session: Session, world: _World) -> UUID:
 
 def _list_runs(api_client: TestClient, world: _World, **params: str) -> list[dict[str, object]]:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{world.acme_suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         params=params,
     )
@@ -125,13 +125,13 @@ def test_a_non_sweep_run_reports_no_arm(
     )
     run = RunRepo(session).create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=world.acme_suite_id,
         solution_id=solution.id,
         suite="plain_v1",
         dataset_version="v0",
         mode=HarnessMode.EVAL,
         pass_idx=0,
-        config={"_beacon_suite_id": str(world.chat_to_data_id)},
+        config={},
         created_by=world.alice_id,
     )
     session.commit()

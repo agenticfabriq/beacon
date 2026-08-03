@@ -17,8 +17,6 @@ from beacon_storage.models.tenancy import ApiKey, Role, ScopeKind
 from beacon_storage.repository.api_keys import ApiKeyRepo
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.memberships import MembershipRepo
-from beacon_storage.repository.project_solutions import ProjectSolutionRepo
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
@@ -32,7 +30,7 @@ if TYPE_CHECKING:
     from beacon_storage.models.eval_items import EvalItem
     from beacon_storage.models.solutions import Solution
     from beacon_storage.models.suites import Suite
-    from beacon_storage.models.tenancy import Project, Team, User
+    from beacon_storage.models.tenancy import Team, User
     from sqlalchemy.orm import Session
 
 DEMO_SUITE = "bird_minidev_v2"
@@ -46,8 +44,6 @@ DATASET_VERSION = "demo-v1"
 class DemoSeedSummary:
     acme_team_id: UUID
     globex_team_id: UUID
-    acme_project_id: UUID
-    globex_project_id: UUID
     eval_item_count: int
     curated_item_count: int
     baseline_run_id: UUID
@@ -88,9 +84,7 @@ def seed(api_base: str, database_url: str | None) -> None:
     click.echo("Demo seed complete.")
     click.echo(f"api_base={api_base}")
     click.echo(f"acme_team_id={summary.acme_team_id}")
-    click.echo(f"acme_project_id={summary.acme_project_id}")
     click.echo(f"globex_team_id={summary.globex_team_id}")
-    click.echo(f"globex_project_id={summary.globex_project_id}")
     click.echo(f"eval_items={summary.eval_item_count}")
     click.echo(f"curated_items={summary.curated_item_count}")
     click.echo(f"baseline_run_id={summary.baseline_run_id}")
@@ -125,38 +119,6 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
         role=Role.TEAM_ADMIN,
         granted_by=alice.id,
     )
-
-    acme_project = _ensure_project(
-        session,
-        team_id=acme.id,
-        name="chat-to-data-v3.2",
-        description="Demo Chat-to-Data project",
-        created_by=alice.id,
-    )
-    globex_project = _ensure_project(
-        session,
-        team_id=globex.id,
-        name="globex-sql-v1.4",
-        description="Demo Globex SQL comparison project",
-        created_by=carol.id,
-    )
-    _ensure_membership(
-        memberships,
-        user_id=alice.id,
-        scope_kind=ScopeKind.PROJECT,
-        scope_id=acme_project.id,
-        role=Role.PROJECT_OWNER,
-        granted_by=alice.id,
-    )
-    _ensure_membership(
-        memberships,
-        user_id=carol.id,
-        scope_kind=ScopeKind.PROJECT,
-        scope_id=globex_project.id,
-        role=Role.PROJECT_OWNER,
-        granted_by=alice.id,
-    )
-
     acme_solution = _ensure_solution(
         session,
         team=acme,
@@ -165,7 +127,7 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
         summary="Demo Chat-to-Data SUT",
         created_by=alice.id,
     )
-    globex_solution = _ensure_solution(
+    _ensure_solution(
         session,
         team=globex,
         solution_id="globex-sql-v1.4",
@@ -173,21 +135,9 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
         summary="Demo Globex SQL SUT",
         created_by=carol.id,
     )
-    ProjectSolutionRepo(session).link(
-        team_id=acme.id,
-        project_id=acme_project.id,
-        solution_id=acme_solution.id,
-    )
-    ProjectSolutionRepo(session).link(
-        team_id=globex.id,
-        project_id=globex_project.id,
-        solution_id=globex_solution.id,
-    )
-
     items = _ensure_bird_items(session, created_by=alice.id)
-    _ensure_project_suite(
+    _ensure_suite(
         session,
-        project=acme_project,
         team=acme,
         name=DEMO_SUITE,
         method="manual",
@@ -195,9 +145,8 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
         item_ids=[item.item_id for item in items],
         created_by=alice.id,
     )
-    curated_suite = _ensure_project_suite(
+    curated_suite = _ensure_suite(
         session,
-        project=acme_project,
         team=acme,
         name=FOCUS_SUITE,
         method="manual",
@@ -205,9 +154,8 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
         item_ids=[item.item_id for item in items],
         created_by=alice.id,
     )
-    _ensure_project_suite(
+    _ensure_suite(
         session,
-        project=globex_project,
         team=globex,
         name=DEMO_SUITE,
         method="manual",
@@ -217,21 +165,18 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
     )
     baseline = _ensure_baseline_runs(
         session,
-        project=acme_project,
         team=acme,
         solution=acme_solution,
         suite=curated_suite,
         items=items,
         created_by=alice.id,
     )
-    if acme_project.baseline_run_id is None:
-        acme_project.baseline_run_id = baseline.id
+    if curated_suite.baseline_run_id is None:
+        curated_suite.baseline_run_id = baseline.id
 
     return DemoSeedSummary(
         acme_team_id=acme.id,
         globex_team_id=globex.id,
-        acme_project_id=acme_project.id,
-        globex_project_id=globex_project.id,
         eval_item_count=len(items),
         curated_item_count=len(SuiteRepo(session).list_item_ids(curated_suite.id)),
         baseline_run_id=baseline.id,
@@ -254,26 +199,6 @@ def _ensure_team(session: Session, *, name: str, description: str) -> Team:
     if team is not None:
         return team
     return repo.create(name=name, description=description)
-
-
-def _ensure_project(
-    session: Session,
-    *,
-    team_id: UUID,
-    name: str,
-    description: str,
-    created_by: UUID,
-) -> Project:
-    repo = ProjectRepo(session)
-    for project in repo.list_for_team(team_id, include_archived=True):
-        if project.name == name:
-            return project
-    return repo.create(
-        team_id=team_id,
-        name=name,
-        description=description,
-        created_by=created_by,
-    )
 
 
 def _ensure_membership(
@@ -368,10 +293,9 @@ def _ensure_bird_items(session: Session, *, created_by: UUID) -> list[EvalItem]:
     return items
 
 
-def _ensure_project_suite(
+def _ensure_suite(
     session: Session,
     *,
-    project: Project,
     team: Team,
     name: str,
     method: str,
@@ -380,10 +304,9 @@ def _ensure_project_suite(
     created_by: UUID,
 ) -> Suite:
     repo = SuiteRepo(session)
-    suite = repo.get_by_project_and_name(project.id, name)
+    suite = repo.get_by_team_and_name(team.id, name)
     if suite is None:
         suite = repo.create(
-            project_id=project.id,
             team_id=team.id,
             name=name,
             description=f"Demo suite {name}",
@@ -398,7 +321,6 @@ def _ensure_project_suite(
 def _ensure_baseline_runs(
     session: Session,
     *,
-    project: Project,
     team: Team,
     solution: Solution,
     suite: Suite,
@@ -410,21 +332,20 @@ def _ensure_baseline_runs(
     for pass_idx in range(3):
         run = _get_baseline_run(
             session,
-            project_id=project.id,
+            suite_id=suite.id,
             solution_id=solution.id,
-            suite_name=suite.name,
             pass_idx=pass_idx,
         )
         if run is None:
             run = repo.create(
                 team_id=team.id,
-                project_id=project.id,
+                suite_id=suite.id,
                 solution_id=solution.id,
                 suite=suite.name,
                 dataset_version=DATASET_VERSION,
                 mode=HarnessMode.NIGHTLY_LOO,
                 pass_idx=pass_idx,
-                config={"source": "demo-seed", "suite_id": str(suite.id)},
+                config={"source": "demo-seed"},
                 created_by=created_by,
             )
         _ensure_baseline_results(session, run=run, items=items, pass_idx=pass_idx)
@@ -439,16 +360,14 @@ def _ensure_baseline_runs(
 def _get_baseline_run(
     session: Session,
     *,
-    project_id: UUID,
+    suite_id: UUID,
     solution_id: UUID,
-    suite_name: str,
     pass_idx: int,
 ) -> Run | None:
     return session.scalar(
         select(Run).where(
-            Run.project_id == project_id,
+            Run.suite_id == suite_id,
             Run.solution_id == solution_id,
-            Run.suite == suite_name,
             Run.dataset_version == DATASET_VERSION,
             Run.mode == HarnessMode.NIGHTLY_LOO,
             Run.pass_idx == pass_idx,
@@ -473,7 +392,6 @@ def _ensure_baseline_results(
         passed = (idx + pass_idx) % 10 != 0
         repo.create(
             team_id=run.team_id,
-            project_id=run.project_id,
             run_id=run.id,
             item_id=item_id,
             attempt_idx=0,

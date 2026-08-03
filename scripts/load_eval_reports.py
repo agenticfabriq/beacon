@@ -36,7 +36,7 @@ Usage::
 
     export BEACON_API_KEY=... DATABASE_URL=...
     uv run python scripts/load_eval_reports.py \
-        --project <uuid> --solution <uuid> --suite <uuid> \
+        --solution <uuid> --suite <uuid> \
         --manifest reports.json --reports-dir path/to/reports
 """
 
@@ -340,18 +340,16 @@ def item_index(database_url: str, *, suite: str) -> dict[str, ItemRef]:
 class BeaconClient:
     """The three ingestion calls this script needs."""
 
-    def __init__(self, base_url: str, api_key: str, project_id: str) -> None:
+    def __init__(self, base_url: str, api_key: str) -> None:
         self.base = base_url.rstrip("/")
-        self.project = project_id
         self.http = httpx.Client(headers={"X-API-Key": api_key}, timeout=180.0)
 
     def create_run(self, *, solution_id: str, suite_id: str, config: Mapping[str, Any]) -> str:
         """Register a run and return its id."""
         response = self.http.post(
-            f"{self.base}/v1/projects/{self.project}/runs",
+            f"{self.base}/v1/suites/{suite_id}/runs",
             json={
                 "solution_id": solution_id,
-                "suite_id": suite_id,
                 "mode": "EVAL",
                 "config": dict(config),
             },
@@ -362,7 +360,7 @@ class BeaconClient:
     def push(self, run_id: str, payload: Mapping[str, Any]) -> str:
         """Push one result and return the outcome beacon composed for it."""
         response = self.http.post(
-            f"{self.base}/v1/projects/{self.project}/runs/{run_id}/results",
+            f"{self.base}/v1/runs/{run_id}/results",
             json=dict(payload),
         )
         response.raise_for_status()
@@ -370,7 +368,7 @@ class BeaconClient:
 
     def complete(self, run_id: str) -> dict[str, Any]:
         """Close the run."""
-        response = self.http.post(f"{self.base}/v1/projects/{self.project}/runs/{run_id}/complete")
+        response = self.http.post(f"{self.base}/v1/runs/{run_id}/complete")
         response.raise_for_status()
         result: Any = response.json()
         return dict(result)
@@ -431,7 +429,6 @@ def _specs(args: argparse.Namespace) -> Iterator[tuple[ReportSpec, Path]]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", required=True, help="project UUID")
     parser.add_argument("--solution", required=True, help="registered solution UUID")
     parser.add_argument("--suite", required=True, help="suite UUID the runs belong to")
     parser.add_argument("--suite-name", default="bird_minidev_v2", help="suite name of the items")
@@ -466,7 +463,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     index = item_index(database_url, suite=args.suite_name)
     print(f"{len(index)} eval items in {args.suite_name}")
-    client = BeaconClient(api_base, api_key, args.project)
+    client = BeaconClient(api_base, api_key)
     totals = Comparison()
     try:
         for spec, path in _specs(args):

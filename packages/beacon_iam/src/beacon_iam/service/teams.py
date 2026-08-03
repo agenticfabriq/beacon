@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from beacon_storage.models.tenancy import ScopeKind, Team
+from beacon_storage.models.tenancy import Team  # noqa: TC002
 from beacon_storage.repository.memberships import MembershipRepo
 from beacon_storage.repository.teams import TeamRepo
 from sqlalchemy.exc import IntegrityError
@@ -25,12 +25,9 @@ class TeamService:
     def create(self, *, actor_id: UUID, name: str, description: str | None = None) -> Team:
         """Create a new team; requires the actor to hold global.admin."""
         actor_memberships = self.memberships.list_for_user(actor_id)
-        permissions = effective_permissions(
-            actor_id,
-            actor_memberships,
-            target_scope_kind=ScopeKind.TEAM,
-            target_scope_id=actor_id,
-        )
+        # Any team id works here: GLOBAL_ADMIN comes only from a global-scope
+        # membership, which effective_permissions honours regardless of team.
+        permissions = effective_permissions(actor_id, actor_memberships, team_id=actor_id)
         if Permission.GLOBAL_ADMIN not in permissions:
             raise AuthorizationError("create team requires beacon_admin")
 

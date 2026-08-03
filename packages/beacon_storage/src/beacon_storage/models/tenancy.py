@@ -1,4 +1,4 @@
-"""User, Team, Project, Membership, ApiKey -- the multi-tenant root."""
+"""User, Team, Membership, ApiKey -- the multi-tenant root."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,15 +24,11 @@ class Role(StrEnum):
     VIEWER = "viewer"
     TEAM_ADMIN = "team_admin"
     TEAM_MEMBER = "team_member"
-    PROJECT_OWNER = "project_owner"
-    PROJECT_CONTRIBUTOR = "project_contributor"
-    PROJECT_VIEWER = "project_viewer"
 
 
 class ScopeKind(StrEnum):
     GLOBAL = "global"
     TEAM = "team"
-    PROJECT = "project"
 
 
 class User(Base, IdMixin, TimestampsMixin):
@@ -51,24 +46,6 @@ class Team(Base, IdMixin, TimestampsMixin):
 
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class Project(Base, IdMixin, TimestampsMixin):
-    __tablename__ = "projects"
-
-    team_id: Mapped[UUID] = mapped_column(
-        ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    baseline_run_id: Mapped[UUID | None] = mapped_column(nullable=True)  # FK added in P2
-    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    archived_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("team_id", "name", name="uq_project_team_name"),
-        Index("ix_project_team_active", "team_id", "archived_at"),
-    )
 
 
 class Membership(Base, TimestampsMixin):

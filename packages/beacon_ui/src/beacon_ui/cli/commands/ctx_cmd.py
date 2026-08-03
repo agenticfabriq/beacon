@@ -23,11 +23,9 @@ def cli() -> None:
     help="Output format.",
 )
 def show(fmt: str) -> None:
-    """Print the active CLI context (team, project, API base, masked key)."""
     ctx = load_context()
     data = {
         "team_id": ctx.team_id,
-        "project_id": ctx.project_id,
         "api_base": ctx.api_base,
         "api_key": "***" if ctx.api_key else None,
     }
@@ -40,15 +38,12 @@ def show(fmt: str) -> None:
 
 @cli.command("set")
 @click.option("--team", default=None, help="Team ID to store.")
-@click.option("--project", default=None, help="Project ID to store.")
 @click.option("--api-base", default=None, help="Beacon API base URL.")
-def set_(team: str | None, project: str | None, api_base: str | None) -> None:
-    """Persist team, project, and API base into the local CLI context."""
+def set_ctx(team: str | None, api_base: str | None) -> None:
+    """Store team and API base in the local context."""
     ctx = load_context()
     if team is not None:
         ctx.team_id = team
-    if project is not None:
-        ctx.project_id = project
     if api_base is not None:
         ctx.api_base = api_base
     save_context(ctx)

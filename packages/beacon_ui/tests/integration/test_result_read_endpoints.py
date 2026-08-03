@@ -17,6 +17,7 @@ from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.verdicts import VerdictRepo
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -28,10 +29,11 @@ SUITE = "read_path_v1"
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
+    acme_suite_id: UUID
     alice_id: UUID
     alice_key: str
     bob_key: str
+    carol_key: str
 
 
 @dataclass(frozen=True)
@@ -77,9 +79,17 @@ def graded_run(session: Session, world: _World) -> GradedRun:
         layers=[],
         created_by=world.alice_id,
     )
+    suite = SuiteRepo(session).create(
+        team_id=world.acme_team_id,
+        name=SUITE,
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=world.alice_id,
+    )
     run = RunRepo(session).create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=suite.id,
         solution_id=solution.id,
         suite=SUITE,
         dataset_version="v1",
@@ -114,7 +124,6 @@ def graded_run(session: Session, world: _World) -> GradedRun:
         is_defer = outcome is VerdictOutcome.DEFER
         result = ResultRepo(session).create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
             run_id=run.id,
             item_id=str(item.item_id),
             attempt_idx=0,
@@ -130,7 +139,6 @@ def graded_run(session: Session, world: _World) -> GradedRun:
         if passed is not None:
             VerdictRepo(session).create(
                 team_id=world.acme_team_id,
-                project_id=world.chat_to_data_id,
                 result_id=result.id,
                 grader="execution_grounded_sql",
                 grader_version="v1",
@@ -162,7 +170,7 @@ def test_a_runs_results_can_be_listed(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         headers=_headers(world),
     )
 
@@ -177,7 +185,7 @@ def test_every_row_carries_the_question_it_answers(
 ) -> None:
     """A list of UUIDs is not a drill-down."""
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         headers=_headers(world),
     ).json()
 
@@ -188,7 +196,7 @@ def test_results_can_be_filtered_to_the_wrong_answers(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         params={"outcome": "FAIL"},
         headers=_headers(world),
     ).json()
@@ -202,7 +210,7 @@ def test_results_can_be_filtered_by_difficulty(
 ) -> None:
     """Difficulty was stored on every BIRD item all along and surfaced nowhere."""
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         params={"difficulty": "challenging"},
         headers=_headers(world),
     ).json()
@@ -216,7 +224,7 @@ def test_the_facet_counts_cover_the_run_not_the_filtered_page(
 ) -> None:
     """A filtered view has to show what it is a slice of."""
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         params={"outcome": "FAIL"},
         headers=_headers(world),
     ).json()
@@ -230,7 +238,7 @@ def test_a_deferral_is_listed_as_its_own_outcome(
 ) -> None:
     """Declining to answer must never appear in the list as a wrong answer."""
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         headers=_headers(world),
     ).json()
 
@@ -243,7 +251,7 @@ def test_paging_does_not_change_the_total(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results",
+        f"/v1/runs/{graded_run.run_id}/results",
         params={"limit": 1},
         headers=_headers(world),
     ).json()
@@ -259,7 +267,7 @@ def test_an_item_detail_shows_our_answer_beside_the_gold(
     item_id = graded_run.failing_item_id
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results/{item_id}",
+        f"/v1/runs/{graded_run.run_id}/results/{item_id}",
         headers=_headers(world),
     )
 
@@ -278,8 +286,7 @@ def test_a_failing_item_says_which_dimension_mismatched(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}"
-        f"/results/{graded_run.failing_item_id}",
+        f"/v1/runs/{graded_run.run_id}/results/{graded_run.failing_item_id}",
         headers=_headers(world),
     ).json()
 
@@ -292,8 +299,7 @@ def test_a_deferred_item_reads_as_declined_not_wrong(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
     body = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}"
-        f"/results/{graded_run.deferred_item_id}",
+        f"/v1/runs/{graded_run.run_id}/results/{graded_run.deferred_item_id}",
         headers=_headers(world),
     ).json()
 
@@ -305,7 +311,7 @@ def test_an_unknown_item_is_a_404(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{graded_run.run_id}/results/{uuid4()}",
+        f"/v1/runs/{graded_run.run_id}/results/{uuid4()}",
         headers=_headers(world),
     )
 
@@ -314,20 +320,20 @@ def test_an_unknown_item_is_a_404(
 
 def test_results_of_an_unknown_run_are_a_404(api_client: TestClient, world: _World) -> None:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{uuid4()}/results",
+        f"/v1/runs/{uuid4()}/results",
         headers=_headers(world),
     )
 
     assert response.status_code == 404
 
 
-def test_a_run_in_another_project_is_not_readable_through_this_one(
+def test_a_run_in_another_team_is_not_readable(
     api_client: TestClient, world: _World, graded_run: GradedRun
 ) -> None:
-    """Run ids are not capabilities: the project in the path has to match."""
+    """Run ids are not capabilities: the reader must be in the owning team."""
     response = api_client.get(
-        f"/v1/projects/{uuid4()}/runs/{graded_run.run_id}/results",
-        headers=_headers(world),
+        f"/v1/runs/{graded_run.run_id}/results",
+        headers={"X-API-Key": world.carol_key},
     )
 
     assert response.status_code in (403, 404)

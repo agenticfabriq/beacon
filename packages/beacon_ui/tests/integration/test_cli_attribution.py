@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
-from beacon_storage.repository.project_solutions import ProjectSolutionRepo
 from beacon_storage.repository.solutions import SolutionRepo
 from beacon_ui.cli.main import app as cli_app
 from click.testing import CliRunner
@@ -26,7 +25,6 @@ class _World(Protocol):
     alice_id: UUID
     alice_key: str
     acme_team_id: UUID
-    chat_to_data_id: UUID
 
 
 def _create_layered_sut(session: Session, world: _World) -> UUID:
@@ -46,11 +44,6 @@ def _create_layered_sut(session: Session, world: _World) -> UUID:
             }
         ],
         created_by=world.alice_id,
-    )
-    ProjectSolutionRepo(session).link(
-        team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
-        solution_id=sut.id,
     )
     session.commit()
     return sut.id
@@ -72,8 +65,6 @@ def test_attribution_sweep_invokes_endpoint(
         [
             "attribution",
             "sweep",
-            "--project",
-            str(world.chat_to_data_id),
             "--sut",
             str(sut_id),
             "--suite",
@@ -101,8 +92,6 @@ def test_attribution_show_renders(
         [
             "attribution",
             "show",
-            "--project",
-            str(world.chat_to_data_id),
             "--sut",
             str(sut_id),
             "--suite",

@@ -33,7 +33,6 @@ def persist_result(
     session: Session,
     *,
     team_id: UUID,
-    project_id: UUID,
     run_id: UUID,
     item: EvalItem,
     attempt_idx: int,
@@ -44,7 +43,6 @@ def persist_result(
     """Persist one runner result, its grader verdicts, and trace tree."""
     result_row = ResultRepo(session).create(
         team_id=team_id,
-        project_id=project_id,
         run_id=run_id,
         item_id=item.item_id,
         attempt_idx=attempt_idx,
@@ -62,7 +60,6 @@ def persist_result(
     for verdict in verdicts:
         verdict_repo.create(
             team_id=team_id,
-            project_id=project_id,
             result_id=result_row.id,
             grader=verdict.grader,
             grader_version=verdict.grader_version,
@@ -76,7 +73,6 @@ def persist_result(
 
     TraceRepo(session).create(
         team_id=team_id,
-        project_id=project_id,
         result_id=result_row.id,
         step_tree=exec_result.trace.to_dict(),
         object_storage_uri=None,

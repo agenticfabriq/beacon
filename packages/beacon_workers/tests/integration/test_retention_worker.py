@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from beacon_storage.models.runs import HarnessMode, ResultStatus, VerdictOutcome
-from beacon_storage.models.tenancy import Project, Team, User
+from beacon_storage.models.suites import Suite
+from beacon_storage.models.tenancy import Team, User
 from beacon_storage.object_storage.local import LocalFsStorage
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
@@ -35,7 +36,7 @@ def test_retention_summarizes_old_traces(engine: Engine, tmp_path: Path) -> None
     storage = LocalFsStorage(root=tmp_path)
 
     with factory() as session:
-        team, user, project = _ctx(session)
+        team, user, suite = _ctx(session)
         old_key = f"team={team.id}/old.json"
         new_key = f"team={team.id}/new.json"
         storage.put(old_key, io.BytesIO(b'{"big": "old-trace"}'))
@@ -44,7 +45,7 @@ def test_retention_summarizes_old_traces(engine: Engine, tmp_path: Path) -> None
             session=session,
             team=team,
             user=user,
-            project=project,
+            suite=suite,
             object_storage_uri=old_key,
             pass_idx=0,
         )
@@ -52,13 +53,12 @@ def test_retention_summarizes_old_traces(engine: Engine, tmp_path: Path) -> None
             session=session,
             team=team,
             user=user,
-            project=project,
+            suite=suite,
             object_storage_uri=new_key,
             pass_idx=1,
         )
         VerdictRepo(session).create(
             team_id=team.id,
-            project_id=project.id,
             result_id=_result_id_for_trace(session, old_id),
             grader="g",
             grader_version="v1",
@@ -113,14 +113,14 @@ def test_retention_idempotent(engine: Engine, tmp_path: Path) -> None:
     storage = LocalFsStorage(root=tmp_path)
 
     with factory() as session:
-        team, user, project = _ctx(session)
+        team, user, suite = _ctx(session)
         key = f"team={team.id}/old.json"
         storage.put(key, io.BytesIO(b"{}"))
         trace_id = _trace_with_result(
             session=session,
             team=team,
             user=user,
-            project=project,
+            suite=suite,
             object_storage_uri=key,
             pass_idx=0,
         )
@@ -154,15 +154,22 @@ def test_retention_idempotent(engine: Engine, tmp_path: Path) -> None:
         assert row.summary["summarized_at"] == first_summarized
 
 
-def _ctx(session: Session) -> tuple[Team, User, Project]:
+def _ctx(session: Session) -> tuple[Team, User, Suite]:
     team = Team(name="retention-team")
     user = User(email="retention@example.com", name="Retention")
     session.add_all([team, user])
     session.flush()
-    project = Project(team_id=team.id, name="retention-project", created_by=user.id)
-    session.add(project)
+    suite = Suite(
+        team_id=team.id,
+        name="retention",
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=user.id,
+    )
+    session.add(suite)
     session.flush()
-    return team, user, project
+    return team, user, suite
 
 
 def _trace_with_result(
@@ -170,7 +177,7 @@ def _trace_with_result(
     session: Session,
     team: Team,
     user: User,
-    project: Project,
+    suite: Suite,
     object_storage_uri: str,
     pass_idx: int,
 ) -> UUID:
@@ -186,7 +193,7 @@ def _trace_with_result(
     )
     run = RunRepo(session).create(
         team_id=team.id,
-        project_id=project.id,
+        suite_id=suite.id,
         solution_id=solution.id,
         suite="retention",
         dataset_version="v0",
@@ -197,7 +204,6 @@ def _trace_with_result(
     )
     result = ResultRepo(session).create(
         team_id=team.id,
-        project_id=project.id,
         run_id=run.id,
         item_id=f"item-{pass_idx}",
         attempt_idx=0,
@@ -212,7 +218,6 @@ def _trace_with_result(
     )
     trace = TraceRepo(session).create(
         team_id=team.id,
-        project_id=project.id,
         result_id=result.id,
         step_tree={"name": "root", "children": []},
         object_storage_uri=object_storage_uri,

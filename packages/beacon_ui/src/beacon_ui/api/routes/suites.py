@@ -1,4 +1,4 @@
-"""POST + GET /v1/projects/{project_id}/suites."""
+"""Benchmarks: create, list, and pin the reference run."""
 
 from __future__ import annotations
 
@@ -10,15 +10,21 @@ from beacon_registry.errors import DuplicateSuiteError
 from beacon_registry.suites import SuiteService
 from beacon_storage.models.suites import Suite  # noqa: TC002
 from beacon_storage.models.tenancy import User  # noqa: TC002
-from beacon_storage.repository.projects import ProjectRepo
+from beacon_storage.repository.suites import SuiteRepo
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
-from beacon_ui.api.schemas.project_suite import SuiteCreateIn, SuiteKind, SuiteMethod, SuiteOut
+from beacon_ui.api.schemas.project_suite import (
+    SuiteCreateIn,
+    SuiteKind,
+    SuiteMethod,
+    SuiteOut,
+    SuitePatchIn,
+)
 
-router = APIRouter(prefix="/v1/projects", tags=["suites"])
+router = APIRouter(prefix="/v1", tags=["suites"])
 
 
 def _suite_out(service: SuiteService, suite: Suite) -> SuiteOut:
@@ -28,8 +34,8 @@ def _suite_out(service: SuiteService, suite: Suite) -> SuiteOut:
     return SuiteOut(
         suite_id=suite.id,
         id=suite.id,
-        project_id=suite.project_id,
         team_id=suite.team_id,
+        baseline_run_id=suite.baseline_run_id,
         name=suite.name,
         description=suite.description,
         method=method,
@@ -42,25 +48,22 @@ def _suite_out(service: SuiteService, suite: Suite) -> SuiteOut:
 
 
 @router.post(
-    "/{project_id}/suites",
+    "/teams/{team_id}/suites",
     response_model=SuiteOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create a suite",
 )
-@requires(Permission.PROJECT_MANAGE)
+@requires(Permission.EVAL_MANAGE)
 def create_suite(
-    project_id: UUID,
+    team_id: UUID,
     body: SuiteCreateIn,
     user: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_MANAGE, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_MANAGE, scope_kind="team")),
     ],
     session: Annotated[Session, Depends(get_session)],
 ) -> SuiteOut:
-    """Create a curated or manual suite within a project."""
-    project = ProjectRepo(session).get(project_id)
-    assert project is not None
-
+    """Create a benchmark owned by the team."""
     metadata = dict(body.metadata)
     if body.resolved_kind == "curated":
         metadata.update(
@@ -73,8 +76,7 @@ def create_suite(
     try:
         service = SuiteService(session)
         suite = service.create(
-            project_id=project_id,
-            team_id=project.team_id,
+            team_id=team_id,
             name=body.name,
             description=body.description,
             method=body.resolved_method,
@@ -92,20 +94,42 @@ def create_suite(
     return _suite_out(service, suite)
 
 
-@router.get("/{project_id}/suites", response_model=list[SuiteOut])
-@requires(Permission.PROJECT_VIEW)
+@router.get("/teams/{team_id}/suites", response_model=list[SuiteOut])
+@requires(Permission.EVAL_VIEW)
 def list_suites(
-    project_id: UUID,
+    team_id: UUID,
     _user: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_VIEW, scope_kind="team")),
     ],
     session: Annotated[Session, Depends(get_session)],
 ) -> list[SuiteOut]:
-    """List suites defined in the given project."""
-    project = ProjectRepo(session).get(project_id)
-    assert project is not None
-
+    """List the team's benchmarks."""
     service = SuiteService(session)
-    suites = service.list_for_project(project_id)
+    suites = SuiteRepo(session).list_for_team(team_id)
     return [_suite_out(service, suite) for suite in suites]
+
+
+@router.patch(
+    "/suites/{suite_id}",
+    response_model=SuiteOut,
+    summary="Update a benchmark, e.g. pin its reference run",
+)
+@requires(Permission.EVAL_MANAGE)
+def patch_suite(
+    suite_id: UUID,
+    body: SuitePatchIn,
+    _user: Annotated[
+        User,
+        Depends(require_permission(Permission.EVAL_MANAGE, scope_kind="suite")),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> SuiteOut:
+    """Pin or clear the reference run every other run is read against."""
+    repo = SuiteRepo(session)
+    suite = repo.get(suite_id)
+    assert suite is not None  # the permission dependency 404s first
+    if "baseline_run_id" in body.model_fields_set:
+        repo.set_baseline(suite_id, body.baseline_run_id)
+    session.commit()
+    return _suite_out(SuiteService(session), suite)

@@ -9,8 +9,7 @@ import pytest
 from beacon_runner.registry import SutRegistry
 from beacon_runner.sut.mnemiq import MnemiqInProcessSUT, register_mnemiq_solution
 from beacon_storage.db import make_session_factory
-from beacon_storage.repository.project_solutions import ProjectSolutionRepo
-from beacon_storage.repository.projects import ProjectRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 
@@ -25,8 +24,13 @@ def test_register_is_idempotent_and_links_project(engine: Engine) -> None:
     with factory() as session:
         user = UserRepo(session).create(email="mnemiq-reg@example.com", name="mnemiq-reg")
         team = TeamRepo(session).create(name="mnemiq-reg-team")
-        project = ProjectRepo(session).create(
-            team_id=team.id, name="mnemiq-reg-project", created_by=user.id
+        SuiteRepo(session).create(
+            team_id=team.id,
+            name="mnemiq-reg-project",
+            description="",
+            method="manual",
+            suite_metadata={},
+            created_by=user.id,
         )
         sut = MnemiqInProcessSUT(
             owner_team_id=team.id,
@@ -42,7 +46,6 @@ def test_register_is_idempotent_and_links_project(engine: Engine) -> None:
             team_id=team.id,
             created_by=user.id,
             sut=sut,
-            project_id=project.id,
             registry=registry,
         )
         second = register_mnemiq_solution(
@@ -50,7 +53,6 @@ def test_register_is_idempotent_and_links_project(engine: Engine) -> None:
             team_id=team.id,
             created_by=user.id,
             sut=sut,
-            project_id=project.id,
             registry=registry,
         )
         session.commit()
@@ -66,9 +68,6 @@ def test_register_is_idempotent_and_links_project(engine: Engine) -> None:
         ]
         assert first.supported_modes == ["EVAL", "NIGHTLY_LOO"]
         assert registry.get("mnemiq", MnemiqInProcessSUT.VERSION) is sut
-
-        linked = ProjectSolutionRepo(session).list_with_solution(project.id)
-        assert [solution.id for solution, _added in linked] == [first.id]
 
 
 def test_register_without_project_skips_link(engine: Engine) -> None:

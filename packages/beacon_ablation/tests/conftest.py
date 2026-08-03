@@ -11,6 +11,7 @@ from alembic import command
 from alembic.config import Config
 from beacon_storage.db import make_engine, make_session_factory
 from beacon_storage.ids import uuid7
+from beacon_storage.repository.suites import SuiteRepo
 from pytest_postgresql import factories
 from sqlalchemy import text
 
@@ -127,12 +128,12 @@ class FakeSweepRunner:
         mode: str,
         pass_idx: int,
         parent_sweep_id: UUID,
-        project_id: UUID,
+        suite_id: UUID,
         team_id: UUID,
         solution_id: UUID,
         sweep_arm: str,
     ) -> UUID:
-        _ = (suite, dataset_version, mode, project_id, team_id, solution_id)
+        _ = (suite, dataset_version, mode, suite_id, team_id, solution_id)
         self.arms.append(sweep_arm)
         run_id = uuid7()
         rows: list[SweepResult] = []
@@ -169,7 +170,7 @@ class SweepFixtures:
     base_config: SolutionConfig
     items: list[EvalItem]
     runner: FakeSweepRunner
-    project_id: UUID
+    suite_id: UUID
     team_id: UUID
     solution_id: UUID
 
@@ -221,16 +222,18 @@ def session(engine: Engine) -> Iterator[Session]:
 def sweep_fixtures(session: Session) -> SweepFixtures:
     from beacon_runner.dummy_sut import DummySUT
     from beacon_runner.types import EvalItem, SolutionConfig
-    from beacon_storage.repository.projects import ProjectRepo
     from beacon_storage.repository.solutions import SolutionRepo
     from beacon_storage.repository.teams import TeamRepo
     from beacon_storage.repository.users import UserRepo
 
     user = UserRepo(session).create(email="ablate@example.com", name="A")
     team = TeamRepo(session).create(name="ablate-team")
-    project = ProjectRepo(session).create(
+    project = SuiteRepo(session).create(
         team_id=team.id,
         name="ablate-proj",
+        description="",
+        method="manual",
+        suite_metadata={},
         created_by=user.id,
     )
     sut = DummySUT(owner_team_id=team.id)
@@ -265,7 +268,7 @@ def sweep_fixtures(session: Session) -> SweepFixtures:
         ),
         items=items,
         runner=FakeSweepRunner(),
-        project_id=project.id,
+        suite_id=project.id,
         team_id=team.id,
         solution_id=solution.id,
     )
@@ -287,7 +290,7 @@ def recovery_sweep_result(
         suite="dummy-suite",
         dataset_version="v1",
         K=5,
-        project_id=sweep_fixtures.project_id,
+        suite_id=sweep_fixtures.suite_id,
         team_id=sweep_fixtures.team_id,
         solution_id=sweep_fixtures.solution_id,
     )

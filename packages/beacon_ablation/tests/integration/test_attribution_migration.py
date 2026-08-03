@@ -10,8 +10,8 @@ from beacon_storage.db import make_session_factory
 from beacon_storage.ids import uuid7
 from beacon_storage.models.tenancy import Role, ScopeKind
 from beacon_storage.repository.memberships import MembershipRepo
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from beacon_storage.rls import set_current_user
@@ -42,7 +42,6 @@ def test_attributions_columns(engine: Engine) -> None:
     expected = {
         "attribution_id",
         "sweep_id",
-        "project_id",
         "team_id",
         "solution_id",
         "solution_version",
@@ -75,7 +74,7 @@ def test_attributions_indexes(engine: Engine) -> None:
     index_names = {index["name"] for index in inspector.get_indexes("attributions")}
 
     assert "idx_attributions_sweep" in index_names
-    assert "idx_attributions_project_solution" in index_names
+    assert "idx_attributions_team_solution" in index_names
 
 
 def test_attributions_rls_hides_rows_from_non_members(engine: Engine) -> None:
@@ -85,9 +84,12 @@ def test_attributions_rls_hides_rows_from_non_members(engine: Engine) -> None:
         bob = UserRepo(superuser).create(email="attr-bob@example.com", name="Bob")
         team_a = TeamRepo(superuser).create(name="attr-team-a")
         team_b = TeamRepo(superuser).create(name="attr-team-b")
-        project_a = ProjectRepo(superuser).create(
+        _ = SuiteRepo(superuser).create(
             team_id=team_a.id,
             name="attr-project-a",
+            description="",
+            method="manual",
+            suite_metadata={},
             created_by=alice.id,
         )
         solution = SolutionRepo(superuser).create(
@@ -117,7 +119,6 @@ def test_attributions_rls_hides_rows_from_non_members(engine: Engine) -> None:
             superuser,
             attribution_id=attribution_id,
             team_id=team_a.id,
-            project_id=project_a.id,
             solution_id=solution.id,
         )
         superuser.commit()
@@ -148,7 +149,6 @@ def _insert_attribution(
     *,
     attribution_id: UUID,
     team_id: UUID,
-    project_id: UUID,
     solution_id: UUID,
 ) -> None:
     metrics = json.dumps({"1": 1.0})
@@ -157,7 +157,7 @@ def _insert_attribution(
         text(
             """
             INSERT INTO attributions (
-                attribution_id, sweep_id, project_id, team_id, solution_id,
+                attribution_id, sweep_id, team_id, solution_id,
                 solution_version, suite, dataset_version, layer_name, methodology,
                 baseline_run_id, ablated_run_id,
                 pass_at_k_baseline, pass_at_k_ablated, delta_pass_at_k,
@@ -166,7 +166,7 @@ def _insert_attribution(
                 mcnemar_p, bh_adjusted_p, ci_low, ci_high
             )
             VALUES (
-                :attribution_id, :sweep_id, :project_id, :team_id, :solution_id,
+                :attribution_id, :sweep_id, :team_id, :solution_id,
                 '0.2', 'suite', 'v0', 'ontology', 'LOO',
                 :baseline_run_id, :ablated_run_id,
                 CAST(:pass_at_k_baseline AS jsonb),
@@ -182,7 +182,6 @@ def _insert_attribution(
         {
             "attribution_id": attribution_id,
             "sweep_id": uuid7(),
-            "project_id": project_id,
             "team_id": team_id,
             "solution_id": solution_id,
             "baseline_run_id": uuid7(),

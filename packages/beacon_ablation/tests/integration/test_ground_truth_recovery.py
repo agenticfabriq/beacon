@@ -21,7 +21,7 @@ _LARGE_LAYER_MCNEMAR_P_MAX = 0.05
 
 
 class _SweepFixtures(Protocol):
-    project_id: UUID
+    suite_id: UUID
     team_id: UUID
     solution_id: UUID
 
@@ -110,7 +110,7 @@ def test_attribution_rows_persisted_with_correct_tenancy(
     fixtures = cast("_SweepFixtures", sweep_fixtures)
 
     for attribution in recovery_sweep_result:
-        assert attribution.project_id == fixtures.project_id
+        assert attribution.team_id == fixtures.team_id
         assert attribution.team_id == fixtures.team_id
         assert attribution.solution_id == fixtures.solution_id
 

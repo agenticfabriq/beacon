@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from beacon_storage.models.eval_items import EvalItemTier
-from beacon_storage.models.tenancy import Project, Team, User
+from beacon_storage.models.tenancy import Team, User
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.suites import SuiteRepo
 
@@ -20,23 +20,19 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def _ctx(session: Session) -> tuple[Team, User, Project]:
+def _ctx(session: Session) -> tuple[Team, User]:
     team = Team(name="suite-repo")
     user = User(email="sr@example.com", name="S")
     session.add_all([team, user])
     session.flush()
-    project = Project(team_id=team.id, name="srp", created_by=user.id)
-    session.add(project)
-    session.flush()
-    return team, user, project
+    return team, user
 
 
-def test_create_and_get_by_name(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_create_and_get_by_name(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     repo = SuiteRepo(session)
 
     suite = repo.create(
-        project_id=project.id,
         team_id=team.id,
         name="curated-50",
         description="d",
@@ -44,18 +40,17 @@ def test_create_and_get_by_name(session: Session, _ctx: tuple[Team, User, Projec
         suite_metadata={},
         created_by=user.id,
     )
-    got = repo.get_by_project_and_name(project.id, "curated-50")
+    got = repo.get_by_team_and_name(team.id, "curated-50")
 
     assert got is not None
     assert got.id == suite.id
 
 
-def test_add_items_and_list_items(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_add_items_and_list_items(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     suite_repo = SuiteRepo(session)
     item_repo = EvalItemRepo(session)
     suite = suite_repo.create(
-        project_id=project.id,
         team_id=team.id,
         name="x",
         description="",
@@ -91,12 +86,11 @@ def test_add_items_and_list_items(session: Session, _ctx: tuple[Team, User, Proj
 
 
 def test_add_items_is_idempotent_and_remove_items(
-    session: Session, _ctx: tuple[Team, User, Project]
+    session: Session, _ctx: tuple[Team, User]
 ) -> None:
-    team, user, project = _ctx
+    team, user = _ctx
     repo = SuiteRepo(session)
     suite = repo.create(
-        project_id=project.id,
         team_id=team.id,
         name="dedupe",
         description="",
@@ -116,11 +110,10 @@ def test_add_items_is_idempotent_and_remove_items(
     assert repo.list_item_ids(suite.id) == [item_ids[1]]
 
 
-def test_list_for_project(session: Session, _ctx: tuple[Team, User, Project]) -> None:
-    team, user, project = _ctx
+def test_list_for_suite(session: Session, _ctx: tuple[Team, User]) -> None:
+    team, user = _ctx
     repo = SuiteRepo(session)
     repo.create(
-        project_id=project.id,
         team_id=team.id,
         name="a",
         description="",
@@ -129,7 +122,6 @@ def test_list_for_project(session: Session, _ctx: tuple[Team, User, Project]) ->
         created_by=user.id,
     )
     repo.create(
-        project_id=project.id,
         team_id=team.id,
         name="b",
         description="",
@@ -138,6 +130,6 @@ def test_list_for_project(session: Session, _ctx: tuple[Team, User, Project]) ->
         created_by=user.id,
     )
 
-    suites = repo.list_for_project(project.id)
+    suites = repo.list_for_team(team.id)
 
     assert [suite.name for suite in suites] == ["a", "b"]

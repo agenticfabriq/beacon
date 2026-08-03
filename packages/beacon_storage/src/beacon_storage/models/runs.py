@@ -73,12 +73,14 @@ class Run(Base, IdMixin, TimestampsMixin):
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
     )
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
     solution_id: Mapped[UUID] = mapped_column(
         ForeignKey("solutions.id", ondelete="RESTRICT"), nullable=False
     )
+    suite_id: Mapped[UUID] = mapped_column(
+        ForeignKey("suites.id", ondelete="CASCADE"), nullable=False
+    )
+    # Denormalized benchmark name: eval items are keyed by it, and grading
+    # matches on it. The FK above is the identity; this is the join key to gold.
     suite: Mapped[str] = mapped_column(String(200), nullable=False)
     dataset_version: Mapped[str] = mapped_column(String(100), nullable=False)
     mode: Mapped[HarnessMode] = mapped_column(String(40), nullable=False)
@@ -112,19 +114,17 @@ class Run(Base, IdMixin, TimestampsMixin):
 
     __table_args__ = (
         UniqueConstraint(
-            "project_id",
+            "suite_id",
             "solution_id",
-            "suite",
             "dataset_version",
             "mode",
             "pass_idx",
             "parent_sweep_id",
             "sweep_arm",
-            name="uq_run_project_pass",
+            name="uq_run_suite_pass",
             postgresql_nulls_not_distinct=True,
         ),
         Index("ix_run_team", "team_id"),
-        Index("ix_run_project", "project_id"),
         Index("ix_run_status", "status"),
     )
 
@@ -134,9 +134,6 @@ class Result(Base, IdMixin, TimestampsMixin):
 
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
-    )
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     item_id: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -153,7 +150,6 @@ class Result(Base, IdMixin, TimestampsMixin):
     __table_args__ = (
         UniqueConstraint("run_id", "item_id", "attempt_idx", name="uq_result_run_item_attempt"),
         Index("ix_result_team", "team_id"),
-        Index("ix_result_project", "project_id"),
         Index("ix_result_run", "run_id"),
     )
 
@@ -163,9 +159,6 @@ class Verdict(Base, IdMixin, TimestampsMixin):
 
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
-    )
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     result_id: Mapped[UUID] = mapped_column(
         ForeignKey("results.id", ondelete="CASCADE"), nullable=False
@@ -204,9 +197,6 @@ class Trace(Base, IdMixin, TimestampsMixin):
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
     )
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
     result_id: Mapped[UUID] = mapped_column(
         ForeignKey("results.id", ondelete="CASCADE"), nullable=False, unique=True
     )
@@ -214,7 +204,4 @@ class Trace(Base, IdMixin, TimestampsMixin):
     object_storage_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
-    __table_args__ = (
-        Index("ix_trace_team", "team_id"),
-        Index("ix_trace_project", "project_id"),
-    )
+    __table_args__ = (Index("ix_trace_team", "team_id"),)

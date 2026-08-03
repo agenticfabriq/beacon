@@ -9,10 +9,10 @@ from beacon_runner.persistence import persist_result
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 from beacon_storage.models.runs import HarnessMode, ResultStatus
 from beacon_storage.models.runs import VerdictOutcome as StorageOutcome
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.traces import TraceRepo
 from beacon_storage.repository.users import UserRepo
@@ -20,10 +20,11 @@ from beacon_storage.repository.verdicts import VerdictRepo
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
-    from beacon_storage.models import Project, Run, Solution, Team, User
+    from beacon_storage.models import Run, Solution, Team, User
+    from beacon_storage.models.suites import Suite
     from sqlalchemy.orm import Session
 
-    _Ctx = tuple[Team, User, Project, Solution, Run]
+    _Ctx = tuple[Team, User, Suite, Solution, Run]
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +33,14 @@ pytestmark = pytest.mark.integration
 def _ctx(session: Session) -> _Ctx:
     user = UserRepo(session).create(email="p@example.com", name="P")
     team = TeamRepo(session).create(name="pers-team")
-    project = ProjectRepo(session).create(team_id=team.id, name="pp", created_by=user.id)
+    project = SuiteRepo(session).create(
+        team_id=team.id,
+        name="pp",
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=user.id,
+    )
     solution = SolutionRepo(session).create(
         team_id=team.id,
         solution_id="dummy",
@@ -45,7 +53,7 @@ def _ctx(session: Session) -> _Ctx:
     )
     run = RunRepo(session).create(
         team_id=team.id,
-        project_id=project.id,
+        suite_id=project.id,
         solution_id=solution.id,
         suite="s",
         dataset_version="v0",
@@ -90,7 +98,6 @@ def test_persist_result_writes_result_verdicts_and_trace(session: Session, _ctx:
     persist_result(
         session,
         team_id=team.id,
-        project_id=project.id,
         run_id=run.id,
         item=item,
         attempt_idx=0,
@@ -131,7 +138,6 @@ def test_persist_result_marks_error_status_when_outcome_is_error(
     persist_result(
         session,
         team_id=team.id,
-        project_id=project.id,
         run_id=run.id,
         item=item,
         attempt_idx=0,
@@ -159,7 +165,6 @@ def test_persist_result_marks_timeout_status(session: Session, _ctx: _Ctx) -> No
     persist_result(
         session,
         team_id=team.id,
-        project_id=project.id,
         run_id=run.id,
         item=item,
         attempt_idx=0,
@@ -185,7 +190,6 @@ def test_persist_result_rejects_duplicate(session: Session, _ctx: _Ctx) -> None:
     persist_result(
         session,
         team_id=team.id,
-        project_id=project.id,
         run_id=run.id,
         item=item,
         attempt_idx=0,
@@ -199,7 +203,6 @@ def test_persist_result_rejects_duplicate(session: Session, _ctx: _Ctx) -> None:
         persist_result(
             session,
             team_id=team.id,
-            project_id=project.id,
             run_id=run.id,
             item=item,
             attempt_idx=0,

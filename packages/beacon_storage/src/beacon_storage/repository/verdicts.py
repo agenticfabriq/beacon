@@ -29,7 +29,6 @@ class VerdictRepo:
         self,
         *,
         team_id: UUID,
-        project_id: UUID,
         result_id: UUID,
         grader: str,
         grader_version: str,
@@ -46,7 +45,6 @@ class VerdictRepo:
         """Persist a verdict on ``result_id`` and return the saved model."""
         verdict = Verdict(
             team_id=team_id,
-            project_id=project_id,
             result_id=result_id,
             grader=grader,
             grader_version=grader_version,

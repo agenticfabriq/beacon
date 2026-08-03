@@ -53,9 +53,11 @@ class SuiteCreateIn(BaseModel):
 class SuiteOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # The reference run every other run in this benchmark is read against.
+    baseline_run_id: UUID | None = None
+
     suite_id: UUID
     id: UUID
-    project_id: UUID
     team_id: UUID
     name: str
     description: str
@@ -72,3 +74,11 @@ class SuiteListOut(BaseModel):
 
     suites: list[SuiteOut]
     total: int
+
+
+class SuitePatchIn(BaseModel):
+    """Benchmark settings. baseline_run_id may be set to null to unpin."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_run_id: UUID | None = None

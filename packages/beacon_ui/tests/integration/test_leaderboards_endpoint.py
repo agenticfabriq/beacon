@@ -22,12 +22,12 @@ pytestmark = pytest.mark.integration
 class _World(Protocol):
     acme_team_id: UUID
     globex_team_id: UUID
-    chat_to_data_id: UUID
-    globex_research_id: UUID
+    acme_suite_id: UUID
+    globex_suite_id: UUID
     acme_solution_id: UUID
     globex_solution_id: UUID
-    chat_to_data_run_id: UUID
-    globex_research_run_id: UUID
+    acme_run_id: UUID
+    globex_run_id: UUID
     alice_id: UUID
     carol_id: UUID
     alice_key: str
@@ -41,7 +41,7 @@ def _extra_pass_runs(
     session: Session,
     *,
     team_id: UUID,
-    project_id: UUID,
+    suite_id: UUID,
     solution_id: UUID,
     created_by: UUID,
     first_run_id: UUID,
@@ -56,7 +56,7 @@ def _extra_pass_runs(
     for pass_idx in range(1, _PASSES):
         run = repo.create(
             team_id=team_id,
-            project_id=project_id,
+            suite_id=suite_id,
             solution_id=solution_id,
             suite="bird_minidev_v2",
             dataset_version="v2",
@@ -78,18 +78,18 @@ def _seed_shared_results(session: Session, world: _World) -> None:
     acme_runs = _extra_pass_runs(
         session,
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=world.acme_suite_id,
         solution_id=world.acme_solution_id,
         created_by=world.alice_id,
-        first_run_id=world.chat_to_data_run_id,
+        first_run_id=world.acme_run_id,
     )
     globex_runs = _extra_pass_runs(
         session,
         team_id=world.globex_team_id,
-        project_id=world.globex_research_id,
+        suite_id=world.globex_suite_id,
         solution_id=world.globex_solution_id,
         created_by=world.carol_id,
-        first_run_id=world.globex_research_run_id,
+        first_run_id=world.globex_run_id,
     )
 
     repo = ResultRepo(session)
@@ -97,7 +97,6 @@ def _seed_shared_results(session: Session, world: _World) -> None:
         for pass_idx in range(_PASSES):
             repo.create(
                 team_id=world.acme_team_id,
-                project_id=world.chat_to_data_id,
                 run_id=acme_runs[pass_idx],
                 item_id=str(item.item_id),
                 attempt_idx=pass_idx,
@@ -112,7 +111,6 @@ def _seed_shared_results(session: Session, world: _World) -> None:
             )
             repo.create(
                 team_id=world.globex_team_id,
-                project_id=world.globex_research_id,
                 run_id=globex_runs[pass_idx],
                 item_id=str(item.item_id),
                 attempt_idx=pass_idx,
@@ -130,7 +128,6 @@ def _seed_shared_results(session: Session, world: _World) -> None:
 
 def _seed_private_results(session: Session, world: _World) -> None:
     suite = SuiteRepo(session).create(
-        project_id=world.chat_to_data_id,
         team_id=world.acme_team_id,
         name="private_team_suite",
         description="Team-only suite",
@@ -150,7 +147,7 @@ def _seed_private_results(session: Session, world: _World) -> None:
     )
     run = RunRepo(session).create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=suite.id,
         solution_id=world.acme_solution_id,
         suite=suite.name,
         dataset_version="v2",
@@ -162,7 +159,6 @@ def _seed_private_results(session: Session, world: _World) -> None:
     RunRepo(session).mark_completed(run.id)
     ResultRepo(session).create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
         run_id=run.id,
         item_id=str(item.item_id),
         attempt_idx=0,
@@ -242,8 +238,7 @@ def _seed_single_pass_results(
     for idx, item in enumerate(items[:3]):
         repo.create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
-            run_id=world.chat_to_data_run_id,
+            run_id=world.acme_run_id,
             item_id=str(item.item_id),
             attempt_idx=0,
             output={"answer": f"acme-{idx}"},

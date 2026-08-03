@@ -10,7 +10,7 @@ pytestmark = pytest.mark.integration
 
 
 class _World(Protocol):
-    chat_to_data_id: object
+    acme_suite_id: object
     alice_key: str
     carol_key: str
 
@@ -19,9 +19,9 @@ def _make_app(permission: Permission) -> FastAPI:
     app = FastAPI()
     router = APIRouter()
 
-    @router.get("/check/{project_id}")
+    @router.get("/check/{suite_id}")
     def check(
-        _user: object = Depends(require_permission(permission, scope_kind="project")),
+        _user: object = Depends(require_permission(permission, scope_kind="suite")),
     ) -> dict[str, bool]:
         return {"ok": True}
 
@@ -29,16 +29,16 @@ def _make_app(permission: Permission) -> FastAPI:
     return app
 
 
-def test_owner_can_access(world: _World, monkeypatch: pytest.MonkeyPatch, db_url: str) -> None:
+def test_admin_can_access(world: _World, monkeypatch: pytest.MonkeyPatch, db_url: str) -> None:
     monkeypatch.setenv("DATABASE_URL", db_url)
     import beacon_ui.api.deps as deps_mod
 
     deps_mod._factory = None
-    app = _make_app(Permission.PROJECT_MANAGE)
+    app = _make_app(Permission.EVAL_MANAGE)
     client = TestClient(app)
 
     response = client.get(
-        f"/check/{world.chat_to_data_id}",
+        f"/check/{world.acme_suite_id}",
         headers={"X-API-Key": world.alice_key},
     )
 
@@ -50,11 +50,11 @@ def test_non_member_denied(world: _World, monkeypatch: pytest.MonkeyPatch, db_ur
     import beacon_ui.api.deps as deps_mod
 
     deps_mod._factory = None
-    app = _make_app(Permission.PROJECT_MANAGE)
+    app = _make_app(Permission.EVAL_MANAGE)
     client = TestClient(app)
 
     response = client.get(
-        f"/check/{world.chat_to_data_id}",
+        f"/check/{world.acme_suite_id}",
         headers={"X-API-Key": world.carol_key},
     )
 
@@ -70,9 +70,9 @@ def test_unauthenticated_returns_401(
     import beacon_ui.api.deps as deps_mod
 
     deps_mod._factory = None
-    app = _make_app(Permission.PROJECT_MANAGE)
+    app = _make_app(Permission.EVAL_MANAGE)
     client = TestClient(app)
 
-    response = client.get(f"/check/{world.chat_to_data_id}")
+    response = client.get(f"/check/{world.acme_suite_id}")
 
     assert response.status_code == 401

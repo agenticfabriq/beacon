@@ -8,7 +8,8 @@ import pytest
 from beacon_storage.errors import DuplicateRunError
 from beacon_storage.ids import uuid7
 from beacon_storage.models.runs import HarnessMode, ResultStatus, RunStatus, VerdictOutcome
-from beacon_storage.models.tenancy import Project, Team, User
+from beacon_storage.models.suites import Suite
+from beacon_storage.models.tenancy import Team, User
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
@@ -23,18 +24,25 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def _ctx(session: Session) -> tuple[Team, User, Project]:
+def _ctx(session: Session) -> tuple[Team, User, Suite]:
     t = Team(name="repo-team")
     u = User(email="repo@example.com", name="R")
     session.add_all([t, u])
     session.flush()
-    p = Project(team_id=t.id, name="repo-proj", created_by=u.id)
+    p = Suite(
+        team_id=t.id,
+        name="repo-proj",
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=u.id,
+    )
     session.add(p)
     session.flush()
     return t, u, p
 
 
-def test_solution_repo_create_and_get(session: Session, _ctx: tuple[Team, User, Project]) -> None:
+def test_solution_repo_create_and_get(session: Session, _ctx: tuple[Team, User, Suite]) -> None:
     t, u, _ = _ctx
     s = SolutionRepo(session).create(
         team_id=t.id,
@@ -51,7 +59,7 @@ def test_solution_repo_create_and_get(session: Session, _ctx: tuple[Team, User, 
     assert got.id == s.id
 
 
-def test_run_repo_lifecycle(session: Session, _ctx: tuple[Team, User, Project]) -> None:
+def test_run_repo_lifecycle(session: Session, _ctx: tuple[Team, User, Suite]) -> None:
     t, u, p = _ctx
     s = SolutionRepo(session).create(
         team_id=t.id,
@@ -65,7 +73,7 @@ def test_run_repo_lifecycle(session: Session, _ctx: tuple[Team, User, Project]) 
     )
     r = RunRepo(session).create(
         team_id=t.id,
-        project_id=p.id,
+        suite_id=p.id,
         solution_id=s.id,
         suite="s",
         dataset_version="v0",
@@ -86,7 +94,7 @@ def test_run_repo_lifecycle(session: Session, _ctx: tuple[Team, User, Project]) 
     assert completed.completed_at is not None
 
 
-def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Project]) -> None:
+def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Suite]) -> None:
     t, u, p = _ctx
     s = SolutionRepo(session).create(
         team_id=t.id,
@@ -100,7 +108,7 @@ def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Pr
     )
     r = RunRepo(session).create(
         team_id=t.id,
-        project_id=p.id,
+        suite_id=p.id,
         solution_id=s.id,
         suite="s",
         dataset_version="v0",
@@ -111,7 +119,6 @@ def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Pr
     )
     res = ResultRepo(session).create(
         team_id=t.id,
-        project_id=p.id,
         run_id=r.id,
         item_id="i-1",
         attempt_idx=0,
@@ -126,7 +133,6 @@ def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Pr
     )
     v = VerdictRepo(session).create(
         team_id=t.id,
-        project_id=p.id,
         result_id=res.id,
         grader="g",
         grader_version="v1",
@@ -138,7 +144,6 @@ def test_result_verdict_trace_repos(session: Session, _ctx: tuple[Team, User, Pr
     )
     tr = TraceRepo(session).create(
         team_id=t.id,
-        project_id=p.id,
         result_id=res.id,
         step_tree={"name": "root"},
         object_storage_uri=None,
@@ -166,7 +171,7 @@ def _solution(session: Session, team: Team, user: User) -> Solution:
 
 def test_repeating_a_run_explains_how_to_distinguish_it(
     session: Session,
-    _ctx: tuple[Team, User, Project],
+    _ctx: tuple[Team, User, Suite],
 ) -> None:
     """The raw IntegrityError said nothing actionable (B7)."""
     t, u, p = _ctx
@@ -174,7 +179,7 @@ def test_repeating_a_run_explains_how_to_distinguish_it(
     repo = RunRepo(session)
     repo.create(
         team_id=t.id,
-        project_id=p.id,
+        suite_id=p.id,
         solution_id=s.id,
         suite="dup-suite",
         dataset_version="v0",
@@ -188,7 +193,7 @@ def test_repeating_a_run_explains_how_to_distinguish_it(
     with pytest.raises(DuplicateRunError, match="parent_sweep_id"):
         repo.create(
             team_id=t.id,
-            project_id=p.id,
+            suite_id=p.id,
             solution_id=s.id,
             suite="dup-suite",
             dataset_version="v0",
@@ -202,7 +207,7 @@ def test_repeating_a_run_explains_how_to_distinguish_it(
 
 def test_a_fresh_sweep_id_makes_a_repeat_run_distinct(
     session: Session,
-    _ctx: tuple[Team, User, Project],
+    _ctx: tuple[Team, User, Suite],
 ) -> None:
     """The documented way out actually works."""
     t, u, p = _ctx
@@ -211,7 +216,7 @@ def test_a_fresh_sweep_id_makes_a_repeat_run_distinct(
     made = [
         repo.create(
             team_id=t.id,
-            project_id=p.id,
+            suite_id=p.id,
             solution_id=s.id,
             suite="sweepid-suite",
             dataset_version="v0",

@@ -9,9 +9,9 @@ from beacon_runner.dummy_sut import DummySUT
 from beacon_storage.models.runs import RunStatus
 from beacon_storage.models.tenancy import Role, ScopeKind
 from beacon_storage.repository.memberships import MembershipRepo
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from click.testing import CliRunner
@@ -19,11 +19,12 @@ from click.testing import CliRunner
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from beacon_storage.models import Project, Team, User
+    from beacon_storage.models import Team, User
+    from beacon_storage.models.suites import Suite
     from pytest import MonkeyPatch
     from sqlalchemy.orm import Session
 
-    _Ctx = tuple[User, Team, Project]
+    _Ctx = tuple[User, Team, Suite]
 
 pytestmark = pytest.mark.integration
 
@@ -32,27 +33,28 @@ pytestmark = pytest.mark.integration
 def _ctx(session: Session) -> _Ctx:
     user = UserRepo(session).create(email="cli@example.com", name="CLI")
     team = TeamRepo(session).create(name="cli-team")
-    project = ProjectRepo(session).create(team_id=team.id, name="cli-proj", created_by=user.id)
+    suite_record = SuiteRepo(session).create(
+        team_id=team.id,
+        name="cli-proj",
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=user.id,
+    )
     MembershipRepo(session).grant(
         user_id=user.id,
         scope_kind=ScopeKind.TEAM,
         scope_id=team.id,
         role=Role.TEAM_ADMIN,
     )
-    MembershipRepo(session).grant(
-        user_id=user.id,
-        scope_kind=ScopeKind.PROJECT,
-        scope_id=project.id,
-        role=Role.PROJECT_OWNER,
-    )
     session.commit()
-    return user, team, project
+    return user, team, suite_record
 
 
 def test_suts_register_writes_row(
     db_url: str, _ctx: _Ctx, monkeypatch: MonkeyPatch, session: Session
 ) -> None:
-    user, team, _project = _ctx
+    user, team, _suite = _ctx
     monkeypatch.setenv("DATABASE_URL", db_url)
 
     result = CliRunner().invoke(
@@ -85,7 +87,7 @@ def test_eval_run_persists_results(
     monkeypatch: MonkeyPatch,
     session: Session,
 ) -> None:
-    user, team, project = _ctx
+    user, team, suite_record = _ctx
     SolutionRepo(session).create(
         team_id=team.id,
         solution_id="dummy",
@@ -116,8 +118,8 @@ def test_eval_run_persists_results(
         [
             "eval",
             "run",
-            "--project-id",
-            str(project.id),
+            "--suite-id",
+            str(suite_record.id),
             "--as",
             user.email,
             "--solution-id",
@@ -135,7 +137,7 @@ def test_eval_run_persists_results(
 
     assert result.exit_code == 0, result.output
     assert result.output.startswith("run_id=")
-    runs = RunRepo(session).list_for_project(project.id)
+    runs = RunRepo(session).list_for_suite(suite_record.id)
     assert len(runs) == 1
     assert result.output.strip() == f"run_id={runs[0].id}"
     assert runs[0].status == RunStatus.COMPLETED

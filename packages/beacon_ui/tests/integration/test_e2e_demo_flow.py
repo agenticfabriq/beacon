@@ -30,8 +30,6 @@ class _World(Protocol):
     carol_key: str
     acme_team_id: UUID
     globex_team_id: UUID
-    chat_to_data_id: UUID
-    globex_research_id: UUID
 
 
 def _json_stdout(result: Result) -> dict[str, object]:
@@ -103,7 +101,6 @@ def test_e2e_demo_flow(
     monkeypatch.delenv("BEACON_API_BASE", raising=False)
     monkeypatch.delenv("BEACON_API_KEY", raising=False)
     monkeypatch.delenv("BEACON_TEAM", raising=False)
-    monkeypatch.delenv("BEACON_PROJECT", raising=False)
     route_cli_httpx(api_client, api_base, monkeypatch)
 
     login = runner.invoke(
@@ -115,14 +112,7 @@ def test_e2e_demo_flow(
 
     ctx_set = runner.invoke(
         cli_app,
-        [
-            "ctx",
-            "set",
-            "--team",
-            str(world.acme_team_id),
-            "--project",
-            str(world.chat_to_data_id),
-        ],
+        ["ctx", "set", "--team", str(world.acme_team_id)],
     )
     assert ctx_set.exit_code == 0, ctx_set.stdout
 
@@ -130,7 +120,6 @@ def test_e2e_demo_flow(
     assert ctx["api_base"] == api_base
     assert ctx["api_key"] == "***"
     assert ctx["team_id"] == str(world.acme_team_id)
-    assert ctx["project_id"] == str(world.chat_to_data_id)
 
     sut_file = tmp_path / "demo_sut.py"
     _write_sut_file(sut_file)
@@ -143,25 +132,9 @@ def test_e2e_demo_flow(
     sut_id = str(sut["id"])
     assert sut["solution_id"] == "demo-flow-sut"
 
-    attached = _json_stdout(
-        runner.invoke(
-            cli_app,
-            [
-                "projects",
-                "solutions",
-                "add",
-                "--project",
-                str(world.chat_to_data_id),
-                "--sut",
-                sut_id,
-            ],
-        )
-    )
-    assert attached["solution_id"] == sut_id
-
     item_id = _seed_eval_item(session, world)
     suite_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
         json={
             "name": "demo-flow-suite",
@@ -180,8 +153,6 @@ def test_e2e_demo_flow(
             [
                 "eval",
                 "run",
-                "--project",
-                str(world.chat_to_data_id),
                 "--sut",
                 sut_id,
                 "--suite",
@@ -195,7 +166,7 @@ def test_e2e_demo_flow(
     assert run["status"] == "queued"
 
     runs_response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite['suite_id']}/runs",
         headers={"X-API-Key": world.alice_key},
     )
     assert runs_response.status_code == 200, runs_response.text
@@ -209,20 +180,13 @@ def test_e2e_demo_flow(
     assert "carol@example.com" in carol_login.stdout
     carol_ctx = runner.invoke(
         cli_app,
-        [
-            "ctx",
-            "set",
-            "--team",
-            str(world.globex_team_id),
-            "--project",
-            str(world.globex_research_id),
-        ],
+        ["ctx", "set", "--team", str(world.globex_team_id)],
     )
     assert carol_ctx.exit_code == 0, carol_ctx.stdout
 
     denied = runner.invoke(
         cli_app,
-        ["projects", "list", "--team", str(world.acme_team_id), "--format", "json"],
+        ["suts", "list", "--team", str(world.acme_team_id), "--format", "json"],
     )
     assert denied.exit_code != 0
     assert isinstance(denied.exception, CliHttpError)

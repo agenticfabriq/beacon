@@ -16,9 +16,6 @@ class Attribution(Base, TimestampsMixin):
 
     attribution_id: Mapped[UUID] = mapped_column(primary_key=True)
     sweep_id: Mapped[UUID] = mapped_column(nullable=False)
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
     )
@@ -59,5 +56,5 @@ class Attribution(Base, TimestampsMixin):
         ),
         UniqueConstraint("sweep_id", "layer_name", name="uq_attribution_sweep_layer"),
         Index("idx_attributions_sweep", "sweep_id"),
-        Index("idx_attributions_project_solution", "project_id", "solution_id", "suite"),
+        Index("idx_attributions_team_solution", "team_id", "solution_id", "suite"),
     )

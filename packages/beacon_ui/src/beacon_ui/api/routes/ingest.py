@@ -34,7 +34,7 @@ from beacon_ui.api.schemas.ingest import ResultIngestIn, ResultIngestOut, RunCom
 if TYPE_CHECKING:
     from beacon_graders.composer import VerdictComposer
 
-router = APIRouter(prefix="/v1/projects", tags=["ingest"])
+router = APIRouter(prefix="/v1", tags=["ingest"])
 
 _INGESTABLE_STATUSES = frozenset({RunStatus.PENDING, RunStatus.RUNNING})
 
@@ -149,24 +149,23 @@ def _trace_step(body: ResultIngestIn) -> ExecutionStep:
 
 
 @router.post(
-    "/{project_id}/runs/{run_id}/results",
+    "/runs/{run_id}/results",
     response_model=ResultIngestOut,
     summary="Push one item's execution output into a run",
 )
-@requires(Permission.PROJECT_RUN_EVAL)
+@requires(Permission.EVAL_RUN)
 def ingest_result(
-    project_id: UUID,
     run_id: UUID,
     body: ResultIngestIn,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_RUN_EVAL, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_RUN, scope_kind="run")),
     ],
     session: Annotated[Session, Depends(get_session)],
 ) -> ResultIngestOut:
     """Grade one pushed output and persist it against the run."""
     run = RunRepo(session).get(run_id)
-    if run is None or run.project_id != project_id:
+    if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
     if _status_value(run.status) not in {_status_value(s) for s in _INGESTABLE_STATUSES}:
         raise HTTPException(
@@ -221,7 +220,6 @@ def ingest_result(
     persist_result(
         session,
         team_id=run.team_id,
-        project_id=project_id,
         run_id=run_id,
         item=item,
         attempt_idx=body.attempt_idx,
@@ -252,23 +250,22 @@ def _payload_matches(existing: Result, body: ResultIngestIn) -> bool:
 
 
 @router.post(
-    "/{project_id}/runs/{run_id}/complete",
+    "/runs/{run_id}/complete",
     response_model=RunCompleteOut,
     summary="Declare a run finished",
 )
-@requires(Permission.PROJECT_RUN_EVAL)
+@requires(Permission.EVAL_RUN)
 def complete_run(
-    project_id: UUID,
     run_id: UUID,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_RUN_EVAL, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_RUN, scope_kind="run")),
     ],
     session: Annotated[Session, Depends(get_session)],
 ) -> RunCompleteOut:
     """Close a run once its pusher has no more results to send."""
     run = RunRepo(session).get(run_id)
-    if run is None or run.project_id != project_id:
+    if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
 
     n_results = len(ResultRepo(session).list_for_run(run_id))

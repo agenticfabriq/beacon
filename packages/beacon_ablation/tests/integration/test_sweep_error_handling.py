@@ -47,13 +47,13 @@ class _ScriptedRunner:
         mode: str,
         pass_idx: int,
         parent_sweep_id: UUID,
-        project_id: UUID,
+        suite_id: UUID,
         team_id: UUID,
         solution_id: UUID,
         sweep_arm: str,
     ) -> UUID:
         _ = (sut, config, suite, dataset_version, mode, parent_sweep_id)
-        _ = (project_id, team_id, solution_id)
+        _ = (suite_id, team_id, solution_id)
         run_id = uuid7()
         outcomes = self.script[sweep_arm]
         self._by_run[run_id] = [
@@ -69,7 +69,7 @@ class _ScriptedRunner:
 class _SweepFixtures(Protocol):
     sut: object
     items: list[object]
-    project_id: UUID
+    suite_id: UUID
     team_id: UUID
     solution_id: UUID
 
@@ -97,7 +97,7 @@ def _sweep(
         suite="dummy-suite",
         dataset_version="v1",
         K=1,
-        project_id=fixtures.project_id,
+        suite_id=fixtures.suite_id,
         team_id=fixtures.team_id,
         solution_id=fixtures.solution_id,
         harness_runner=cast("_HarnessRunnerLike", runner),

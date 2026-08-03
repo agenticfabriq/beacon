@@ -28,7 +28,6 @@ SUITE = "declaration_v1"
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
     alice_id: UUID
     alice_key: str
 
@@ -36,7 +35,6 @@ class _World(Protocol):
 @pytest.fixture
 def suite_id(session: Session, world: _World) -> str:
     suite = SuiteRepo(session).create(
-        project_id=world.chat_to_data_id,
         team_id=world.acme_team_id,
         name=SUITE,
         description="",
@@ -70,7 +68,7 @@ def _declare(
     solution_id: str = "declaring-sut",
 ) -> Any:
     return api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution": {
@@ -80,7 +78,6 @@ def _declare(
                 "supported_modes": ["EVAL"],
                 "layers": _layers("grounding", "verifier") if layers is None else layers,
             },
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {"model_id": "m", "layers_enabled": {}},
         },
@@ -164,18 +161,18 @@ def test_a_new_version_may_declare_different_layers(
     assert next_version.status_code == 202
 
 
-def test_a_declared_system_is_attached_to_the_project(
+def test_a_declared_system_lands_in_the_team_catalog(
     api_client: TestClient, world: _World, suite_id: str
 ) -> None:
     """A runner that declares itself has no separate step in which to be attached."""
     declared = _declare(api_client, world, suite_id)
 
-    attached = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/solutions",
+    catalog = api_client.get(
+        f"/v1/teams/{world.acme_team_id}/solutions",
         headers={"X-API-Key": world.alice_key},
     ).json()
 
-    assert declared.json()["solution_id"] in [str(row["solution_id"]) for row in attached]
+    assert declared.json()["solution_id"] in [str(row["id"]) for row in catalog]
 
 
 def test_a_catalogued_solution_can_still_be_named_by_id(
@@ -186,11 +183,10 @@ def test_a_catalogued_solution_can_still_be_named_by_id(
     solution_id = declared.json()["solution_id"]
 
     by_id = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution_id": solution_id,
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {},
         },
@@ -203,12 +199,11 @@ def test_naming_a_solution_both_ways_is_refused(
     api_client: TestClient, world: _World, suite_id: str
 ) -> None:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
         json={
             "solution_id": str(uuid4()),
             "solution": {"solution_id": "s", "version": "1"},
-            "suite_id": suite_id,
             "mode": "EVAL",
             "config": {},
         },
@@ -221,9 +216,9 @@ def test_naming_a_solution_neither_way_is_refused(
     api_client: TestClient, world: _World, suite_id: str
 ) -> None:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
-        json={"suite_id": suite_id, "mode": "EVAL", "config": {}},
+        json={"mode": "EVAL", "config": {}},
     )
 
     assert response.status_code == 422
@@ -264,7 +259,7 @@ def test_runs_can_be_filtered_by_model(
     _declare(api_client, world, suite_id)
 
     listed = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         params={"model_id": "m"},
         headers={"X-API-Key": world.alice_key},
     ).json()
@@ -279,7 +274,7 @@ def test_runs_can_be_filtered_by_configuration(
     digest = _declare(api_client, world, suite_id).json()["config_digest"]
 
     listed = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{suite_id}/runs",
         params={"config_digest": digest},
         headers={"X-API-Key": world.alice_key},
     ).json()

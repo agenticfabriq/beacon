@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class SuiteService:
-    """Service boundary for project-scoped suite operations."""
+    """Service boundary for team-scoped benchmark operations."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -26,7 +26,6 @@ class SuiteService:
     def create(
         self,
         *,
-        project_id: UUID,
         team_id: UUID,
         name: str,
         description: str,
@@ -34,10 +33,9 @@ class SuiteService:
         suite_metadata: dict[str, Any],
         created_by: UUID,
     ) -> Suite:
-        """Create a suite, mapping project-name uniqueness to a domain error."""
+        """Create a suite, mapping team-name uniqueness to a domain error."""
         try:
             return self.repo.create(
-                project_id=project_id,
                 team_id=team_id,
                 name=name,
                 description=description,
@@ -48,7 +46,7 @@ class SuiteService:
         except IntegrityError as exc:
             self.session.rollback()
             raise DuplicateSuiteError(
-                f"suite name '{name}' already exists in project {project_id}"
+                f"suite name '{name}' already exists in team {team_id}"
             ) from exc
 
     def get(self, suite_id: UUID) -> Suite | None:
@@ -62,20 +60,20 @@ class SuiteService:
             raise SuiteNotFoundError(f"suite {suite_id} not found")
         return suite
 
-    def get_by_project_and_name(self, project_id: UUID, name: str) -> Suite | None:
-        """Look up a suite by project and name, returning None when absent."""
-        return self.repo.get_by_project_and_name(project_id, name)
+    def get_by_team_and_name(self, team_id: UUID, name: str) -> Suite | None:
+        """Look up a suite by team and name, returning None when absent."""
+        return self.repo.get_by_team_and_name(team_id, name)
 
-    def get_by_project_and_name_or_raise(self, project_id: UUID, name: str) -> Suite:
-        """Look up a suite by project and name or raise SuiteNotFoundError."""
-        suite = self.repo.get_by_project_and_name(project_id, name)
+    def get_by_team_and_name_or_raise(self, team_id: UUID, name: str) -> Suite:
+        """Look up a suite by team and name or raise SuiteNotFoundError."""
+        suite = self.repo.get_by_team_and_name(team_id, name)
         if suite is None:
-            raise SuiteNotFoundError(f"no suite named '{name}' in project {project_id}")
+            raise SuiteNotFoundError(f"no suite named '{name}' in project {team_id}")
         return suite
 
-    def list_for_project(self, project_id: UUID) -> list[Suite]:
-        """List all suites belonging to the given project."""
-        return self.repo.list_for_project(project_id)
+    def list_for_team(self, team_id: UUID) -> list[Suite]:
+        """List all benchmarks owned by the given team."""
+        return self.repo.list_for_team(team_id)
 
     def add_items(self, *, suite_id: UUID, item_ids: list[UUID]) -> int:
         """Add items idempotently and return the count of new joins."""

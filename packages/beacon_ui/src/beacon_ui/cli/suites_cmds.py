@@ -9,13 +9,11 @@ import click
 from beacon_registry.errors import DuplicateSuiteError
 from beacon_registry.suites import SuiteService
 from beacon_storage.db import make_engine, make_session_factory
-from beacon_storage.repository.projects import ProjectRepo
+from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from beacon_storage.rls import set_current_user
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from sqlalchemy.orm import Session
 
 
@@ -32,7 +30,7 @@ def suites_group() -> None:
 
 
 @suites_group.command("create")
-@click.option("--project", "project_id", required=True, type=click.UUID)
+@click.option("--team", "team_name", required=True)
 @click.option("--name", required=True)
 @click.option("--description", default="")
 @click.option(
@@ -42,27 +40,26 @@ def suites_group() -> None:
 )
 @click.option("--as", "actor_email", required=True)
 def create_suite(
-    project_id: UUID,
+    team_name: str,
     name: str,
     description: str,
     method: str,
     actor_email: str,
 ) -> None:
-    """Create an empty suite in a project."""
+    """Create an empty benchmark owned by a team."""
     with _open_session() as session:
         actor = UserRepo(session).get_by_email(actor_email)
         if actor is None:
             raise click.ClickException(f"user {actor_email} not found")
         set_current_user(session, actor.id)
 
-        project = ProjectRepo(session).get(project_id)
-        if project is None:
-            raise click.ClickException(f"project {project_id} not found")
+        team = TeamRepo(session).get_by_name(team_name)
+        if team is None:
+            raise click.ClickException(f"team {team_name} not found")
 
         try:
             suite = SuiteService(session).create(
-                project_id=project_id,
-                team_id=project.team_id,
+                team_id=team.id,
                 name=name,
                 description=description,
                 method=method,

@@ -12,7 +12,6 @@ pytestmark = pytest.mark.integration
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
     alice_id: UUID
     alice_key: str
     carol_key: str
@@ -39,7 +38,7 @@ def test_create_manual_suite(api_client: TestClient, world: _World, session: Ses
     session.commit()
 
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
         json={
             "name": "smoke-10",
@@ -56,7 +55,7 @@ def test_create_manual_suite(api_client: TestClient, world: _World, session: Ses
 
 def test_create_curated_suite(api_client: TestClient, world: _World) -> None:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
         json={
             "name": "regression-50",
@@ -69,9 +68,9 @@ def test_create_curated_suite(api_client: TestClient, world: _World) -> None:
     assert response.status_code in (200, 201, 400), response.text
 
 
-def test_viewer_cannot_create_suite(api_client: TestClient, world: _World) -> None:
+def test_outsider_cannot_create_suite(api_client: TestClient, world: _World) -> None:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.carol_key},
         json={"name": "x", "kind": "manual", "item_ids": []},
     )
@@ -81,14 +80,14 @@ def test_viewer_cannot_create_suite(api_client: TestClient, world: _World) -> No
 
 def test_list_suites(api_client: TestClient, world: _World) -> None:
     create_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
         json={"name": "smoke-list", "kind": "manual", "item_ids": []},
     )
     assert create_response.status_code == 201, create_response.text
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
     )
 

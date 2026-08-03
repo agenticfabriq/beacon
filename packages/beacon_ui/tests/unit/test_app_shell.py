@@ -25,13 +25,6 @@ def test_openapi_documents_endpoint_roles() -> None:
         ("get", "/v1/me"): ["authenticated"],
         ("post", "/v1/teams"): ["beacon_admin"],
         ("get", "/v1/teams"): ["authenticated"],
-        ("post", "/v1/projects"): ["beacon_admin", "team_admin", "team_member"],
-        ("get", "/v1/projects"): ["beacon_admin", "viewer", "team_admin", "team_member"],
-        ("post", "/v1/projects/{project_id}/members"): [
-            "beacon_admin",
-            "team_admin",
-            "project_owner",
-        ],
         ("post", "/v1/auth/oidc/exchange"): ["public"],
         ("post", "/v1/auth/password/login"): ["public"],
         ("get", "/v1/auth/oidc/start"): ["public"],

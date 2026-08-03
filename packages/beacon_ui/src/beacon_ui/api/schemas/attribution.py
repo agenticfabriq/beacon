@@ -23,7 +23,6 @@ class AttributionLayerOut(BaseModel):
 class AttributionSnapshotOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    project_id: UUID
     solution_id: UUID
     suite_id: UUID
     supported: bool

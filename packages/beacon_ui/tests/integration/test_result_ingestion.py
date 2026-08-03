@@ -16,6 +16,7 @@ from beacon_storage.models.runs import HarnessMode, RunStatus
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -28,7 +29,6 @@ SUITE = "ingest_answer_v1"
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
     alice_id: UUID
     alice_key: str
 
@@ -55,15 +55,23 @@ def _seed(session: Session, world: _World) -> tuple[str, str]:
         item_metadata={},
         created_by=world.alice_id,
     )
+    suite = SuiteRepo(session).create(
+        team_id=world.acme_team_id,
+        name=SUITE,
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=world.alice_id,
+    )
     run = RunRepo(session).create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=suite.id,
         solution_id=solution.id,
         suite=SUITE,
         dataset_version="v1",
         mode=HarnessMode.EVAL,
         pass_idx=0,
-        config={"_beacon_suite_id": str(world.chat_to_data_id)},
+        config={},
         created_by=world.alice_id,
     )
     session.commit()
@@ -77,7 +85,7 @@ def _push(
     body: dict[str, Any],
 ) -> Any:
     return api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{run_id}/results",
+        f"/v1/runs/{run_id}/results",
         headers={"X-API-Key": world.alice_key},
         json=body,
     )
@@ -204,7 +212,7 @@ def test_completing_a_run_closes_it(
     _push(api_client, world, run_id, _payload(item_id, "yes"))
 
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{run_id}/complete",
+        f"/v1/runs/{run_id}/complete",
         headers={"X-API-Key": world.alice_key},
     )
 
@@ -219,7 +227,7 @@ def test_a_closed_run_refuses_further_results(
     """Late arrivals must not silently change a run someone has already read."""
     run_id, item_id = _seed(session, world)
     api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{run_id}/complete",
+        f"/v1/runs/{run_id}/complete",
         headers={"X-API-Key": world.alice_key},
     )
 
@@ -240,7 +248,6 @@ def test_a_trace_contradicting_the_declared_arm_is_refused(
     """
     run_id, item_id = _seed(session, world)
     RunRepo(session).get(UUID(run_id)).config = {  # type: ignore[union-attr]
-        "_beacon_suite_id": str(world.chat_to_data_id),
         "layers_enabled": {"self_consistency": False},
     }
     session.commit()
@@ -278,7 +285,6 @@ def test_a_trace_agreeing_with_the_declared_arm_is_accepted(
 ) -> None:
     run_id, item_id = _seed(session, world)
     RunRepo(session).get(UUID(run_id)).config = {  # type: ignore[union-attr]
-        "_beacon_suite_id": str(world.chat_to_data_id),
         "layers_enabled": {"self_consistency": False},
     }
     session.commit()

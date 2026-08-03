@@ -1,4 +1,4 @@
-"""The /v1/projects/{id}/runs summary reports real pass@k, not a placeholder (B3)."""
+"""The /v1/suites/{id}/runs summary reports real pass@k, not a placeholder (B3)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _OUTCOMES = {
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
+    acme_suite_id: UUID
     alice_id: UUID
     alice_key: str
 
@@ -56,13 +56,13 @@ def _seed_run(
     run_repo = RunRepo(session)
     run = run_repo.create(
         team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
+        suite_id=world.acme_suite_id,
         solution_id=solution.id,
         suite=suite,
         dataset_version="v2",
         mode=HarnessMode.EVAL,
         pass_idx=0,
-        config={"_beacon_suite_id": str(world.chat_to_data_id)},
+        config={},
         created_by=world.alice_id,
     )
     result_repo = ResultRepo(session)
@@ -70,7 +70,6 @@ def _seed_run(
         for attempt_idx, outcome in enumerate(outcomes):
             result_repo.create(
                 team_id=world.acme_team_id,
-                project_id=world.chat_to_data_id,
                 run_id=run.id,
                 item_id=item_id,
                 attempt_idx=attempt_idx,
@@ -94,7 +93,7 @@ def _summary_for(
     run_id: UUID,
 ) -> dict[str, object]:
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{world.acme_suite_id}/runs",
         headers={"X-API-Key": world.alice_key},
     )
     assert response.status_code == 200, response.text

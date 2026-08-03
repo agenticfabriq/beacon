@@ -280,27 +280,19 @@
       <h1>Settings</h1>
       <p class="sub">Configuration, not measurement — nothing here answers a question about how a
       system is doing, so none of it is in the navigation.</p>
-      <section><div class="sechead"><h2>Team &amp; project</h2>
+      <section><div class="sechead"><h2>Team</h2>
         <span class="sub" style="margin:0">The team is the access boundary — who can see this data.
-        The project is a legacy container between team and benchmark; runs still hang off it, so it
-        is shown here until it is folded out of the schema. Neither is a step on the way to a
-        result.</span></div>
+        Benchmarks belong to the team and runs hang off the benchmark; there is nothing in
+        between.</span></div>
         <div class="inline">
           <select id="set-team"></select>
-          <select id="set-project"></select>
         </div>
         <div class="inline" style="margin-top:8px">
           <input type="text" id="set-new-team" placeholder="new team name">
           <button class="btn" id="set-create-team">Create team</button>
-          <span class="chipsep"></span>
-          <input type="text" id="set-new-project" placeholder="new project name">
-          <button class="btn" id="set-create-project">Create project</button>
-          <span class="chipsep"></span>
-          <button class="btn danger" id="set-archive-project">Archive current project</button>
         </div>
-        <p class="sub">Creating a team needs the beacon_admin role. Archiving hides a project and
-        its runs from every listing; teams have no delete endpoint at all — removal means removing
-        the members.</p></section>
+        <p class="sub">Creating a team needs the beacon_admin role. Teams have no delete endpoint
+        at all — removal means removing the members.</p></section>
       <section><div class="sechead"><h2>This benchmark</h2></div><div id="set-bench"></div></section>
       <section><div class="sechead"><h2>Systems under test</h2>
         <span class="sub" style="margin:0">Registered by the runner on first push; a divergent
@@ -347,22 +339,19 @@ const ENDPOINTS = {
   addMember:    ["POST",   "/v1/teams/{team_id}/members"],
   removeMember: ["DELETE", "/v1/teams/{team_id}/members/{user_id}"],
   teamSystems:  ["GET",    "/v1/teams/{team_id}/solutions"],
-  projects:     ["GET",    "/v1/projects"],
   createTeam:   ["POST",   "/v1/teams"],
-  createProject:["POST",   "/v1/projects"],
-  archiveProject:["DELETE","/v1/projects/{project_id}"],
-  settings:     ["PATCH",  "/v1/projects/{project_id}/settings"],
-  suites:       ["GET",    "/v1/projects/{project_id}/suites"],
-  createSuite:  ["POST",   "/v1/projects/{project_id}/suites"],
-  suiteItems:   ["GET",    "/v1/projects/{project_id}/suites/{suite_id}/items"],
-  matrix:       ["GET",    "/v1/projects/{project_id}/results-matrix"],
-  attribution:  ["GET",    "/v1/projects/{project_id}/attribution"],
-  runs:         ["GET",    "/v1/projects/{project_id}/runs"],
-  run:          ["GET",    "/v1/projects/{project_id}/runs/{run_id}"],
-  invalidate:   ["POST",   "/v1/projects/{project_id}/runs/{run_id}/invalidate"],
-  restore:      ["POST",   "/v1/projects/{project_id}/runs/{run_id}/restore"],
-  results:      ["GET",    "/v1/projects/{project_id}/runs/{run_id}/results"],
-  result:       ["GET",    "/v1/projects/{project_id}/runs/{run_id}/results/{item_id}"],
+  suites:       ["GET",    "/v1/teams/{team_id}/suites"],
+  createSuite:  ["POST",   "/v1/teams/{team_id}/suites"],
+  patchSuite:   ["PATCH",  "/v1/suites/{suite_id}"],
+  suiteItems:   ["GET",    "/v1/suites/{suite_id}/items"],
+  matrix:       ["GET",    "/v1/suites/{suite_id}/results-matrix"],
+  attribution:  ["GET",    "/v1/suites/{suite_id}/attribution"],
+  runs:         ["GET",    "/v1/suites/{suite_id}/runs"],
+  run:          ["GET",    "/v1/runs/{run_id}"],
+  invalidate:   ["POST",   "/v1/runs/{run_id}/invalidate"],
+  restore:      ["POST",   "/v1/runs/{run_id}/restore"],
+  results:      ["GET",    "/v1/runs/{run_id}/results"],
+  result:       ["GET",    "/v1/runs/{run_id}/results/{item_id}"],
   keys:         ["GET",    "/v1/me/api-keys"],
   createKey:    ["POST",   "/v1/me/api-keys"],
   revokeKey:    ["DELETE", "/v1/me/api-keys/{api_key_id}"],
@@ -370,7 +359,7 @@ const ENDPOINTS = {
 
 const S = {  // client state; everything else lives on the server
   key: null, user: null,
-  teamId: null, projectId: null, suiteId: null,
+  teamId: null, suiteId: null,
   suites: [], baselineRunId: null,
   matrixDifficulty: "", matrixRows: [],
   matrixQuery: "", matrixSystem: "", matrixModel: "",
@@ -471,12 +460,10 @@ async function bootstrapWorkspace() {
   const teams = asList(await api("teams"), "teams");
   if (!S.teamId && teams.length) S.teamId = String(teams[0].id);
   if (!S.teamId) return;
-  const projects = asList(await api("projects", {}, { query: { team_id: S.teamId } }), "projects");
-  if (!S.projectId && projects.length) S.projectId = String(projects[0].id);
-  if (!S.projectId) return;
-  S.baselineRunId = (projects.find((p) => String(p.id) === S.projectId) || {}).baseline_run_id;
-  S.suites = asList(await api("suites", { project_id: S.projectId }), "suites");
+  S.suites = asList(await api("suites", { team_id: S.teamId }), "suites");
   if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
+  const suite = S.suites.find((s) => String(s.id) === S.suiteId);
+  S.baselineRunId = suite ? suite.baseline_run_id : null;
   renderRail();
 }
 function renderRail() {
@@ -491,8 +478,8 @@ const loadMatrix = guard(async () => {
   if (!S.suiteId) return;
   // Difficulty re-aggregates the rates, so it is server-side; everything else
   // below is a refinement over the returned rows and stays in the client.
-  const body = await api("matrix", { project_id: S.projectId },
-    { query: { suite_id: S.suiteId, difficulty: S.matrixDifficulty } });
+  const body = await api("matrix", { suite_id: S.suiteId },
+    { query: { difficulty: S.matrixDifficulty } });
   S.matrixRows = body.rows;
   const counts = body.difficulty_counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -572,8 +559,8 @@ const openCell = guard(async (row) => {
 
   const attributionBox = document.getElementById("cell-attribution");
   try {
-    const snapshot = await api("attribution", { project_id: S.projectId },
-      { query: { sut: row.solution_id, suite: S.suiteId } });
+    const snapshot = await api("attribution", { suite_id: S.suiteId },
+      { query: { sut: row.solution_id } });
     const layers = snapshot.layers || [];
     attributionBox.innerHTML = !snapshot.supported
       ? '<div class="empty">This system declares no ablatable layers.</div>'
@@ -588,8 +575,8 @@ const openCell = guard(async (row) => {
           "</tbody></table></div>";
   } catch (error) { attributionBox.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 
-  const runs = await api("runs", { project_id: S.projectId }, { query: {
-    suite_id: S.suiteId, model_id: row.model_id || "", config_digest: row.config_digest || "", limit: 50 } });
+  const runs = await api("runs", { suite_id: S.suiteId }, { query: {
+    model_id: row.model_id || "", config_digest: row.config_digest || "", limit: 50 } });
   document.getElementById("cell-runs").innerHTML = `<div class="tw"><table>
     <thead><tr><th>Run</th><th>Arm</th><th>State</th><th class="num">pass@1</th>
     <th class="num">items</th><th></th></tr></thead><tbody>` +
@@ -604,8 +591,8 @@ const openCell = guard(async (row) => {
 
 /* ---------------------------- runs ---------------------------- */
 const loadRuns = guard(async () => {
-  const runs = await api("runs", { project_id: S.projectId }, { query: {
-    suite_id: S.suiteId, limit: 200,
+  const runs = await api("runs", { suite_id: S.suiteId }, { query: {
+    limit: 200,
     include_invalidated: S.showInvalidated ? "true" : "" } });
   document.getElementById("runs-show-invalidated")
     .setAttribute("aria-pressed", String(S.showInvalidated));
@@ -635,7 +622,7 @@ const loadRuns = guard(async () => {
 const openRun = guard(async (runId) => {
   go("run");
   S.selectedItem = null;
-  const run = await api("run", { project_id: S.projectId, run_id: runId });
+  const run = await api("run", { run_id: runId });
   document.getElementById("run-crumb").textContent = short(runId);
   document.getElementById("run-title").textContent = `Run ${short(runId)}`;
   document.getElementById("run-sub").textContent =
@@ -646,7 +633,7 @@ const openRun = guard(async (runId) => {
 });
 
 const loadRunItems = guard(async (runId) => {
-  const body = await api("results", { project_id: S.projectId, run_id: runId },
+  const body = await api("results", { run_id: runId },
     { query: { outcome: S.runOutcome, difficulty: S.runDifficulty, limit: 500 } });
   const oc = body.outcome_counts || {}, dc = body.difficulty_counts || {};
   const chip = (group, value, label, pressed) =>
@@ -676,7 +663,7 @@ const loadRunItems = guard(async (runId) => {
 const openItem = guard(async (runId, itemId) => {
   S.selectedItem = itemId;
   await loadRunItems(runId);
-  const detail = await api("result", { project_id: S.projectId, run_id: runId, item_id: itemId });
+  const detail = await api("result", { run_id: runId, item_id: itemId });
   const verdicts = detail.verdicts || [];
   const evidence = (verdicts.find((v) => v.evidence && v.evidence.candidate_sql) || {}).evidence || {};
   const sampleTable = (columns, rows) => (!columns || !rows) ? "" :
@@ -724,7 +711,7 @@ const openItem = guard(async (runId, itemId) => {
 /* -------------------------- questions -------------------------- */
 const loadQuestions = guard(async () => {
   if (!S.suiteId) return;
-  const body = await api("suiteItems", { project_id: S.projectId, suite_id: S.suiteId },
+  const body = await api("suiteItems", { suite_id: S.suiteId },
     { query: { difficulty: S.questionsDifficulty, source: S.questionsSource, limit: 200 } });
   const dc = body.difficulty_counts || {}, sc = body.source_counts || {};
   const chip = (group, value, label, pressed) =>
@@ -750,11 +737,12 @@ const loadQuestions = guard(async () => {
 
 /* -------------------------- benchmarks -------------------------- */
 const loadBenchmarks = guard(async () => {
-  S.suites = asList(await api("suites", { project_id: S.projectId }), "suites");
-  const runs = await api("runs", { project_id: S.projectId },
-    { query: { limit: 500, include_invalidated: "true" } });
+  S.suites = asList(await api("suites", { team_id: S.teamId }), "suites");
+  const counts = await Promise.all(S.suites.map((suite) =>
+    api("runs", { suite_id: suite.id }, { query: { limit: 500, include_invalidated: "true" } })
+      .then((runs) => runs.length).catch(() => 0)));
   const bySuite = {};
-  for (const run of runs) bySuite[String(run.suite_id)] = (bySuite[String(run.suite_id)] || 0) + 1;
+  S.suites.forEach((suite, index) => { bySuite[String(suite.id)] = counts[index]; });
   document.getElementById("benchmarks-rows").innerHTML = S.suites.length ? S.suites.map((suite) =>
     `<tr class="click" data-suite="${esc(suite.id)}"><td>${esc(suite.name)}</td>
       <td class="num dim">${suite.item_count}</td>
@@ -768,9 +756,6 @@ const loadSettings = guard(async () => {
   const teams = asList(await api("teams"), "teams");
   document.getElementById("set-team").innerHTML = teams.map((team) =>
     `<option value="${esc(team.id)}" ${String(team.id) === S.teamId ? "selected" : ""}>${esc(team.name)}</option>`).join("");
-  const projects = asList(await api("projects", {}, { query: { team_id: S.teamId } }), "projects");
-  document.getElementById("set-project").innerHTML = projects.map((project) =>
-    `<option value="${esc(project.id)}" ${String(project.id) === S.projectId ? "selected" : ""}>${esc(project.name)}</option>`).join("");
 
   const suite = S.suites.find((s) => String(s.id) === S.suiteId);
   document.getElementById("set-bench").innerHTML =
@@ -829,7 +814,8 @@ document.addEventListener("click", (event) => {
     const reason = window.prompt("Why is this run invalid? (the reason is the point of keeping the row)");
     if (reason && reason.trim()) {
       guard(async () => {
-        await api("invalidate", { project_id: S.projectId, run_id: invalidateId }, { body: { reason: reason.trim() } });
+        await api("invalidate", { run_id: invalidateId }, { body: { reason: reason.trim() } });
+        if (String(invalidateId) === String(S.baselineRunId)) S.baselineRunId = null;
         loadRuns();
       })();
     }
@@ -837,13 +823,13 @@ document.addEventListener("click", (event) => {
   }
   const restoreId = withData("restore");
   if (restoreId) {
-    guard(async () => { await api("restore", { project_id: S.projectId, run_id: restoreId }); loadRuns(); })();
+    guard(async () => { await api("restore", { run_id: restoreId }); loadRuns(); })();
     return;
   }
   const pinId = withData("pin");
   if (pinId) {
     guard(async () => {
-      await api("settings", { project_id: S.projectId }, { body: { baseline_run_id: pinId } });
+      await api("patchSuite", { suite_id: S.suiteId }, { body: { baseline_run_id: pinId } });
       S.baselineRunId = pinId;
       loadRuns();
     })();
@@ -893,6 +879,8 @@ document.addEventListener("click", (event) => {
   const suiteRow = t.closest("[data-suite]");
   if (suiteRow) {
     S.suiteId = suiteRow.dataset.suite;
+    const suite = S.suites.find((entry) => String(entry.id) === S.suiteId);
+    S.baselineRunId = suite ? suite.baseline_run_id : null;
     S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
     renderRail(); go("matrix");
     return;
@@ -929,17 +917,13 @@ document.getElementById("runs-show-invalidated").addEventListener("click", () =>
 document.getElementById("bench-create-btn").addEventListener("click", guard(async () => {
   const name = document.getElementById("bench-new-name").value.trim();
   if (!name) return;
-  const created = await api("createSuite", { project_id: S.projectId },
+  const created = await api("createSuite", { team_id: S.teamId },
     { body: { name, description: document.getElementById("bench-new-desc").value, kind: "manual" } });
   S.suiteId = String(created.id);
   loadBenchmarks(); renderRail();
 }));
 document.getElementById("set-team").addEventListener("change", guard(async (event) => {
-  S.teamId = event.target.value; S.projectId = null; S.suiteId = null; S.suites = [];
-  await bootstrapWorkspace(); loadSettings();
-}));
-document.getElementById("set-project").addEventListener("change", guard(async (event) => {
-  S.projectId = event.target.value; S.suiteId = null; S.suites = [];
+  S.teamId = event.target.value; S.suiteId = null; S.suites = [];
   await bootstrapWorkspace(); loadSettings();
 }));
 document.getElementById("set-create-team").addEventListener("click", guard(async () => {
@@ -947,21 +931,7 @@ document.getElementById("set-create-team").addEventListener("click", guard(async
   if (!name) return;
   const created = await api("createTeam", {}, { body: { name, description: "" } });
   document.getElementById("set-new-team").value = "";
-  S.teamId = String(created.id); S.projectId = null; S.suiteId = null; S.suites = [];
-  await bootstrapWorkspace(); loadSettings();
-}));
-document.getElementById("set-create-project").addEventListener("click", guard(async () => {
-  const name = document.getElementById("set-new-project").value.trim();
-  if (!name) return;
-  const created = await api("createProject", {}, { query: { team_id: S.teamId }, body: { name, description: "" } });
-  document.getElementById("set-new-project").value = "";
-  S.projectId = String(created.id); S.suiteId = null; S.suites = [];
-  await bootstrapWorkspace(); loadSettings();
-}));
-document.getElementById("set-archive-project").addEventListener("click", guard(async () => {
-  if (!window.confirm("Archive this project? It disappears from listings; nothing is deleted.")) return;
-  await api("archiveProject", { project_id: S.projectId });
-  S.projectId = null; S.suiteId = null; S.suites = [];
+  S.teamId = String(created.id); S.suiteId = null; S.suites = [];
   await bootstrapWorkspace(); loadSettings();
 }));
 document.getElementById("set-invite-btn").addEventListener("click", guard(async () => {

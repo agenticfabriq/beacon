@@ -23,14 +23,17 @@ from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
 
 
 class Suite(Base, IdMixin, TimestampsMixin):
-    """A project-scoped named subset of eval items."""
+    """A benchmark: a team-owned named set of eval items runs are scored over.
+
+    Carries the reference run every other run is read against. It lived on the
+    Project before; a reference is per benchmark, and the project level is gone.
+    """
 
     __tablename__ = "suites"
 
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    # No FK: a run references its suite, so the reference run would be a cycle.
+    # Cleared by run invalidation at the service layer.
+    baseline_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("teams.id", ondelete="CASCADE"),
         nullable=False,
@@ -54,9 +57,8 @@ class Suite(Base, IdMixin, TimestampsMixin):
             "method IN ('manual','separability_gain','handpicked')",
             name="ck_suites_method",
         ),
-        Index("ix_suites_project", "project_id"),
         Index("ix_suites_team", "team_id"),
-        UniqueConstraint("project_id", "name", name="uq_suites_project_name"),
+        UniqueConstraint("team_id", "name", name="uq_suites_team_name"),
     )
 
 

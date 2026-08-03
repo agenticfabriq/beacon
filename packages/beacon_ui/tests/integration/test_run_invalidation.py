@@ -32,7 +32,6 @@ SUITE = "invalidation_v1"
 
 class _World(Protocol):
     acme_team_id: UUID
-    chat_to_data_id: UUID
     alice_id: UUID
     alice_key: str
     bob_key: str
@@ -40,6 +39,7 @@ class _World(Protocol):
 
 @dataclass(frozen=True)
 class Seeded:
+    suite_id: str
     run_id: str
     other_run_id: str
 
@@ -57,7 +57,6 @@ def seeded(session: Session, world: _World) -> Seeded:
         created_by=world.alice_id,
     )
     suite = SuiteRepo(session).create(
-        project_id=world.chat_to_data_id,
         team_id=world.acme_team_id,
         name=SUITE,
         description="",
@@ -69,19 +68,18 @@ def seeded(session: Session, world: _World) -> Seeded:
     for index in range(2):
         run = RunRepo(session).create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
+            suite_id=suite.id,
             solution_id=solution.id,
             suite=SUITE,
             dataset_version="v1",
             mode=HarnessMode.EVAL,
             pass_idx=index,
-            config={"_beacon_suite_id": str(suite.id)},
+            config={},
             created_by=world.alice_id,
         )
         RunRepo(session).mark_completed(run.id)
         ResultRepo(session).create(
             team_id=world.acme_team_id,
-            project_id=world.chat_to_data_id,
             run_id=run.id,
             item_id=str(uuid4()),
             attempt_idx=0,
@@ -96,7 +94,7 @@ def seeded(session: Session, world: _World) -> Seeded:
         )
         ids.append(str(run.id))
     session.commit()
-    return Seeded(run_id=ids[0], other_run_id=ids[1])
+    return Seeded(suite_id=str(suite.id), run_id=ids[0], other_run_id=ids[1])
 
 
 def _headers(world: _World) -> dict[str, str]:
@@ -107,7 +105,7 @@ def _invalidate(
     api_client: TestClient, world: _World, run_id: str, reason: str = "Wrong benchmark database"
 ) -> Any:
     return api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{run_id}/invalidate",
+        f"/v1/runs/{run_id}/invalidate",
         headers=_headers(world),
         json={"reason": reason},
     )
@@ -139,7 +137,7 @@ def test_an_invalidated_run_leaves_the_default_listing(
     _invalidate(api_client, world, seeded.run_id)
 
     listed = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs", headers=_headers(world)
+        f"/v1/suites/{seeded.suite_id}/runs", headers=_headers(world)
     ).json()
 
     ids = [row["run_id"] for row in listed]
@@ -154,7 +152,7 @@ def test_an_invalidated_run_can_still_be_listed_on_request(
     _invalidate(api_client, world, seeded.run_id)
 
     listed = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs",
+        f"/v1/suites/{seeded.suite_id}/runs",
         params={"include_invalidated": True},
         headers=_headers(world),
     ).json()
@@ -168,7 +166,7 @@ def test_its_results_survive(api_client: TestClient, world: _World, seeded: Seed
     _invalidate(api_client, world, seeded.run_id)
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{seeded.run_id}/results",
+        f"/v1/runs/{seeded.run_id}/results",
         headers=_headers(world),
     )
 
@@ -180,7 +178,7 @@ def test_it_is_still_readable_by_id(api_client: TestClient, world: _World, seede
     _invalidate(api_client, world, seeded.run_id)
 
     response = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{seeded.run_id}", headers=_headers(world)
+        f"/v1/runs/{seeded.run_id}", headers=_headers(world)
     )
 
     assert response.status_code == 200
@@ -192,7 +190,7 @@ def test_invalidating_clears_the_reference_pin(
 ) -> None:
     """A retired run cannot go on being what everything is compared against."""
     api_client.patch(
-        f"/v1/projects/{world.chat_to_data_id}/settings",
+        f"/v1/suites/{seeded.suite_id}",
         headers=_headers(world),
         json={"baseline_run_id": seeded.run_id},
     )
@@ -200,16 +198,16 @@ def test_invalidating_clears_the_reference_pin(
     _invalidate(api_client, world, seeded.run_id)
 
     settings = api_client.patch(
-        f"/v1/projects/{world.chat_to_data_id}/settings", headers=_headers(world), json={}
+        f"/v1/suites/{seeded.suite_id}", headers=_headers(world), json={}
     ).json()
     assert settings["baseline_run_id"] is None
 
 
-def test_invalidating_leaves_another_projects_pin_alone(
+def test_invalidating_leaves_an_unrelated_pin_alone(
     api_client: TestClient, world: _World, seeded: Seeded
 ) -> None:
     api_client.patch(
-        f"/v1/projects/{world.chat_to_data_id}/settings",
+        f"/v1/suites/{seeded.suite_id}",
         headers=_headers(world),
         json={"baseline_run_id": seeded.other_run_id},
     )
@@ -217,7 +215,7 @@ def test_invalidating_leaves_another_projects_pin_alone(
     _invalidate(api_client, world, seeded.run_id)
 
     settings = api_client.patch(
-        f"/v1/projects/{world.chat_to_data_id}/settings", headers=_headers(world), json={}
+        f"/v1/suites/{seeded.suite_id}", headers=_headers(world), json={}
     ).json()
     assert settings["baseline_run_id"] == seeded.other_run_id
 
@@ -239,14 +237,14 @@ def test_an_invalidation_can_be_undone(
     _invalidate(api_client, world, seeded.run_id)
 
     restored = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{seeded.run_id}/restore",
+        f"/v1/runs/{seeded.run_id}/restore",
         headers=_headers(world),
     )
 
     assert restored.status_code == 200
     assert restored.json()["invalidated_at"] is None
     listed = api_client.get(
-        f"/v1/projects/{world.chat_to_data_id}/runs", headers=_headers(world)
+        f"/v1/suites/{seeded.suite_id}/runs", headers=_headers(world)
     ).json()
     assert seeded.run_id in [row["run_id"] for row in listed]
 
@@ -255,7 +253,7 @@ def test_restoring_a_valid_run_is_a_conflict(
     api_client: TestClient, world: _World, seeded: Seeded
 ) -> None:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{seeded.run_id}/restore",
+        f"/v1/runs/{seeded.run_id}/restore",
         headers=_headers(world),
     )
 
@@ -266,13 +264,13 @@ def test_someone_who_may_only_run_evals_cannot_invalidate(
     api_client: TestClient, world: _World, seeded: Seeded
 ) -> None:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/runs/{seeded.run_id}/invalidate",
+        f"/v1/runs/{seeded.run_id}/invalidate",
         headers={"X-API-Key": world.bob_key},
         json={"reason": "not mine to retire"},
     )
 
     # Retiring a run changes what everyone else sees, and can clear the
-    # reference pin, so it takes project.manage rather than project.run_eval.
+    # reference pin, so it takes EVAL_MANAGE rather than EVAL_RUN.
     assert response.status_code == 403
 
 

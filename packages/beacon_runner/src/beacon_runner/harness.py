@@ -68,7 +68,7 @@ class HarnessRunner:
         self,
         *,
         team_id: UUID,
-        project_id: UUID,
+        suite_id: UUID,
         user_id: UUID,
         solution_record_id: UUID,
         items: Iterable[EvalItem],
@@ -95,7 +95,7 @@ class HarnessRunner:
         sut = self._resolve_and_validate_sut(solution_record_id, config, mode)
         run_id = self._create_run(
             team_id=team_id,
-            project_id=project_id,
+            suite_id=suite_id,
             user_id=user_id,
             solution_record_id=solution_record_id,
             suite=suite,
@@ -116,7 +116,6 @@ class HarnessRunner:
                         task,
                         config,
                         team_id,
-                        project_id,
                         run_id,
                     ): task
                     for task in tasks
@@ -159,7 +158,7 @@ class HarnessRunner:
         self,
         *,
         team_id: UUID,
-        project_id: UUID,
+        suite_id: UUID,
         user_id: UUID,
         solution_record_id: UUID,
         suite: str,
@@ -174,7 +173,7 @@ class HarnessRunner:
             payload = config.model_dump()
             run = RunRepo(session).create(
                 team_id=team_id,
-                project_id=project_id,
+                suite_id=suite_id,
                 solution_id=solution_record_id,
                 suite=suite,
                 dataset_version=dataset_version,
@@ -202,7 +201,6 @@ class HarnessRunner:
         task: _ItemTask,
         config: SolutionConfig,
         team_id: UUID,
-        project_id: UUID,
         run_id: UUID,
     ) -> None:
         item = task.item
@@ -240,7 +238,6 @@ class HarnessRunner:
             persist_result(
                 session,
                 team_id=team_id,
-                project_id=project_id,
                 run_id=run_id,
                 item=item,
                 attempt_idx=task.attempt_idx,
@@ -261,7 +258,7 @@ def run_nightly_loo(
     suite: str,
     dataset_version: str,
     K: int,
-    project_id: UUID,
+    suite_id: UUID,
     team_id: UUID,
     solution_id: UUID,
 ) -> list[Attribution]:
@@ -276,7 +273,7 @@ def run_nightly_loo(
         suite=suite,
         dataset_version=dataset_version,
         K=K,
-        project_id=project_id,
+        suite_id=suite_id,
         team_id=team_id,
         solution_id=solution_id,
         harness_runner=cast("_HarnessRunnerLike", runner),

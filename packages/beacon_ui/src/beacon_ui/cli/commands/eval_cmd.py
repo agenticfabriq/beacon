@@ -11,28 +11,19 @@ from beacon_ui.cli.http import http_client_from_context
 
 @click.group()
 def cli() -> None:
-    """Run and gate evaluations."""
-
-
-def _require_project_id(project: str | None) -> str:
-    ctx = load_context()
-    project_id = project or ctx.project_id
-    if not project_id:
-        raise click.ClickException("--project or BEACON_PROJECT required")
-    return project_id
+    """Register evaluation runs."""
 
 
 @cli.command("run")
-@click.option("--project", default=None, help="Project ID. Defaults to BEACON_PROJECT or ctx.")
 @click.option("--sut", required=True, help="Solution UUID.")
-@click.option("--suite", required=True, help="Suite UUID.")
+@click.option("--suite", required=True, help="Benchmark (suite) UUID.")
 @click.option("--mode", default="EVAL", show_default=True)
 @click.option("--k", default=1, type=int, show_default=True)
-def run_eval(project: str | None, sut: str, suite: str, mode: str, k: int) -> None:
-    """Queue an evaluation run for the given solution and suite."""
+def run_eval(sut: str, suite: str, mode: str, k: int) -> None:
+    """Register a run for the given solution and benchmark."""
     client = http_client_from_context(load_context())
     out = client.post(
-        f"/v1/projects/{_require_project_id(project)}/runs",
-        {"solution_id": sut, "suite_id": suite, "mode": mode, "config": {"k": k}},
+        f"/v1/suites/{suite}/runs",
+        {"solution_id": sut, "mode": mode, "config": {"k": k}},
     )
     click.echo(format_output(out, format="json"))

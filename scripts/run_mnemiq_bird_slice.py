@@ -1,6 +1,6 @@
 """Run mnemiq (in-process) over a small BIRD slice through beacon's harness.
 
-Bootstraps team/project/solution/suite rows idempotently, ingests the BIRD
+Bootstraps team/solution/suite rows idempotently, ingests the BIRD
 questions for one database, runs ``MnemiqInProcessSUT`` through
 ``HarnessRunner`` with the execution-grounded SQL grader, and prints a
 per-item summary of the persisted run.
@@ -54,7 +54,6 @@ from beacon_runner.types import EvalItem, SolutionConfig
 from beacon_storage.db import make_engine, make_session_factory, session_scope
 from beacon_storage.models.runs import HarnessMode, Run
 from beacon_storage.repository.eval_items import EvalItemRepo
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.suites import SuiteRepo
@@ -112,7 +111,7 @@ def _run_loo_sweep(
     sut: MnemiqInProcessSUT,
     items: list[EvalItem],
     team_id: UUID,
-    project_id: UUID,
+    suite_id: UUID,
     user_id: UUID,
     solution_record_id: UUID,
     loo_layers: list[str],
@@ -146,7 +145,7 @@ def _run_loo_sweep(
             suite=SUITE,
             dataset_version=DATASET_VERSION,
             K=passes,
-            project_id=project_id,
+            suite_id=suite_id,
             team_id=team_id,
             solution_id=solution_record_id,
             harness_runner=adapter,
@@ -264,11 +263,16 @@ def main(argv: list[str] | None = None) -> int:
             team = TeamRepo(session).get_by_name(args.team)
             if team is None:
                 team = TeamRepo(session).create(name=args.team)
-            projects = ProjectRepo(session).list_for_team(team.id)
-            project = next((p for p in projects if p.name == args.project), None)
-            if project is None:
-                project = ProjectRepo(session).create(
-                    team_id=team.id, name=args.project, created_by=user_id
+            suites = SuiteRepo(session).list_for_team(team.id)
+            suite_row = next((x for x in suites if x.name == args.project), None)
+            if suite_row is None:
+                suite_row = SuiteRepo(session).create(
+                    team_id=team.id,
+                    name=args.project,
+                    description="",
+                    method="manual",
+                    suite_metadata={},
+                    created_by=user_id,
                 )
             sut = MnemiqInProcessSUT(
                 owner_team_id=team.id,
@@ -282,7 +286,6 @@ def main(argv: list[str] | None = None) -> int:
                 team_id=team.id,
                 created_by=user_id,
                 sut=sut,
-                project_id=project.id,
                 registry=registry,
             )
             ingest = ingest_bird_tasks(session, team_id=team.id, tasks=tasks, created_by=user_id)
@@ -293,10 +296,9 @@ def main(argv: list[str] | None = None) -> int:
             rows = rows[: args.limit]
 
             suite_repo = SuiteRepo(session)
-            suite_row = suite_repo.get_by_project_and_name(project.id, SUITE)
+            suite_row = suite_repo.get_by_team_and_name(team.id, SUITE)
             if suite_row is None:
                 suite_row = suite_repo.create(
-                    project_id=project.id,
                     team_id=team.id,
                     name=SUITE,
                     description=f"mnemiq BIRD slice ({args.db_id} x {args.limit})",
@@ -316,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for row in rows
             ]
-            team_id, project_id, solution_record_id = team.id, project.id, solution.id
+            team_id, suite_record_id, solution_record_id = team.id, suite_row.id, solution.id
 
         print(f"ingest: inserted={ingest.inserted} skipped={ingest.skipped}; slice={len(items)}")
 
@@ -345,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                         sut=sut,
                         items=items,
                         team_id=team_id,
-                        project_id=project_id,
+                        suite_id=suite_record_id,
                         user_id=user_id,
                         solution_record_id=solution_record_id,
                         loo_layers=args.loo,
@@ -358,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
 
         run_id = runner.run_single(
             team_id=team_id,
-            project_id=project_id,
+            suite_id=suite_record_id,
             user_id=user_id,
             solution_record_id=solution_record_id,
             items=items,

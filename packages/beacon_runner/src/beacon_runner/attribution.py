@@ -78,7 +78,7 @@ class AttributionHarnessRunner:
         mode: str,
         pass_idx: int,
         parent_sweep_id: UUID,
-        project_id: UUID,
+        suite_id: UUID,
         team_id: UUID,
         solution_id: UUID,
         sweep_arm: str,
@@ -87,7 +87,7 @@ class AttributionHarnessRunner:
         self._assert_sut_matches_solution_record(cast("_SutLike", sut), solution_id)
         return self.runner.run_single(
             team_id=team_id,
-            project_id=project_id,
+            suite_id=suite_id,
             user_id=self.user_id,
             solution_record_id=solution_id,
             items=cast("Sequence[EvalItem]", items),

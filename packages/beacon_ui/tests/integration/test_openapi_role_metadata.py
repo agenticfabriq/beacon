@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 # Endpoints authorized by identity alone: they are public, or they act only on
-# the caller's own resources, so there is no team- or project-scoped permission
-# for them to declare. Everything else must carry @requires().
+# the caller's own resources, so there is no team-scoped permission for them to
+# declare. Everything else must carry @requires().
 #
 # Keep this list free of paths that no longer exist. A stale entry silently
 # exempts whatever is mounted there next, which is how a guard stops guarding.
@@ -28,9 +28,6 @@ EXEMPT_PATHS: set[tuple[str, str]] = {
     ("/v1/me/api-keys", "get"),
     ("/v1/me/api-keys", "post"),
     ("/v1/me/api-keys/{api_key_id}", "delete"),
-    ("/v1/projects", "get"),
-    ("/v1/projects", "post"),
-    ("/v1/projects/{project_id}/members", "post"),
     ("/v1/teams", "get"),
     ("/v1/teams", "post"),
 }
@@ -69,15 +66,15 @@ def test_team_members_endpoint_requires_team_manage(api_client: TestClient) -> N
     assert "team.manage" in operation["x-required-permissions"]
 
 
-def test_project_settings_endpoint_requires_project_manage(api_client: TestClient) -> None:
+def test_suite_patch_requires_eval_manage(api_client: TestClient) -> None:
     schema = api_client.get("/openapi.json").json()
-    operation = schema["paths"]["/v1/projects/{project_id}/settings"]["patch"]
+    operation = schema["paths"]["/v1/suites/{suite_id}"]["patch"]
 
-    assert "project.manage" in operation["x-required-permissions"]
+    assert "eval.manage" in operation["x-required-permissions"]
 
 
-def test_runs_endpoint_requires_run_eval(api_client: TestClient) -> None:
+def test_runs_endpoint_requires_eval_run(api_client: TestClient) -> None:
     schema = api_client.get("/openapi.json").json()
-    operation = schema["paths"]["/v1/projects/{project_id}/runs"]["post"]
+    operation = schema["paths"]["/v1/suites/{suite_id}/runs"]["post"]
 
-    assert "project.run_eval" in operation["x-required-permissions"]
+    assert "eval.run" in operation["x-required-permissions"]

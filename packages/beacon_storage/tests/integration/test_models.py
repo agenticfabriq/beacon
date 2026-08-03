@@ -2,7 +2,6 @@ import pytest
 from beacon_storage.models.tenancy import (
     ApiKey,
     Membership,
-    Project,
     Role,
     ScopeKind,
     Team,
@@ -21,16 +20,25 @@ def test_create_user(session: Session) -> None:
 
 
 @pytest.mark.integration
-def test_create_team_and_project(session: Session) -> None:
+def test_suite_belongs_to_team(session: Session) -> None:
+    from beacon_storage.models.suites import Suite
+
     u = User(email="owner@example.com", name="Owner")
     t = Team(name="acme")
     session.add_all([u, t])
     session.flush()
-    p = Project(team_id=t.id, name="schema-linker-tuning", description="...", created_by=u.id)
-    session.add(p)
+    suite = Suite(
+        team_id=t.id,
+        name="bench",
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=u.id,
+    )
+    session.add(suite)
     session.commit()
-    assert p.team_id == t.id
-    assert p.created_by == u.id
+    assert suite.team_id == t.id
+    assert suite.created_by == u.id
 
 
 @pytest.mark.integration

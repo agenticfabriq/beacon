@@ -8,23 +8,23 @@ from fastapi import FastAPI
 
 
 def test_requires_decorator_attaches_metadata() -> None:
-    @requires(Permission.PROJECT_MANAGE)
+    @requires(Permission.EVAL_MANAGE)
     def handler() -> None:
         pass
 
     required = vars(handler)["_beacon_required_permissions"]
-    assert required == (Permission.PROJECT_MANAGE,)
+    assert required == (Permission.EVAL_MANAGE,)
 
 
 def test_requires_supports_multiple_permissions() -> None:
-    @requires(Permission.PROJECT_VIEW, Permission.PROJECT_RUN_EVAL)
+    @requires(Permission.EVAL_VIEW, Permission.EVAL_RUN)
     def handler() -> None:
         pass
 
     required = vars(handler)["_beacon_required_permissions"]
     assert required == (
-        Permission.PROJECT_VIEW,
-        Permission.PROJECT_RUN_EVAL,
+        Permission.EVAL_VIEW,
+        Permission.EVAL_RUN,
     )
 
 
@@ -47,9 +47,9 @@ def test_extract_required_permissions_helper_returns_set() -> None:
     app = FastAPI()
 
     @app.get("/y")
-    @requires(Permission.PROJECT_VIEW)
+    @requires(Permission.EVAL_VIEW)
     def y_handler() -> dict[str, str]:
         return {"ok": "yes"}
 
     permissions = extract_required_permissions(app, "/y", "get")
-    assert permissions == {Permission.PROJECT_VIEW}
+    assert permissions == {Permission.EVAL_VIEW}

@@ -1,4 +1,4 @@
-"""GET /v1/projects/{project_id}/attribution."""
+"""GET /v1/suites/{suite_id}/attribution."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from uuid import UUID  # noqa: TC003
 from beacon_iam.permissions import Permission
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.attributions import AttributionRepo
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.solutions import SolutionRepo
 from beacon_storage.repository.suites import SuiteRepo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,7 +22,7 @@ from beacon_ui.api.schemas.attribution import AttributionLayerOut, AttributionSn
 if TYPE_CHECKING:
     from beacon_storage.models.attribution import Attribution
 
-router = APIRouter(prefix="/v1/projects", tags=["attribution"])
+router = APIRouter(prefix="/v1", tags=["attribution"])
 
 
 def _to_float(value: object, default: float) -> float:
@@ -54,58 +53,51 @@ def _layer_out(row: Attribution) -> AttributionLayerOut:
 
 
 @router.get(
-    "/{project_id}/attribution",
+    "/suites/{suite_id}/attribution",
     response_model=AttributionSnapshotOut,
     summary="Get the latest attribution snapshot for a solution and suite",
 )
-@requires(Permission.PROJECT_VIEW)
-def get_project_attribution(
-    project_id: UUID,
+@requires(Permission.EVAL_VIEW)
+def get_suite_attribution(
+    suite_id: UUID,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_VIEW, scope_kind="suite")),
     ],
     session: Annotated[Session, Depends(get_session)],
     sut: Annotated[UUID, Query(description="Solution UUID")],
-    suite: Annotated[UUID, Query(description="Suite UUID")],
 ) -> AttributionSnapshotOut:
-    """Return the latest per-layer attribution snapshot for a solution and suite."""
-    project = ProjectRepo(session).get(project_id)
-    assert project is not None
+    """Return the latest per-layer attribution snapshot for a solution and benchmark."""
+    suite_record = SuiteRepo(session).get(suite_id)
+    assert suite_record is not None  # the permission dependency 404s first
 
     solution = SolutionRepo(session).get(sut)
     if solution is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"solution {sut} not found")
-    if solution.team_id != project.team_id:
+    if solution.team_id != suite_record.team_id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "solution belongs to a different team than this project",
+            "solution belongs to a different team than this benchmark",
         )
 
     if not solution.layers:
         return AttributionSnapshotOut(
-            project_id=project_id,
             solution_id=sut,
-            suite_id=suite,
+            suite_id=suite_id,
             supported=False,
             computed_at=None,
             layers=[],
         )
 
-    suite_record = SuiteRepo(session).get(suite)
-    if suite_record is None or suite_record.project_id != project_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"suite {suite} not found")
-
     rows = AttributionRepo(session).latest_for(
-        project_id=project_id,
+        team_id=suite_record.team_id,
         solution_id=sut,
         suite=suite_record.name,
     )
     layers = sorted((_layer_out(row) for row in rows), key=lambda row: -abs(row.delta_pass_at_3))
     return AttributionSnapshotOut(
-        project_id=project_id,
         solution_id=sut,
-        suite_id=suite,
+        suite_id=suite_id,
         supported=True,
         computed_at=max((row.created_at for row in rows), default=None),
         layers=layers,

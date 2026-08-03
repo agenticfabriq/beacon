@@ -21,7 +21,6 @@ class TraceRepo:
         self,
         *,
         team_id: UUID,
-        project_id: UUID,
         result_id: UUID,
         step_tree: dict[str, object],
         object_storage_uri: str | None,
@@ -29,7 +28,6 @@ class TraceRepo:
         """Persist a trace tied to ``result_id`` and return it."""
         trace = Trace(
             team_id=team_id,
-            project_id=project_id,
             result_id=result_id,
             step_tree=step_tree,
             object_storage_uri=object_storage_uri,

@@ -12,23 +12,20 @@ def test_load_returns_empty_when_no_file(tmp_path: Path) -> None:
 def test_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "ctx.json"
     save_context(
-        Context(team_id="t1", project_id="p1", api_base="http://x", api_key="k"),
+        Context(team_id="t1", api_base="http://x", api_key="k"),
         path=path,
     )
     assert load_context(path=path) == Context(
         team_id="t1",
-        project_id="p1",
         api_base="http://x",
         api_key="k",
     )
 
 
 def test_env_overrides_take_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    save_context(Context(team_id="from-file", project_id="from-file"), path=tmp_path / "ctx.json")
+    save_context(Context(team_id="from-file"), path=tmp_path / "ctx.json")
     monkeypatch.setenv("BEACON_TEAM", "from-env")
-    monkeypatch.setenv("BEACON_PROJECT", "from-env-project")
 
     ctx = load_context(path=tmp_path / "ctx.json")
 
     assert ctx.team_id == "from-env"
-    assert ctx.project_id == "from-env-project"

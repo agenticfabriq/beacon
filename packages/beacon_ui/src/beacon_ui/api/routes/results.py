@@ -34,14 +34,14 @@ from beacon_ui.api.schemas.result import (
     VerdictOut,
 )
 
-router = APIRouter(prefix="/v1/projects", tags=["results"])
+router = APIRouter(prefix="/v1", tags=["results"])
 
 _SQL_GRADER_KEYS = ("candidate_row_count", "gold_row_count", "mismatch")
 
 
-def _run_or_404(session: Session, *, project_id: UUID, run_id: UUID) -> object:
+def _run_or_404(session: Session, *, run_id: UUID) -> object:
     run = RunRepo(session).get(run_id)
-    if run is None or run.project_id != project_id:
+    if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
     return run
 
@@ -103,17 +103,16 @@ def _verdicts_by_result(session: Session, result_ids: list[UUID]) -> dict[UUID, 
 
 
 @router.get(
-    "/{project_id}/runs/{run_id}/results",
+    "/runs/{run_id}/results",
     response_model=ResultListOut,
     summary="List a run's per-item results",
 )
-@requires(Permission.PROJECT_VIEW)
+@requires(Permission.EVAL_VIEW)
 def list_results(
-    project_id: UUID,
     run_id: UUID,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_VIEW, scope_kind="run")),
     ],
     session: Annotated[Session, Depends(get_session)],
     outcome: Annotated[str | None, Query()] = None,
@@ -122,7 +121,7 @@ def list_results(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ResultListOut:
     """List a run's results, filtered by outcome and by the item's difficulty."""
-    _run_or_404(session, project_id=project_id, run_id=run_id)
+    _run_or_404(session, run_id=run_id)
     pairs = _rows_for_run(session, run_id)
     verdicts = _verdicts_by_result(session, [result.id for result, _ in pairs])
 
@@ -172,24 +171,23 @@ def list_results(
 
 
 @router.get(
-    "/{project_id}/runs/{run_id}/results/{item_id}",
+    "/runs/{run_id}/results/{item_id}",
     response_model=ResultDetailOut,
     summary="One item's answer beside its gold",
 )
-@requires(Permission.PROJECT_VIEW)
+@requires(Permission.EVAL_VIEW)
 def get_result(
-    project_id: UUID,
     run_id: UUID,
     item_id: UUID,
     _actor: Annotated[
         User,
-        Depends(require_permission(Permission.PROJECT_VIEW, scope_kind="project")),
+        Depends(require_permission(Permission.EVAL_VIEW, scope_kind="run")),
     ],
     session: Annotated[Session, Depends(get_session)],
     attempt_idx: Annotated[int, Query(ge=0)] = 0,
 ) -> ResultDetailOut:
     """Return one item's output, the gold it was graded against, and every verdict."""
-    _run_or_404(session, project_id=project_id, run_id=run_id)
+    _run_or_404(session, run_id=run_id)
     result = session.scalar(
         sa.select(Result).where(
             Result.run_id == run_id,

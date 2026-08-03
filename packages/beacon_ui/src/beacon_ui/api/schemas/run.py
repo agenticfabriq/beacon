@@ -36,7 +36,6 @@ class RunCreate(BaseModel):
     # runner declares about itself. Declaring is the tracker-shaped path.
     solution_id: UUID | None = None
     solution: SolutionDeclarationIn | None = None
-    suite_id: UUID
     mode: HarnessMode
     # Runner configs are SUT-defined JSON objects, so the API accepts arbitrary values here.
     config: dict[str, Any] = Field(default_factory=dict)
@@ -79,7 +78,6 @@ class RunOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: UUID
-    project_id: UUID
     solution_id: UUID
     suite_id: UUID
     mode: str

@@ -25,7 +25,7 @@ class _SweepFixtures(Protocol):
     base_config: object
     items: list[object]
     runner: object
-    project_id: UUID
+    suite_id: UUID
     team_id: UUID
     solution_id: UUID
 
@@ -49,7 +49,7 @@ def _run_sweep(
         suite="dummy-suite",
         dataset_version="v1",
         K=k,
-        project_id=fixtures.project_id,
+        suite_id=fixtures.suite_id,
         team_id=fixtures.team_id,
         solution_id=fixtures.solution_id,
         harness_runner=cast("_HarnessRunnerLike", fixtures.runner),

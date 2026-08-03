@@ -2,7 +2,6 @@ from beacon_storage.models.attribution import Attribution
 from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
 from beacon_storage.models.dataset_loads import DatasetLoad
 from beacon_storage.models.eval_items import EvalItem, EvalItemTier
-from beacon_storage.models.project_solutions import ProjectSolution
 from beacon_storage.models.runs import (
     HarnessMode,
     Result,
@@ -15,7 +14,7 @@ from beacon_storage.models.runs import (
 )
 from beacon_storage.models.solutions import Solution
 from beacon_storage.models.suites import EvalItemSuite, Suite
-from beacon_storage.models.tenancy import ApiKey, Membership, Project, Role, ScopeKind, Team, User
+from beacon_storage.models.tenancy import ApiKey, Membership, Role, ScopeKind, Team, User
 from beacon_storage.models.worker_state import WorkerState
 
 __all__ = [
@@ -29,8 +28,6 @@ __all__ = [
     "HarnessMode",
     "IdMixin",
     "Membership",
-    "Project",
-    "ProjectSolution",
     "Result",
     "ResultStatus",
     "Role",

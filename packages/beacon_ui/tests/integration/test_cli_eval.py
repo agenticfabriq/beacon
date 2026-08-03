@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
-from beacon_storage.repository.project_solutions import ProjectSolutionRepo
 from beacon_storage.repository.solutions import SolutionRepo
 from beacon_ui.cli.main import app as cli_app
 from click.testing import CliRunner
@@ -25,12 +24,11 @@ class _World(Protocol):
     alice_id: UUID
     alice_key: str
     acme_team_id: UUID
-    chat_to_data_id: UUID
 
 
 def _create_suite(api_client: TestClient, world: _World, name: str) -> str:
     response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/suites",
+        f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.alice_key},
         json={"name": name, "kind": "manual", "item_ids": []},
     )
@@ -55,11 +53,6 @@ def test_eval_run_invokes_endpoint(
         layers=[],
         created_by=world.alice_id,
     )
-    ProjectSolutionRepo(session).link(
-        team_id=world.acme_team_id,
-        project_id=world.chat_to_data_id,
-        solution_id=sut.id,
-    )
     session.commit()
     suite_id = _create_suite(api_client, world, "cli-suite")
     configure_cli_env(tmp_path, monkeypatch, api_client, world.alice_key)
@@ -69,8 +62,6 @@ def test_eval_run_invokes_endpoint(
         [
             "eval",
             "run",
-            "--project",
-            str(world.chat_to_data_id),
             "--sut",
             str(sut.id),
             "--suite",

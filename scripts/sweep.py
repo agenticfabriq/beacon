@@ -14,8 +14,8 @@ from beacon_runner.dummy_sut import DummySUT
 from beacon_runner.types import EvalItem, SolutionConfig
 from beacon_storage.db import make_engine, make_session_factory
 from beacon_storage.ids import uuid7, uuid7_str
-from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 
@@ -121,7 +121,7 @@ class FakeSweepRunner:
         mode: str,
         pass_idx: int,
         parent_sweep_id: UUID,
-        project_id: UUID,
+        suite_id: UUID,
         team_id: UUID,
         solution_id: UUID,
         sweep_arm: str,
@@ -131,7 +131,7 @@ class FakeSweepRunner:
             dataset_version,
             mode,
             parent_sweep_id,
-            project_id,
+            suite_id,
             team_id,
             solution_id,
             sweep_arm,
@@ -212,9 +212,12 @@ def main() -> int:
                 name="Validation Sweep",
             )
             team = TeamRepo(session).create(name=f"validation-sweep-{suffix}")
-            project = ProjectRepo(session).create(
+            suite_row = SuiteRepo(session).create(
                 team_id=team.id,
                 name=f"validation-sweep-{suffix}",
+                description="",
+                method="manual",
+                suite_metadata={},
                 created_by=user.id,
             )
             sut = DummySUT(owner_team_id=team.id)
@@ -240,7 +243,7 @@ def main() -> int:
                 suite=args.suite,
                 dataset_version="validation-v1",
                 K=args.pass_num,
-                project_id=project.id,
+                suite_id=suite_row.id,
                 team_id=team.id,
                 solution_id=solution.id,
                 harness_runner=FakeSweepRunner(),

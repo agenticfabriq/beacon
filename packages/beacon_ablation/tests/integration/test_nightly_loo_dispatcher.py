@@ -22,7 +22,7 @@ class _SweepFixtures(Protocol):
     base_config: object
     items: list[object]
     runner: object
-    project_id: UUID
+    suite_id: UUID
     team_id: UUID
     solution_id: UUID
 
@@ -39,7 +39,7 @@ class _RunNightlyLoo(Protocol):
         suite: str,
         dataset_version: str,
         K: int,
-        project_id: UUID,
+        suite_id: UUID,
         team_id: UUID,
         solution_id: UUID,
     ) -> list[Attribution]: ...
@@ -62,7 +62,7 @@ def test_nightly_loo_dispatcher_runs_sweep(
         suite="dummy-suite",
         dataset_version="v1",
         K=2,
-        project_id=fixtures.project_id,
+        suite_id=fixtures.suite_id,
         team_id=fixtures.team_id,
         solution_id=fixtures.solution_id,
     )

@@ -20,7 +20,6 @@ class ResultRepo:
         self,
         *,
         team_id: UUID,
-        project_id: UUID,
         run_id: UUID,
         item_id: str,
         attempt_idx: int,
@@ -36,7 +35,6 @@ class ResultRepo:
         """Persist a per-item run result and return the saved model."""
         result = Result(
             team_id=team_id,
-            project_id=project_id,
             run_id=run_id,
             item_id=item_id,
             attempt_idx=attempt_idx,
