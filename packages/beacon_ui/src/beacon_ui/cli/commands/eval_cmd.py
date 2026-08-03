@@ -36,5 +36,3 @@ def run_eval(project: str | None, sut: str, suite: str, mode: str, k: int) -> No
         {"solution_id": sut, "suite_id": suite, "mode": mode, "config": {"k": k}},
     )
     click.echo(format_output(out, format="json"))
-
-

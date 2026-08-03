@@ -36,7 +36,9 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 DEMO_SUITE = "bird_minidev_v2"
-CURATED_SUITE = "curated_50_2026_06_05"
+# A focused subset alongside the full demo suite. It used to be the PR gate's
+# curated_50_* suite; the gate is gone and nothing reads the naming convention.
+FOCUS_SUITE = "demo_focus_suite"
 DATASET_VERSION = "demo-v1"
 
 
@@ -197,14 +199,9 @@ def seed_demo_data(session: Session) -> DemoSeedSummary:
         session,
         project=acme_project,
         team=acme,
-        name=CURATED_SUITE,
-        method="separability_gain",
-        metadata={
-            "source": DEMO_SUITE,
-            "subset_tag": CURATED_SUITE,
-            "dataset_version": DATASET_VERSION,
-            "target_size": 50,
-        },
+        name=FOCUS_SUITE,
+        method="manual",
+        metadata={"source": DEMO_SUITE, "dataset_version": DATASET_VERSION},
         item_ids=[item.item_id for item in items],
         created_by=alice.id,
     )

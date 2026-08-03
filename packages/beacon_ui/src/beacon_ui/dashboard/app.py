@@ -39,9 +39,6 @@ from beacon_ui.dashboard.team_views import (
     members as t_members,
 )
 from beacon_ui.dashboard.team_views import (
-    secrets as t_secrets,
-)
-from beacon_ui.dashboard.team_views import (
     solutions_catalog as t_solutions,
 )
 
@@ -78,11 +75,10 @@ def _sidebar(client: BeaconApiClient, state: DashboardState) -> None:
         if view == "team":
             team_view = st.radio(
                 "Team view",
-                options=["solutions_catalog", "members", "secrets"],
+                options=["solutions_catalog", "members"],
                 format_func=lambda value: {
                     "solutions_catalog": "Solutions catalog",
                     "members": "Members",
-                    "secrets": "Secrets",
                 }[value],
                 key="nav_team_view",
             )
@@ -159,8 +155,6 @@ def _render_team_view(state: DashboardState) -> None:
         t_solutions.render()
     elif subview == "members":
         t_members.render()
-    elif subview == "secrets":
-        t_secrets.render()
     else:
         st.error(f"Unknown team view: {subview}")
 

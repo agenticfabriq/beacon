@@ -8,14 +8,11 @@ from typing import Any
 from uuid import UUID  # noqa: TC003
 
 from sqlalchemy import (
-    ARRAY,
     TIMESTAMP,
     CheckConstraint,
-    Float,
     ForeignKey,
     Index,
     String,
-    Text,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -63,11 +60,6 @@ class EvalItem(Base):
     )
 
     question_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(
-        ARRAY(Float),
-        nullable=True,
-    )
-    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
@@ -76,15 +68,6 @@ class EvalItem(Base):
     )
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id"),
-        nullable=True,
-    )
-
-    rejected_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True),
-        nullable=True,
-    )
-    deferred_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True),
         nullable=True,
     )
 

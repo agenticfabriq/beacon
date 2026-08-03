@@ -19,7 +19,6 @@ from beacon_storage.repository.suites import SuiteRepo
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
-    from httpx2 import Response
     from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
@@ -69,7 +68,7 @@ def _declare(
     version: str = "0.1.0",
     layers: list[dict[str, Any]] | None = None,
     solution_id: str = "declaring-sut",
-) -> Response:
+) -> Any:
     return api_client.post(
         f"/v1/projects/{world.chat_to_data_id}/runs",
         headers={"X-API-Key": world.alice_key},

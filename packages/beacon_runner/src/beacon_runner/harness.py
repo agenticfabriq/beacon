@@ -10,6 +10,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
 from beacon_graders.types import VerdictOutcome as GraderOutcome
+from beacon_storage.config_identity import config_digest, config_label_of, model_id_of
 from beacon_storage.models.runs import HarnessMode
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
@@ -170,6 +171,7 @@ class HarnessRunner:
         config: SolutionConfig,
     ) -> UUID:
         with self.session_factory() as session:
+            payload = config.model_dump()
             run = RunRepo(session).create(
                 team_id=team_id,
                 project_id=project_id,
@@ -180,7 +182,13 @@ class HarnessRunner:
                 pass_idx=pass_idx,
                 parent_sweep_id=parent_sweep_id,
                 sweep_arm=sweep_arm,
-                config=config.model_dump(),
+                config=payload,
+                # The same identity API-registered runs get. Without it, every
+                # in-process sweep run had NULL for all three and could not be
+                # grouped into the matrix its own attribution rows feed.
+                model_id=model_id_of(payload),
+                config_label=config_label_of(payload),
+                config_digest=config_digest(payload),
                 created_by=user_id,
             )
             run_id = run.id

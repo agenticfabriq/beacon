@@ -39,8 +39,6 @@ class EvalItemRepo:
         gold_answer: dict[str, Any] | None,
         item_metadata: dict[str, Any],
         question_hash: str | None = None,
-        embedding: list[float] | None = None,
-        evidence: str | None = None,
         created_by: UUID | None = None,
     ) -> EvalItem:
         """Insert a new (open-ended) version row for ``item_id`` and return it."""
@@ -57,8 +55,6 @@ class EvalItemRepo:
             gold_answer=gold_answer,
             item_metadata=item_metadata,
             question_hash=question_hash,
-            embedding=embedding,
-            evidence=evidence,
             created_by=created_by,
         )
         self.session.add(item)
@@ -77,8 +73,6 @@ class EvalItemRepo:
         gold_answer: dict[str, Any] | None = None,
         item_metadata: dict[str, Any] | None = None,
         question_hash: str | None = None,
-        embedding: list[float] | None = None,
-        evidence: str | None = None,
         created_by: UUID | None = None,
     ) -> EvalItem:
         """Create a brand-new eval item with a fresh UUIDv7 and current ``valid_from``."""
@@ -94,8 +88,6 @@ class EvalItemRepo:
             gold_answer=gold_answer,
             item_metadata=item_metadata or {},
             question_hash=question_hash,
-            embedding=embedding,
-            evidence=evidence,
             created_by=created_by,
         )
 
@@ -111,8 +103,6 @@ class EvalItemRepo:
         dataset_version: str = "v1",
         gold_answer: dict[str, Any] | None = None,
         item_metadata: dict[str, Any] | None = None,
-        embedding: list[float] | None = None,
-        evidence: str | None = None,
         created_by: UUID | None = None,
     ) -> tuple[EvalItem, bool]:
         """Return active item for ``question_hash`` or create one; bool flags creation."""
@@ -140,8 +130,6 @@ class EvalItemRepo:
                 gold_answer=gold_answer,
                 item_metadata=item_metadata,
                 question_hash=question_hash,
-                embedding=embedding,
-                evidence=evidence,
                 created_by=created_by,
             ),
             True,
@@ -188,8 +176,6 @@ class EvalItemRepo:
             gold_answer=gold_answer,
             item_metadata=current.item_metadata,
             question_hash=current.question_hash,
-            embedding=current.embedding,
-            evidence=current.evidence,
             created_by=current.created_by,
         )
         return True

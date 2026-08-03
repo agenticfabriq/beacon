@@ -12,7 +12,7 @@ from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
-from beacon_ui.cli.demo import CURATED_SUITE, DEMO_SUITE
+from beacon_ui.cli.demo import DEMO_SUITE, FOCUS_SUITE
 from beacon_ui.cli.main import app as cli_app
 from click.testing import CliRunner
 from sqlalchemy import func, select
@@ -80,13 +80,13 @@ def test_demo_seed_creates_idempotent_fixtures(db_url: str, session: Session) ->
 
     items = _demo_items(session)
     assert len(items) == 50
-    curated = SuiteRepo(session).get_by_project_and_name(acme_project.id, CURATED_SUITE)
+    curated = SuiteRepo(session).get_by_project_and_name(acme_project.id, FOCUS_SUITE)
     assert curated is not None
     assert len(SuiteRepo(session).list_item_ids(curated.id)) == 50
 
     runs = RunRepo(session).list_for_project(
         acme_project.id,
-        suite=CURATED_SUITE,
+        suite=FOCUS_SUITE,
         mode=HarnessMode.NIGHTLY_LOO,
         status=RunStatus.COMPLETED,
     )
@@ -109,7 +109,7 @@ def test_demo_seed_creates_idempotent_fixtures(db_url: str, session: Session) ->
     assert _demo_api_key_count(session) == 2
     rerun_runs = RunRepo(session).list_for_project(
         acme_project.id,
-        suite=CURATED_SUITE,
+        suite=FOCUS_SUITE,
         mode=HarnessMode.NIGHTLY_LOO,
         status=RunStatus.COMPLETED,
     )

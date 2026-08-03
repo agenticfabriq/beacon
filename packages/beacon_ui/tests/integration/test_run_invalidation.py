@@ -10,7 +10,7 @@ it is still there.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,7 +23,6 @@ from beacon_storage.repository.suites import SuiteRepo
 if TYPE_CHECKING:
     # TestClient is built on httpx2, so its Response is not httpx.Response.
     from fastapi.testclient import TestClient
-    from httpx2 import Response
     from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
@@ -106,7 +105,7 @@ def _headers(world: _World) -> dict[str, str]:
 
 def _invalidate(
     api_client: TestClient, world: _World, run_id: str, reason: str = "Wrong benchmark database"
-) -> Response:
+) -> Any:
     return api_client.post(
         f"/v1/projects/{world.chat_to_data_id}/runs/{run_id}/invalidate",
         headers=_headers(world),

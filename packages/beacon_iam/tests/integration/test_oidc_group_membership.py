@@ -31,9 +31,7 @@ def team_name(session: Session) -> str:
 
 
 def _claims(subject: str, *groups: str) -> OidcClaims:
-    return OidcClaims(
-        subject=subject, email=f"{subject}@example.com", name=subject, groups=groups
-    )
+    return OidcClaims(subject=subject, email=f"{subject}@example.com", name=subject, groups=groups)
 
 
 def test_a_group_naming_a_team_grants_membership(session: Session, team_name: str) -> None:
@@ -72,9 +70,7 @@ def test_signing_in_twice_does_not_duplicate_the_membership(
     assert len(service.memberships.list_for_user(user.id)) == 1
 
 
-def test_a_token_with_no_groups_claim_removes_nothing(
-    session: Session, team_name: str
-) -> None:
+def test_a_token_with_no_groups_claim_removes_nothing(session: Session, team_name: str) -> None:
     """Silence is not an assertion of belonging to nothing.
 
     Treating it as removal would lock people out on the first provider that
