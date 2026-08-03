@@ -1,23 +1,5 @@
 """Dashboard panel modules."""
 
-from beacon_ui.dashboard.panels import (
-    attribution,
-    cost_accuracy,
-    members,
-    overview,
-    runs,
-    settings,
-    solutions,
-    suites,
-)
+from beacon_ui.dashboard.panels import benchmarks, matrix, questions, runs, settings
 
-__all__ = [
-    "attribution",
-    "cost_accuracy",
-    "members",
-    "overview",
-    "runs",
-    "settings",
-    "solutions",
-    "suites",
-]
+__all__ = ["benchmarks", "matrix", "questions", "runs", "settings"]

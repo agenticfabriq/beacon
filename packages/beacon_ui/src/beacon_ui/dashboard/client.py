@@ -197,17 +197,39 @@ class BeaconApiClient:
         """Revoke a team membership."""
         self._delete(f"/v1/teams/{team_id}/members/{user_id}")
 
+    def results_matrix(self, project_id: str, **filters: Any) -> dict[str, Any]:
+        """One row per system · version · model · config, with facet counts."""
+        return cast(
+            "dict[str, Any]",
+            self._get(f"/v1/projects/{project_id}/results-matrix", **filters),
+        )
+
+    def list_suite_items(self, project_id: str, suite_id: str, **filters: Any) -> dict[str, Any]:
+        """The questions a benchmark scores against, with facets."""
+        return cast(
+            "dict[str, Any]",
+            self._get(f"/v1/projects/{project_id}/suites/{suite_id}/items", **filters),
+        )
+
+    def list_team_solutions(self, team_id: str) -> list[dict[str, Any]]:
+        """The team's registered systems under test."""
+        return _list_body(self._get(f"/v1/teams/{team_id}/solutions"), key="solutions")
+
+    def list_api_keys(self) -> list[dict[str, Any]]:
+        """The caller's active API keys. Never returns key material."""
+        return _list_body(self._get("/v1/me/api-keys"), key="keys")
+
+    def create_api_key(self, *, label: str) -> dict[str, Any]:
+        """Mint a key. The response is the only place the key ever appears."""
+        return cast("dict[str, Any]", self._post("/v1/me/api-keys", {"label": label}))
+
+    def revoke_api_key(self, api_key_id: str) -> None:
+        """Revoke one of the caller's keys."""
+        self._delete(f"/v1/me/api-keys/{api_key_id}")
+
     def get_attribution(self, project_id: str, *, sut: str, suite: str) -> dict[str, Any]:
         """Return the latest attribution snapshot for a solution and suite."""
         return cast(
             "dict[str, Any]",
             self._get(f"/v1/projects/{project_id}/attribution", sut=sut, suite=suite),
         )
-
-    def cost_leaderboard(self, *, suite: str) -> dict[str, Any]:
-        """Return the cost-adjusted leaderboard for a shared suite."""
-        return cast("dict[str, Any]", self._get("/v1/leaderboards/cost", suite=suite))
-
-    def latency_leaderboard(self, *, suite: str) -> dict[str, Any]:
-        """Return the latency-adjusted leaderboard for a shared suite."""
-        return cast("dict[str, Any]", self._get("/v1/leaderboards/latency", suite=suite))

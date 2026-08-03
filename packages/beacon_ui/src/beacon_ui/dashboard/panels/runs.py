@@ -64,6 +64,9 @@ def render() -> None:
     )
 
     filters: dict[str, object] = {"limit": int(limit), "offset": int(offset)}
+    # Benchmark-scoped: runs from other suites are a different comparison.
+    if state.current_suite_id is not None:
+        filters["suite_id"] = state.current_suite_id
     if mode:
         filters["mode"] = mode
     if status:
@@ -114,8 +117,22 @@ def render() -> None:
         key="runs_inspect_select",
     )
 
+    _render_reference_pin(client, state, selected_run_id)
     _render_lifecycle(client, state.current_project_id, runs, selected_run_id)
     _render_drilldown(client, state.current_project_id, selected_run_id)
+
+
+def _render_reference_pin(client: Any, state: DashboardState, run_id: str) -> None:
+    """Pin from the list, where you can see what you are pinning."""
+    if state.current_project_id is None:
+        return
+    if st.button("Pin as reference run", key="runs_pin_reference"):
+        try:
+            client.patch_project_settings(state.current_project_id, baseline_run_id=run_id)
+        except BeaconApiError as exc:
+            st.error(exc.message)
+            return
+        st.success(f"Reference run: {run_id[:8]}")
 
 
 def _render_lifecycle(

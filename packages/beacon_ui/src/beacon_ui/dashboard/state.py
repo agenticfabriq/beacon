@@ -90,4 +90,17 @@ class DashboardState:
 
     def select_project(self, project_id: str | None) -> None:
         """Set the active project ID for the session."""
+        prior = self.current_project_id
         self.bag["current_project_id"] = project_id
+        if prior != project_id:
+            self.bag["current_suite_id"] = None
+
+    @property
+    def current_suite_id(self) -> str | None:
+        """The selected benchmark. Picking one is the only step before a result."""
+        value = self.bag.get("current_suite_id")
+        return value if isinstance(value, str) and value else None
+
+    def select_suite(self, suite_id: str | None) -> None:
+        """Switch the active benchmark."""
+        self.bag["current_suite_id"] = suite_id
