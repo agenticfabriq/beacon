@@ -5,7 +5,6 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
     "beacon_storage",
-    "beacon_registry",
     "beacon_graders",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
@@ -18,13 +17,10 @@ dependencies = [
 ]
 
 [project.scripts]
-beacon-worker-promotion = "beacon_workers.promotion.__main__:main"
-beacon-worker-convergence = "beacon_workers.convergence.__main__:main"
 beacon-worker-retention = "beacon_workers.retention.__main__:main"
 
 [tool.uv.sources]
 beacon_storage = { workspace = true }
-beacon_registry = { workspace = true }
 beacon_graders = { workspace = true }
 
 [build-system]

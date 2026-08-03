@@ -10,7 +10,6 @@ from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_ui.cli.http import CliHttpError
 from beacon_ui.cli.main import app as cli_app
 from click.testing import CliRunner, Result
-from dashboard_panel_test import run_dashboard_panel  # type: ignore[import-not-found]
 from test_cli_teams import route_cli_httpx  # type: ignore[import-not-found]
 
 if TYPE_CHECKING:
@@ -40,21 +39,6 @@ def _json_stdout(result: Result) -> dict[str, object]:
     body = json.loads(result.stdout)
     assert isinstance(body, dict)
     return body
-
-
-def _seed_review_item(session: Session, world: _World) -> str:
-    item = EvalItemRepo(session).create(
-        tier=EvalItemTier.EXECUTION_CONFIRMED,
-        suite="demo_flow_review",
-        team_id=world.acme_team_id,
-        dataset_version="demo-v1",
-        item_input={"question": "How many demo rows are visible?"},
-        gold_answer={"sql": "SELECT 1"},
-        item_metadata={"source": "task-31-demo-flow"},
-        created_by=world.alice_id,
-    )
-    session.commit()
-    return str(item.item_id)
 
 
 def _write_sut_file(path: Path) -> None:
@@ -89,6 +73,22 @@ def _write_sut_file(path: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _seed_eval_item(session: Session, world: _World) -> str:
+    """One gold item for the suite leg. Curation lives in the semantic layer."""
+    item = EvalItemRepo(session).create(
+        tier=EvalItemTier.HUMAN_VERIFIED,
+        suite="demo_flow_review",
+        team_id=world.acme_team_id,
+        dataset_version="demo-v1",
+        item_input={"question": "demo?"},
+        gold_answer={"answer": "yes"},
+        item_metadata={},
+        created_by=world.alice_id,
+    )
+    session.commit()
+    return str(item.item_id)
 
 
 def test_e2e_demo_flow(
@@ -159,7 +159,7 @@ def test_e2e_demo_flow(
     )
     assert attached["solution_id"] == sut_id
 
-    item_id = _seed_review_item(session, world)
+    item_id = _seed_eval_item(session, world)
     suite_response = api_client.post(
         f"/v1/projects/{world.chat_to_data_id}/suites",
         headers={"X-API-Key": world.alice_key},
@@ -200,21 +200,6 @@ def test_e2e_demo_flow(
     )
     assert runs_response.status_code == 200, runs_response.text
     assert run_id in {row["run_id"] for row in runs_response.json()}
-
-    decision_response = api_client.post(
-        f"/v1/projects/{world.chat_to_data_id}/review-queue/{item_id}/decide",
-        headers={"X-API-Key": world.alice_key},
-        json={"action": "accept", "reason": "demo answer matches gold"},
-    )
-    assert decision_response.status_code == 200, decision_response.text
-    decision = decision_response.json()
-    assert decision["action"] == "accept"
-    assert decision["new_tier"] == "human_verified"
-
-    overview = run_dashboard_panel("overview", api_client, world, monkeypatch)
-    assert not overview.exception
-    review_queue = run_dashboard_panel("review_queue", api_client, world, monkeypatch)
-    assert not review_queue.exception
 
     carol_login = runner.invoke(
         cli_app,

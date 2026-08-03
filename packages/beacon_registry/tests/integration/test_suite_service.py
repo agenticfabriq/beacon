@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 from beacon_registry.errors import DuplicateSuiteError, SuiteNotFoundError
-from beacon_registry.items import ItemService
 from beacon_registry.suites import SuiteService
-from beacon_registry.types import EvalItemTier
+from beacon_storage.models.eval_items import EvalItemTier
 from beacon_storage.models.tenancy import Project, Team, User
+from beacon_storage.repository.eval_items import EvalItemRepo
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -34,7 +34,7 @@ def _ctx(session: Session) -> tuple[Team, User, Project]:
 
 
 def _make_items(
-    item_service: ItemService,
+    item_repo: EvalItemRepo,
     *,
     team_id: UUID,
     user_id: UUID,
@@ -44,7 +44,7 @@ def _make_items(
     item_ids: list[UUID] = []
     for index in range(start, start + count):
         item_ids.append(
-            item_service.create_item(
+            item_repo.create(
                 tier=EvalItemTier.HUMAN_VERIFIED,
                 suite="b",
                 team_id=team_id,
@@ -54,7 +54,7 @@ def _make_items(
                 gold_answer={},
                 item_metadata={},
                 created_by=user_id,
-            )
+            ).item_id
         )
     return item_ids
 
@@ -103,7 +103,7 @@ def test_duplicate_suite_name_raises(session: Session, _ctx: tuple[Team, User, P
 def test_add_items_idempotent(session: Session, _ctx: tuple[Team, User, Project]) -> None:
     team, user, project = _ctx
     suite_service = SuiteService(session)
-    item_service = ItemService(session)
+    item_repo = EvalItemRepo(session)
     suite = suite_service.create(
         project_id=project.id,
         team_id=team.id,
@@ -113,7 +113,7 @@ def test_add_items_idempotent(session: Session, _ctx: tuple[Team, User, Project]
         suite_metadata={},
         created_by=user.id,
     )
-    item_ids = _make_items(item_service, team_id=team.id, user_id=user.id, count=3)
+    item_ids = _make_items(item_repo, team_id=team.id, user_id=user.id, count=3)
 
     first_count = suite_service.add_items(suite_id=suite.id, item_ids=item_ids)
     second_count = suite_service.add_items(suite_id=suite.id, item_ids=item_ids)
@@ -158,7 +158,7 @@ def test_get_suite_not_found_raises(session: Session) -> None:
 def test_replace_items_overwrites(session: Session, _ctx: tuple[Team, User, Project]) -> None:
     team, user, project = _ctx
     suite_service = SuiteService(session)
-    item_service = ItemService(session)
+    item_repo = EvalItemRepo(session)
     suite = suite_service.create(
         project_id=project.id,
         team_id=team.id,
@@ -168,9 +168,9 @@ def test_replace_items_overwrites(session: Session, _ctx: tuple[Team, User, Proj
         suite_metadata={},
         created_by=user.id,
     )
-    old_ids = _make_items(item_service, team_id=team.id, user_id=user.id, count=5)
+    old_ids = _make_items(item_repo, team_id=team.id, user_id=user.id, count=5)
     new_ids = _make_items(
-        item_service,
+        item_repo,
         team_id=team.id,
         user_id=user.id,
         count=3,

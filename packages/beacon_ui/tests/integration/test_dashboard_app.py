@@ -71,7 +71,6 @@ def test_project_workspace_uses_compact_cost_accuracy_label(
     monkeypatch.setattr(dashboard_app.p_suites, "render", lambda: None)
     monkeypatch.setattr(dashboard_app.p_attribution, "render", lambda: None)
     monkeypatch.setattr(dashboard_app.p_cost_accuracy, "render", lambda: None)
-    monkeypatch.setattr(dashboard_app.p_review_queue, "render", lambda: None)
     monkeypatch.setattr(dashboard_app.p_members, "render", lambda: None)
     monkeypatch.setattr(dashboard_app.p_settings, "render", lambda: None)
 

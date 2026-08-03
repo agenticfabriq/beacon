@@ -19,7 +19,7 @@ from beacon_storage.repository.solutions import SolutionRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from beacon_storage.rls import set_current_user
-from beacon_ui.cli import benchmarks_group, registry_group, suites_group, traces_group
+from beacon_ui.cli import benchmarks_group, suites_group
 
 from beacon_runner.composer_factory import composer_for_suite
 from beacon_runner.errors import BeaconRunnerError, SutNotFoundError
@@ -51,9 +51,7 @@ def main() -> None:
     """Beacon evaluation framework CLI."""
 
 
-main.add_command(registry_group)
 main.add_command(suites_group)
-main.add_command(traces_group)
 main.add_command(benchmarks_group)
 
 

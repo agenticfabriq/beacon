@@ -4,7 +4,6 @@ from beacon_ui.api.schemas.project_settings import (
     ProjectSettingsPatch,
 )
 from beacon_ui.api.schemas.project_solution import ProjectSolutionLink, ProjectSolutionOut
-from beacon_ui.api.schemas.registry import EvalItemListOut, EvalItemOut, PromoteIn, PromoteOut
 from beacon_ui.api.schemas.suite import SuiteCreateIn, SuiteListOut, SuiteOut
 from beacon_ui.api.schemas.team import TeamIn, TeamOut
 from beacon_ui.api.schemas.team_member import TeamMemberIn, TeamMemberOut

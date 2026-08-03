@@ -59,13 +59,6 @@ def test_project_settings_endpoint_requires_project_manage(api_client: TestClien
     assert "project.manage" in operation["x-required-permissions"]
 
 
-def test_review_queue_decide_requires_promote(api_client: TestClient) -> None:
-    schema = api_client.get("/openapi.json").json()
-    operation = schema["paths"]["/v1/projects/{project_id}/review-queue/{item_id}/decide"]["post"]
-
-    assert "project.promote_item" in operation["x-required-permissions"]
-
-
 def test_runs_endpoint_requires_run_eval(api_client: TestClient) -> None:
     schema = api_client.get("/openapi.json").json()
     operation = schema["paths"]["/v1/projects/{project_id}/runs"]["post"]

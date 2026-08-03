@@ -14,8 +14,6 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.database_url == "postgresql+psycopg://u@h/db"
     assert cfg.log_level == "INFO"
     assert cfg.health_port == 0
-    assert cfg.promotion_interval_seconds == 3600
-    assert cfg.convergence_interval_seconds == 30
     assert cfg.retention_interval_seconds == 86400
     assert cfg.retention_days == 90
 
@@ -29,15 +27,12 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = WorkerConfig()
 
     assert cfg.log_level == "DEBUG"
-    assert cfg.promotion_interval_seconds == 60
     assert cfg.retention_days == 30
 
 
 def test_health_port_default_per_worker() -> None:
     from beacon_workers.config import default_health_port
 
-    assert default_health_port("promotion") == 9101
-    assert default_health_port("convergence") == 9102
     assert default_health_port("retention") == 9104
     with pytest.raises(ValueError, match="unknown worker_name"):
         default_health_port("unknown")

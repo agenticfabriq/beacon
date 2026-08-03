@@ -1,9 +1,7 @@
 """Beacon background workers.
 
-Three independent processes:
+One process:
 
-  beacon-worker-promotion    - hourly: extract candidate eval items from traces
-  beacon-worker-convergence  - continuous: auto-promote on SUT agreement
   beacon-worker-retention    - daily: enforce 90-day full-trace retention
 
 Each worker runs in its own process. No shared in-memory state; all

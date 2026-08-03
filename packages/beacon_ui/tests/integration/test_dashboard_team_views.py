@@ -16,7 +16,7 @@ class _World(Protocol):
 
 @pytest.mark.parametrize(
     "view_module",
-    ["solutions_catalog", "eval_items", "members", "secrets"],
+    ["solutions_catalog", "members", "secrets"],
 )
 def test_team_view_renders(
     api_client: TestClient,

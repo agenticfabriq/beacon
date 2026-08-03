@@ -20,18 +20,8 @@ class WorkerConfig(BaseSettings):
         validation_alias=AliasChoices("BEACON_OBJECT_STORAGE", "BEACON_WORKER_OBJECT_STORAGE"),
     )
 
-    promotion_interval_seconds: int = 3600
-    convergence_interval_seconds: int = 30
     retention_interval_seconds: int = 86400
     retention_days: int = 90
-
-    promotion_novelty_threshold: float = 0.95
-    promotion_judge_min_score: float = 0.7
-    promotion_batch_size: int = 100
-    promotion_max_per_team_per_tick: int = 50
-
-    convergence_min_suts: int = 3
-    convergence_min_confidence: float = 0.85
 
     llm_provider: str = "anthropic"
     embedding_provider: str = "anthropic"
@@ -47,8 +37,6 @@ class WorkerConfig(BaseSettings):
 
 
 _DEFAULT_HEALTH_PORTS = {
-    "promotion": 9101,
-    "convergence": 9102,
     "retention": 9104,
 }
 

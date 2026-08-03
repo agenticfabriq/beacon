@@ -22,7 +22,6 @@ members = [
     "beacon-iam",
     "beacon-registry",
     "beacon-runner",
-    "beacon-sdk",
     "beacon-storage",
     "beacon-ui",
     "beacon-workers",
@@ -445,7 +444,6 @@ version = "0.2.0"
 source = { editable = "packages/beacon_benchmarks" }
 dependencies = [
     { name = "beacon-graders" },
-    { name = "beacon-registry" },
     { name = "beacon-runner" },
     { name = "beacon-storage" },
     { name = "click" },
@@ -467,7 +465,6 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "beacon-graders", editable = "packages/beacon_graders" },
-    { name = "beacon-registry", editable = "packages/beacon_registry" },
     { name = "beacon-runner", editable = "packages/beacon_runner" },
     { name = "beacon-storage", editable = "packages/beacon_storage" },
     { name = "click", specifier = ">=8.1" },
@@ -566,21 +563,6 @@ requires-dist = [
 ]
 
 [[package]]
-name = "beacon-sdk"
-version = "0.2.0"
-source = { editable = "packages/beacon_sdk" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pydantic", specifier = ">=2.7" },
-]
-
-[[package]]
 name = "beacon-storage"
 version = "0.2.0"
 source = { editable = "packages/beacon_storage" }
@@ -657,7 +639,6 @@ source = { editable = "packages/beacon_workers" }
 dependencies = [
     { name = "apscheduler" },
     { name = "beacon-graders" },
-    { name = "beacon-registry" },
     { name = "beacon-storage" },
     { name = "numpy" },
     { name = "psycopg", extra = ["binary"] },
@@ -672,7 +653,6 @@ dependencies = [
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.10" },
     { name = "beacon-graders", editable = "packages/beacon_graders" },
-    { name = "beacon-registry", editable = "packages/beacon_registry" },
     { name = "beacon-storage", editable = "packages/beacon_storage" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },

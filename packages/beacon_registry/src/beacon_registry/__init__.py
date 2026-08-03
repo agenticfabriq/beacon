@@ -1,37 +1,27 @@
-"""Beacon registry: eval-item versioning, provenance, suites, trace ingestion."""
+"""Benchmark suites: the container runs are compared within.
+
+What remains of this package after curation moved to the semantic layer. The
+name is now wider than the contents -- suites are the only thing here -- but
+renaming the package is churn for its own sake and can wait for the
+benchmark-first UI work.
+
+Curation (item tiers, promotion from production traces, review queues,
+selection heuristics) and provenance are deliberately absent: the semantic
+layer curates gold and audits it through GoldenQuestion history, and beacon
+consumes an export rather than maintaining a worse copy. See
+beacon-internal docs/2026-08-02-beacon-verity-boundary.md.
+"""
 
 from beacon_registry.errors import (
     BeaconRegistryError,
     DuplicateSuiteError,
-    EvalItemNotFoundError,
-    IngestionAuthError,
-    InvalidSelectorConfigError,
-    InvalidTierTransitionError,
-    NoCandidateRunsError,
     SuiteNotFoundError,
 )
-from beacon_registry.types import (
-    ActorType,
-    EvalItemSummary,
-    EvalItemTier,
-    PromoteRequest,
-    TraceIngestRequest,
-    TraceIngestResult,
-)
+from beacon_registry.suites import SuiteService
 
 __all__ = [
-    "ActorType",
     "BeaconRegistryError",
     "DuplicateSuiteError",
-    "EvalItemNotFoundError",
-    "EvalItemSummary",
-    "EvalItemTier",
-    "IngestionAuthError",
-    "InvalidSelectorConfigError",
-    "InvalidTierTransitionError",
-    "NoCandidateRunsError",
-    "PromoteRequest",
     "SuiteNotFoundError",
-    "TraceIngestRequest",
-    "TraceIngestResult",
+    "SuiteService",
 ]

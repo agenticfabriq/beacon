@@ -127,7 +127,7 @@ def world(session: Session) -> SeededWorld:
     """Seed a multi-team world for P7 REST, dashboard, and CLI tests."""
     from beacon_iam.service.projects import ProjectService
     from beacon_iam.service.teams import TeamService
-    from beacon_registry.types import EvalItemTier
+    from beacon_storage.models.eval_items import EvalItemTier
     from beacon_storage.models.runs import HarnessMode
     from beacon_storage.models.tenancy import Role, ScopeKind
     from beacon_storage.repository.eval_items import EvalItemRepo

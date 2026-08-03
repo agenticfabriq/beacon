@@ -23,9 +23,6 @@ from beacon_ui.dashboard.panels import (
     overview as p_overview,
 )
 from beacon_ui.dashboard.panels import (
-    review_queue as p_review_queue,
-)
-from beacon_ui.dashboard.panels import (
     runs as p_runs,
 )
 from beacon_ui.dashboard.panels import (
@@ -38,9 +35,6 @@ from beacon_ui.dashboard.panels import (
     suites as p_suites,
 )
 from beacon_ui.dashboard.state import DashboardState
-from beacon_ui.dashboard.team_views import (
-    eval_items as t_eval_items,
-)
 from beacon_ui.dashboard.team_views import (
     members as t_members,
 )
@@ -84,10 +78,9 @@ def _sidebar(client: BeaconApiClient, state: DashboardState) -> None:
         if view == "team":
             team_view = st.radio(
                 "Team view",
-                options=["solutions_catalog", "eval_items", "members", "secrets"],
+                options=["solutions_catalog", "members", "secrets"],
                 format_func=lambda value: {
                     "solutions_catalog": "Solutions catalog",
-                    "eval_items": "Eval items",
                     "members": "Members",
                     "secrets": "Secrets",
                 }[value],
@@ -138,7 +131,6 @@ def _render_project_workspace() -> None:
             "Suites",
             "Attribution",
             "Cost/Accuracy",
-            "Review Queue",
             "Members",
             "Settings",
         ]
@@ -156,10 +148,8 @@ def _render_project_workspace() -> None:
     with tabs[5]:
         p_cost_accuracy.render()
     with tabs[6]:
-        p_review_queue.render()
-    with tabs[7]:
         p_members.render()
-    with tabs[8]:
+    with tabs[7]:
         p_settings.render()
 
 
@@ -167,8 +157,6 @@ def _render_team_view(state: DashboardState) -> None:
     subview = state.bag.get("team_subview", "solutions_catalog")
     if subview == "solutions_catalog":
         t_solutions.render()
-    elif subview == "eval_items":
-        t_eval_items.render()
     elif subview == "members":
         t_members.render()
     elif subview == "secrets":

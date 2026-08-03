@@ -2,9 +2,7 @@ from beacon_storage.models.attribution import Attribution
 from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
 from beacon_storage.models.dataset_loads import DatasetLoad
 from beacon_storage.models.eval_items import EvalItem, EvalItemTier
-from beacon_storage.models.production_traces import ProductionTrace
 from beacon_storage.models.project_solutions import ProjectSolution
-from beacon_storage.models.provenance import ActorType, ProvenanceEvent
 from beacon_storage.models.runs import (
     HarnessMode,
     Result,
@@ -23,7 +21,6 @@ from beacon_storage.models.worker_state import WorkerState
 __all__ = [
     "ApiKey",
     "Attribution",
-    "ActorType",
     "Base",
     "DatasetLoad",
     "EvalItem",
@@ -32,10 +29,8 @@ __all__ = [
     "HarnessMode",
     "IdMixin",
     "Membership",
-    "ProductionTrace",
     "Project",
     "ProjectSolution",
-    "ProvenanceEvent",
     "Result",
     "ResultStatus",
     "Role",

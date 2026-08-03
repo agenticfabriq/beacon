@@ -7,9 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from beacon_storage.models.eval_items import EvalItemTier
-from beacon_storage.models.provenance import ActorType
 from beacon_storage.repository.eval_items import EvalItemRepo
-from beacon_storage.repository.provenance import ProvenanceRepo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -21,8 +19,6 @@ if TYPE_CHECKING:
 
 SUITE = "bird_minidev_v2"
 DATASET_VERSION = "v2-2025-07-22"
-INGEST_ACTOR_ID = "scripts/ingest_bird_questions.py"
-INGEST_REASON = "bird-minidev-v2 public-source ingest"
 
 
 @dataclass(frozen=True)
@@ -76,13 +72,12 @@ def ingest_bird_tasks(
     tasks: Iterable[BirdTask],
     created_by: UUID,
 ) -> IngestResult:
-    """Upsert BIRD tasks into ``eval_items`` and write matching provenance rows.
+    """Upsert BIRD tasks into ``eval_items``.
 
     Existing rows (by ``question_hash``) are left untouched and counted under
     ``skipped`` so re-running the script is safe.
     """
     items_repo = EvalItemRepo(session)
-    prov_repo = ProvenanceRepo(session)
     inserted = 0
     skipped = 0
     for task in tasks:
@@ -100,6 +95,9 @@ def ingest_bird_tasks(
             },
             gold_answer={"sql": task.sql},
             item_metadata={
+                # Where this item came from. The provenance table this used to
+                # write is gone: curated gold is audited in the semantic layer,
+                # and for a public corpus dataset_version plus this say enough.
                 "source": "bird-minidev-v2",
                 "difficulty": task.difficulty,
                 "question_id": task.question_id,
@@ -109,20 +107,5 @@ def ingest_bird_tasks(
         if not created:
             skipped += 1
             continue
-        prov_repo.append(
-            item_id=item.item_id,
-            team_id=team_id,
-            prior_tier=None,
-            new_tier=EvalItemTier.HUMAN_VERIFIED,
-            actor_type=ActorType.SYSTEM,
-            actor_id=INGEST_ACTOR_ID,
-            created_by=created_by,
-            reason=INGEST_REASON,
-            evidence={
-                "question_id": task.question_id,
-                "dataset_version": DATASET_VERSION,
-                "db_id": task.db_id,
-            },
-        )
         inserted += 1
     return IngestResult(inserted=inserted, skipped=skipped)

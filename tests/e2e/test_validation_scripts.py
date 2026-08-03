@@ -13,7 +13,6 @@ from alembic import command
 from alembic.config import Config
 from beacon_storage.db import make_engine, make_session_factory
 from beacon_storage.models.attribution import Attribution
-from beacon_storage.models.production_traces import ProductionTrace
 from pytest_postgresql import factories
 from sqlalchemy import func, select, text
 
@@ -104,30 +103,3 @@ def test_sweep_script_runs_dummy_nightly_loo(db_url: str, session: Session) -> N
     assert payload["pass_num"] == 1
     assert set(payload["layers"]) == {"ontology", "retry_loop"}
     assert session.scalar(select(func.count()).select_from(Attribution)) == 2
-
-
-def test_seed_traces_script_inserts_eval_candidate_traces(
-    db_url: str,
-    session: Session,
-) -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/seed_traces.py",
-            "--solution",
-            "dummy",
-            "--count",
-            "3",
-        ],
-        env={**os.environ, "DATABASE_URL": db_url},
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    payload = json.loads(result.stdout)
-    assert payload["solution"] == "dummy"
-    assert payload["count"] == 3
-    assert len(payload["trace_ids"]) == 3
-    assert session.scalar(select(func.count()).select_from(ProductionTrace)) == 3

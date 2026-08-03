@@ -7,7 +7,6 @@ dependencies = [
     "beacon_storage",
     "beacon_runner",
     "beacon_graders",
-    "beacon_registry",
     "datasets>=2.20",
     "huggingface_hub>=0.24",
     "sqlglot>=25.5",
