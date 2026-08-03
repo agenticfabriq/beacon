@@ -135,6 +135,12 @@ def test_percent_is_escaped_for_pyformat_drivers(
         def fetchall(self) -> list[tuple[str]]:
             return [("b",)]
 
+        def keys(self) -> list[str]:
+            # The grader records column names alongside the rows so a reader can
+            # see both answers without re-executing; a real cursor exposes them
+            # here, so the double has to as well.
+            return ["letter"]
+
     class _Txn:
         def __enter__(self) -> _Txn:
             return self

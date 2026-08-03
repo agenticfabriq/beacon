@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +32,47 @@ def _sort_key(row: tuple[Any, ...]) -> tuple[str, ...]:
 
 # Dialects exposing a server-side per-statement timeout via SET LOCAL.
 _STATEMENT_TIMEOUT_DIALECTS = frozenset({"postgresql"})
+
+# How many rows of each side to keep on the verdict. Enough to show a reader
+# what the two answers looked like, bounded so a 7,806-row gold cannot bloat
+# every verdict row that references it.
+SAMPLE_ROWS = 5
+
+
+def _jsonable(value: Any) -> Any:
+    """Coerce a database cell to something JSONB can hold, losing nothing visible."""
+    if value is None or isinstance(value, bool | float | int | str):
+        return value
+    return str(value)
+
+
+@dataclass(frozen=True)
+class ResultSet:
+    """The rows a query returned, and the names of their columns."""
+
+    columns: list[str]
+    rows: list[tuple[Any, ...]]
+
+    def sample(self, limit: int = SAMPLE_ROWS) -> list[list[Any]]:
+        """Return the first ``limit`` rows, JSON-safe."""
+        return [[_jsonable(cell) for cell in row] for row in self.rows[:limit]]
+
+
+@dataclass(frozen=True)
+class Mismatch:
+    """Which dimension of a comparison actually differed.
+
+    The old justification named row counts even when the counts were equal,
+    which described the one thing that was not wrong and left every value
+    mismatch to be diagnosed by re-executing both queries by hand.
+    """
+
+    kind: str
+    detail: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Render for storage on the verdict."""
+        return {"kind": self.kind, "detail": self.detail}
 
 
 class ExecutionGroundedSqlGrader:
@@ -81,7 +123,7 @@ class ExecutionGroundedSqlGrader:
         order_sensitive = bool(_ORDER_BY_RE.search(str(gold_sql)))
 
         try:
-            candidate_rows = self._exec(engine, str(candidate_sql))
+            candidate = self._exec(engine, str(candidate_sql))
         except Exception as exc:
             return [
                 self._verdict(
@@ -95,7 +137,7 @@ class ExecutionGroundedSqlGrader:
                 )
             ]
         try:
-            gold_rows = self._exec(engine, str(gold_sql))
+            gold = self._exec(engine, str(gold_sql))
         except Exception as exc:
             return [
                 self._verdict(
@@ -113,27 +155,75 @@ class ExecutionGroundedSqlGrader:
         if tolerance.row_order_insensitive is not None:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
-        passed = self._compare(candidate_rows, gold_rows, order_sensitive, tolerance)
+        passed = self._compare(candidate.rows, gold.rows, order_sensitive, tolerance)
+        mismatch = None if passed else self._diagnose(candidate, gold, order_sensitive, tolerance)
+        raw: dict[str, Any] = {
+            "candidate_sql": candidate_sql,
+            "gold_sql": gold_sql,
+            "order_sensitive": order_sensitive,
+            "candidate_row_count": len(candidate.rows),
+            "gold_row_count": len(gold.rows),
+            # Kept so a reader can see both answers without re-executing the
+            # queries -- which would answer from today's database, not the one
+            # the verdict was computed against.
+            "candidate_columns": candidate.columns,
+            "gold_columns": gold.columns,
+            "candidate_sample": candidate.sample(),
+            "gold_sample": gold.sample(),
+        }
+        if mismatch is not None:
+            raw["mismatch"] = mismatch.as_dict()
         return [
             self._verdict(
                 passed=passed,
                 justification=(
                     "Candidate result set matches gold."
-                    if passed
-                    else f"Mismatch: candidate has {len(candidate_rows)} rows, "
-                    f"gold has {len(gold_rows)}."
+                    if mismatch is None
+                    else f"Mismatch ({mismatch.kind}): {mismatch.detail}"
                 ),
-                raw={
-                    "candidate_sql": candidate_sql,
-                    "gold_sql": gold_sql,
-                    "order_sensitive": order_sensitive,
-                    "candidate_row_count": len(candidate_rows),
-                    "gold_row_count": len(gold_rows),
-                },
+                raw=raw,
             )
         ]
 
-    def _exec(self, engine: sa.Engine, sql: str) -> list[tuple[Any, ...]]:
+    def _diagnose(
+        self,
+        candidate: ResultSet,
+        gold: ResultSet,
+        order_sensitive: bool,
+        tolerance: Tolerance,
+    ) -> Mismatch:
+        """Name the dimension that differed, and the first place it differed."""
+        if len(candidate.rows) != len(gold.rows):
+            return Mismatch(
+                "row_count",
+                f"candidate returned {len(candidate.rows)} rows, gold returned {len(gold.rows)}",
+            )
+        left, right = candidate.rows, gold.rows
+        if not order_sensitive:
+            try:
+                left, right = sorted(left, key=_sort_key), sorted(right, key=_sort_key)
+            except TypeError:
+                return Mismatch("values", "rows differ; mixed types prevent an ordered comparison")
+        for index, (row, gold_row) in enumerate(zip(left, right, strict=True)):
+            if len(row) != len(gold_row):
+                return Mismatch(
+                    "column_arity",
+                    f"row {index} has {len(row)} columns "
+                    f"({', '.join(candidate.columns) or 'unnamed'}), "
+                    f"gold has {len(gold_row)} ({', '.join(gold.columns) or 'unnamed'})",
+                )
+            for column, (cell, gold_cell) in enumerate(zip(row, gold_row, strict=True)):
+                if not self._values_match(cell, gold_cell, tolerance):
+                    name = candidate.columns[column] if column < len(candidate.columns) else column
+                    return Mismatch(
+                        "values",
+                        f"row {index}, column {name!r}: candidate {cell!r} != gold {gold_cell!r}",
+                    )
+        return Mismatch(
+            "values", "rows differ under the comparison but no differing cell was found"
+        )
+
+    def _exec(self, engine: sa.Engine, sql: str) -> ResultSet:
         # Drivers with %-based paramstyles (e.g. psycopg) parse "%" in the
         # statement as a placeholder even without bound parameters, so a
         # literal "%" (LIKE patterns in gold SQL) must be doubled for them.
@@ -146,7 +236,9 @@ class ExecutionGroundedSqlGrader:
             # shared benchmark engine serialises the whole run.
             self._apply_statement_timeout(connection)
             cursor = connection.exec_driver_sql(sql)
-            return [tuple(row) for row in cursor.fetchall()]
+            # RMKeyView, not a mapping: iterating the cursor itself yields rows.
+            columns = [str(key) for key in cursor.keys()]  # noqa: SIM118
+            return ResultSet(columns=columns, rows=[tuple(row) for row in cursor.fetchall()])
 
     def _apply_statement_timeout(self, connection: sa.Connection) -> None:
         """Bound the next statement on this connection where the dialect allows it.
