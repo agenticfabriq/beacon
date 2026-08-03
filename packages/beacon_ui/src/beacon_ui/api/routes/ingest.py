@@ -16,6 +16,7 @@ from beacon_graders.types import VerdictOutcome
 from beacon_iam.permissions import Permission
 from beacon_runner.composer_factory import composer_for_suite, graders_for_suite
 from beacon_runner.persistence import persist_result
+from beacon_runner.trace_conformance import layer_contradictions
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 from beacon_storage.models.runs import Result, RunStatus
 from beacon_storage.models.tenancy import User  # noqa: TC002
@@ -110,6 +111,32 @@ def _existing_result(session: Session, *, run_id: UUID, body: ResultIngestIn) ->
     )
 
 
+def _assert_trace_matches_declared_config(
+    body: ResultIngestIn, *, run_config: dict[str, object]
+) -> None:
+    """Refuse a result whose trace contradicts the arm the run declared.
+
+    A run that says self_consistency was off, pushing a trace in which it ran,
+    is not the experiment it claims to be -- and the attribution engine would
+    compare it against a baseline as though it were.
+    """
+    if body.trace is None:
+        return
+    declared = run_config.get("layers_enabled")
+    if not isinstance(declared, dict) or not declared:
+        return
+    contradictions = layer_contradictions(
+        ExecutionStep.model_validate(body.trace),
+        {str(k): bool(v) for k, v in declared.items()},
+    )
+    if contradictions:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "the pushed trace contradicts this run's declared configuration -- "
+            + "; ".join(contradictions),
+        )
+
+
 def _trace_step(body: ResultIngestIn) -> ExecutionStep:
     if body.trace is not None:
         return ExecutionStep.model_validate(body.trace)
@@ -168,6 +195,7 @@ def ingest_result(
         )
 
     item = _eval_item(session, item_id=body.item_id, suite=run.suite)
+    _assert_trace_matches_declared_config(body, run_config=run.config)
     exec_result = ExecutionResult(
         output=body.output,
         output_kind=body.output_kind,

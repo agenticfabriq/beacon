@@ -227,3 +227,84 @@ def test_a_closed_run_refuses_further_results(
 
     assert response.status_code == 409, response.text
     assert "awaiting them" in response.text
+
+
+def test_a_trace_contradicting_the_declared_arm_is_refused(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """B22: an ablated arm whose trace shows the layer ran is not that experiment.
+
+    The attribution engine would compare it against the baseline as though the
+    layer had been removed, and attribute the difference to a layer that was
+    never switched off.
+    """
+    run_id, item_id = _seed(session, world)
+    RunRepo(session).get(UUID(run_id)).config = {  # type: ignore[union-attr]
+        "_beacon_suite_id": str(world.chat_to_data_id),
+        "layers_enabled": {"self_consistency": False},
+    }
+    session.commit()
+
+    response = _push(
+        api_client,
+        world,
+        run_id,
+        _payload(
+            item_id,
+            "yes",
+            trace={
+                "uuid": "root",
+                "name": "run",
+                "level": "workflow",
+                "status": "COMPLETED",
+                "children": [
+                    {
+                        "uuid": "sc",
+                        "name": "self_consistency",
+                        "level": "layer:self_consistency",
+                        "status": "COMPLETED",
+                    }
+                ],
+            },
+        ),
+    )
+
+    assert response.status_code == 409, response.text
+    assert "declared disabled" in response.json()["detail"]
+
+
+def test_a_trace_agreeing_with_the_declared_arm_is_accepted(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    run_id, item_id = _seed(session, world)
+    RunRepo(session).get(UUID(run_id)).config = {  # type: ignore[union-attr]
+        "_beacon_suite_id": str(world.chat_to_data_id),
+        "layers_enabled": {"self_consistency": False},
+    }
+    session.commit()
+
+    response = _push(
+        api_client,
+        world,
+        run_id,
+        _payload(
+            item_id,
+            "yes",
+            trace={
+                "uuid": "root",
+                "name": "run",
+                "level": "workflow",
+                "status": "COMPLETED",
+                "children": [
+                    {
+                        "uuid": "sc",
+                        "name": "self_consistency",
+                        "level": "layer:self_consistency",
+                        "status": "SKIPPED",
+                    }
+                ],
+            },
+        ),
+    )
+
+    assert response.status_code == 200, response.text
