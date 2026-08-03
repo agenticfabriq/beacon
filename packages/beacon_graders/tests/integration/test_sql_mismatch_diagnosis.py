@@ -38,9 +38,7 @@ def grader(engine: sa.Engine) -> ExecutionGroundedSqlGrader:
 
 
 def _item(gold_sql: str) -> EvalItem:
-    return EvalItem(
-        item_id="i", suite="s", query={"question": "q"}, ground_truth={"sql": gold_sql}
-    )
+    return EvalItem(item_id="i", suite="s", query={"question": "q"}, ground_truth={"sql": gold_sql})
 
 
 def _result(sql: str) -> ExecutionResult:

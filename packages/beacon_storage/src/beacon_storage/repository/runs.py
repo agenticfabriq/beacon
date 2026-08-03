@@ -87,6 +87,38 @@ class RunRepo:
         """Return the run with id ``run_id`` or None."""
         return self.session.get(Run, run_id)
 
+    def invalidate(self, run_id: UUID, *, user_id: UUID, reason: str) -> Run | None:
+        """Retire a run, recording who and why. Returns None if already invalid.
+
+        The reason is required. An invalidation with no reason is a deletion
+        with extra steps, and the point of keeping the row is the explanation.
+        """
+        if not reason.strip():
+            raise ValueError("an invalidation needs a reason")
+        run = self.session.get(Run, run_id)
+        if run is None or run.invalidated_at is not None:
+            return None
+        run.invalidated_at = datetime.now(UTC)
+        run.invalidated_by = user_id
+        run.invalidation_reason = reason.strip()
+        self.session.flush()
+        return run
+
+    def restore(self, run_id: UUID) -> Run | None:
+        """Undo an invalidation. Returns None if the run was not invalidated.
+
+        Invalidating by mistake must not be permanent, or the safe action stops
+        being safe and people reach for the database instead.
+        """
+        run = self.session.get(Run, run_id)
+        if run is None or run.invalidated_at is None:
+            return None
+        run.invalidated_at = None
+        run.invalidated_by = None
+        run.invalidation_reason = None
+        self.session.flush()
+        return run
+
     def mark_running(self, run_id: UUID) -> None:
         """Set the run to ``RUNNING`` and stamp ``started_at``."""
         run = self.session.get(Run, run_id)
@@ -125,9 +157,17 @@ class RunRepo:
         suite: str | None = None,
         mode: HarnessMode | None = None,
         status: RunStatus | None = None,
+        include_invalidated: bool = False,
     ) -> list[Run]:
-        """Return runs in ``project_id`` filtered by optional facets, newest first."""
+        """Return runs in ``project_id`` filtered by optional facets, newest first.
+
+        Invalidated runs are excluded unless asked for: a retired experiment
+        that still showed up in the default listing would go on being read as a
+        result.
+        """
         stmt = select(Run).where(Run.project_id == project_id)
+        if not include_invalidated:
+            stmt = stmt.where(Run.invalidated_at.is_(None))
         if solution_id is not None:
             stmt = stmt.where(Run.solution_id == solution_id)
         if suite is not None:

@@ -87,7 +87,13 @@ def _shared_result_rows(session: Session, *, suite: str) -> list[_ResultRow]:
             & (EvalItem.team_id.is_(None))
             & (EvalItem.suite == suite),
         )
-        .where(Run.suite == suite, Run.status == RunStatus.COMPLETED)
+        # An invalidated run is a retired experiment: it keeps its results but
+        # must not rank, or invalidating it changes nothing anyone can see.
+        .where(
+            Run.suite == suite,
+            Run.status == RunStatus.COMPLETED,
+            Run.invalidated_at.is_(None),
+        )
     )
     return [
         _ResultRow(

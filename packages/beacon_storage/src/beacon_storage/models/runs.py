@@ -86,6 +86,18 @@ class Run(Base, IdMixin, TimestampsMixin):
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # A bad experiment is retired, not deleted: the row and its results stay so
+    # the record is honest, and it leaves every aggregate. Distinct from
+    # ``status``, which is how the execution ended -- a COMPLETED run is
+    # exactly the kind that gets invalidated.
+    invalidated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    invalidated_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    invalidation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def is_valid(self) -> bool:
+        """Whether this run still counts toward anything."""
+        return self.invalidated_at is None
 
     __table_args__ = (
         UniqueConstraint(

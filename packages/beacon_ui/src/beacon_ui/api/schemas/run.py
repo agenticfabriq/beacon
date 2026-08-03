@@ -20,6 +20,14 @@ class RunCreate(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class RunInvalidateIn(BaseModel):
+    """Why a run is being retired. Required: the reason is the point."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class RunSummaryOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -54,4 +62,8 @@ class RunOut(BaseModel):
     # against a baseline you must separately identify.
     parent_sweep_id: UUID | None = None
     sweep_arm: str | None = None
+    # Set when the run has been retired. The row stays and keeps its results;
+    # it just stops counting. A reader has to be able to see that and why.
+    invalidated_at: datetime | None = None
+    invalidation_reason: str | None = None
     summary: RunSummaryOut

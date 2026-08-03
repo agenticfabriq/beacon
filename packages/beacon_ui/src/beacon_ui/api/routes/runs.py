@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
-from beacon_ui.api.schemas.run import RunCreate, RunOut, RunSummaryOut
+from beacon_ui.api.schemas.run import RunCreate, RunInvalidateIn, RunOut, RunSummaryOut
 
 router = APIRouter(prefix="/v1/projects", tags=["runs"])
 
@@ -147,6 +147,8 @@ def _run_out(run: Run, session: Session) -> RunOut:
         completed_at=run.completed_at,
         parent_sweep_id=run.parent_sweep_id,
         sweep_arm=run.sweep_arm,
+        invalidated_at=run.invalidated_at,
+        invalidation_reason=run.invalidation_reason,
         summary=_summary(run, session),
     )
 
@@ -279,6 +281,7 @@ def list_runs(
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     parent_sweep_id: UUID | None = None,
     sweep_arm: str | None = None,
+    include_invalidated: bool = False,
 ) -> list[RunOut]:
     """List runs in the project, filtered by solution, suite, mode, status or sweep arm."""
     suite_name: str | None = None
@@ -296,6 +299,7 @@ def list_runs(
         suite=suite_name,
         mode=mode,
         status=_parse_status_filter(status_filter),
+        include_invalidated=include_invalidated,
     )
     if suite_id is not None:
         runs = [run for run in runs if _suite_id_from_config(run.config) in (None, suite_id)]
@@ -304,3 +308,74 @@ def list_runs(
     if sweep_arm is not None:
         runs = [run for run in runs if run.sweep_arm == sweep_arm]
     return [_run_out(run, session) for run in runs]
+
+
+@router.post(
+    "/{project_id}/runs/{run_id}/invalidate",
+    response_model=RunOut,
+    summary="Retire a run without deleting it",
+)
+@requires(Permission.PROJECT_MANAGE)
+def invalidate_run(
+    project_id: UUID,
+    run_id: UUID,
+    body: RunInvalidateIn,
+    actor: Annotated[
+        User,
+        Depends(require_permission(Permission.PROJECT_MANAGE, scope_kind="project")),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> RunOut:
+    """Mark a run invalid, with a reason, so it leaves every aggregate.
+
+    The results are kept. A re-run lands as a new run rather than reviving this
+    one, because the ingestion contract refuses to rewrite a graded result.
+    """
+    repo = RunRepo(session)
+    run = repo.get(run_id)
+    if run is None or run.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    if run.invalidated_at is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"run {run_id} is already invalidated")
+
+    invalidated = repo.invalidate(run_id, user_id=actor.id, reason=body.reason)
+    assert invalidated is not None
+
+    # A retired run cannot go on being the thing everything is compared against.
+    project = ProjectRepo(session).get(project_id)
+    if project is not None and project.baseline_run_id == run_id:
+        project.baseline_run_id = None
+    session.commit()
+    return _run_out(invalidated, session)
+
+
+@router.post(
+    "/{project_id}/runs/{run_id}/restore",
+    response_model=RunOut,
+    summary="Undo an invalidation",
+)
+@requires(Permission.PROJECT_MANAGE)
+def restore_run(
+    project_id: UUID,
+    run_id: UUID,
+    _actor: Annotated[
+        User,
+        Depends(require_permission(Permission.PROJECT_MANAGE, scope_kind="project")),
+    ],
+    session: Annotated[Session, Depends(get_session)],
+) -> RunOut:
+    """Bring an invalidated run back.
+
+    Invalidating by mistake must not be permanent, or the safe action stops
+    being safe and people reach for the database instead. The reference pin is
+    not restored: re-pinning is a deliberate act.
+    """
+    repo = RunRepo(session)
+    run = repo.get(run_id)
+    if run is None or run.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    restored = repo.restore(run_id)
+    if restored is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"run {run_id} is not invalidated")
+    session.commit()
+    return _run_out(restored, session)
