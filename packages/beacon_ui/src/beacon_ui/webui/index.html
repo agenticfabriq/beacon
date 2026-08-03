@@ -54,6 +54,8 @@
 
   .tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
   table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  th.sort{cursor:pointer} th.sort:hover{color:var(--ink)}
+  th .arrow{color:var(--accent);font-size:9px}
   th{text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:650;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
   td{padding:7px 10px;border-bottom:1px solid var(--line-soft);white-space:nowrap;vertical-align:top}
   tbody tr:last-child td{border-bottom:none}
@@ -185,13 +187,26 @@
       configuration's valid runs. Two readings of correctness side by side — exact match decides,
       got-facts is the tolerant one — with what each row costs. Open a row for its layer effect
       and its runs. Invalidated runs are out of every number here.</p>
-      <div class="chips" id="matrix-chips"></div>
+      <div class="chips" id="matrix-filters">
+        <input type="search" id="matrix-q" placeholder="Search model or config…" style="flex:1 1 200px;min-width:170px">
+        <select id="matrix-system"></select>
+        <select id="matrix-model"></select>
+        <span class="chipsep"></span>
+        <span id="matrix-diff-chips" style="display:contents"></span>
+        <span class="dim" style="margin-left:auto;font-size:11.5px" id="matrix-count"></span>
+        <button class="btn" id="matrix-clear">clear</button>
+      </div>
       <div class="tw"><table>
         <thead><tr>
-          <th>System</th><th>Model</th><th>Config</th><th class="num">runs</th><th class="num">n</th>
-          <th class="num">EX</th><th class="num">got-facts</th><th class="num">deferred</th>
-          <th class="num">wrong</th><th class="num">infra</th><th class="num">tokens</th>
-          <th class="num">latency</th><th></th></tr></thead>
+          <th class="sort" data-sort="system">System</th><th class="sort" data-sort="model">Model</th>
+          <th class="sort" data-sort="config">Config</th><th class="num">runs</th><th class="num">n</th>
+          <th class="num sort" data-sort="ex_rate">EX</th>
+          <th class="num sort" data-sort="got_facts_rate">got-facts</th>
+          <th class="num sort" data-sort="defer_rate">deferred</th>
+          <th class="num sort" data-sort="wrong_rate">wrong</th>
+          <th class="num sort" data-sort="n_errors">infra</th>
+          <th class="num sort" data-sort="median_tokens">tokens</th>
+          <th class="num sort" data-sort="median_runtime_ms">latency</th><th></th></tr></thead>
         <tbody id="matrix-rows"></tbody></table></div>
     </div>
 
@@ -265,11 +280,27 @@
       <h1>Settings</h1>
       <p class="sub">Configuration, not measurement — nothing here answers a question about how a
       system is doing, so none of it is in the navigation.</p>
-      <section><div class="sechead"><h2>Workspace</h2></div>
+      <section><div class="sechead"><h2>Team &amp; project</h2>
+        <span class="sub" style="margin:0">The team is the access boundary — who can see this data.
+        The project is a legacy container between team and benchmark; runs still hang off it, so it
+        is shown here until it is folded out of the schema. Neither is a step on the way to a
+        result.</span></div>
         <div class="inline">
           <select id="set-team"></select>
           <select id="set-project"></select>
-        </div></section>
+        </div>
+        <div class="inline" style="margin-top:8px">
+          <input type="text" id="set-new-team" placeholder="new team name">
+          <button class="btn" id="set-create-team">Create team</button>
+          <span class="chipsep"></span>
+          <input type="text" id="set-new-project" placeholder="new project name">
+          <button class="btn" id="set-create-project">Create project</button>
+          <span class="chipsep"></span>
+          <button class="btn danger" id="set-archive-project">Archive current project</button>
+        </div>
+        <p class="sub">Creating a team needs the beacon_admin role. Archiving hides a project and
+        its runs from every listing; teams have no delete endpoint at all — removal means removing
+        the members.</p></section>
       <section><div class="sechead"><h2>This benchmark</h2></div><div id="set-bench"></div></section>
       <section><div class="sechead"><h2>Systems under test</h2>
         <span class="sub" style="margin:0">Registered by the runner on first push; a divergent
@@ -317,6 +348,9 @@ const ENDPOINTS = {
   removeMember: ["DELETE", "/v1/teams/{team_id}/members/{user_id}"],
   teamSystems:  ["GET",    "/v1/teams/{team_id}/solutions"],
   projects:     ["GET",    "/v1/projects"],
+  createTeam:   ["POST",   "/v1/teams"],
+  createProject:["POST",   "/v1/projects"],
+  archiveProject:["DELETE","/v1/projects/{project_id}"],
   settings:     ["PATCH",  "/v1/projects/{project_id}/settings"],
   suites:       ["GET",    "/v1/projects/{project_id}/suites"],
   createSuite:  ["POST",   "/v1/projects/{project_id}/suites"],
@@ -338,7 +372,10 @@ const S = {  // client state; everything else lives on the server
   key: null, user: null,
   teamId: null, projectId: null, suiteId: null,
   suites: [], baselineRunId: null,
-  matrixDifficulty: "", showInvalidated: false,
+  matrixDifficulty: "", matrixRows: [],
+  matrixQuery: "", matrixSystem: "", matrixModel: "",
+  matrixSort: "ex_rate", matrixSortDir: -1,
+  showInvalidated: false,
   runOutcome: "", runDifficulty: "", selectedItem: null,
   questionsDifficulty: "", questionsSource: "",
 };
@@ -452,11 +489,14 @@ function renderRail() {
 /* --------------------------- matrix --------------------------- */
 const loadMatrix = guard(async () => {
   if (!S.suiteId) return;
+  // Difficulty re-aggregates the rates, so it is server-side; everything else
+  // below is a refinement over the returned rows and stays in the client.
   const body = await api("matrix", { project_id: S.projectId },
     { query: { suite_id: S.suiteId, difficulty: S.matrixDifficulty } });
+  S.matrixRows = body.rows;
   const counts = body.difficulty_counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  document.getElementById("matrix-chips").innerHTML =
+  document.getElementById("matrix-diff-chips").innerHTML =
     '<span class="chiplabel">Difficulty</span>' +
     [["", `all <span class="c">${total}</span>`],
      ...Object.keys(counts).sort().filter((k) => k !== "unknown")
@@ -464,7 +504,48 @@ const loadMatrix = guard(async () => {
       .map(([value, label]) =>
         `<button class="chip" data-diff="${esc(value)}" aria-pressed="${String(value === S.matrixDifficulty)}">${label}</button>`)
       .join("");
-  document.getElementById("matrix-rows").innerHTML = body.rows.length ? body.rows.map((row, index) =>
+  const systems = [...new Set(S.matrixRows.map((r) => `${r.solution_name} ${r.solution_version}`))].sort();
+  const models = [...new Set(S.matrixRows.map((r) => r.model_id).filter(Boolean))].sort();
+  document.getElementById("matrix-system").innerHTML =
+    '<option value="">All systems</option>' + systems.map((v) =>
+      `<option ${v === S.matrixSystem ? "selected" : ""}>${esc(v)}</option>`).join("");
+  document.getElementById("matrix-model").innerHTML =
+    '<option value="">All models</option>' + models.map((v) =>
+      `<option ${v === S.matrixModel ? "selected" : ""}>${esc(v)}</option>`).join("");
+  renderMatrixRows();
+});
+
+function matrixSelection() {
+  let rows = S.matrixRows;
+  if (S.matrixSystem) rows = rows.filter((r) => `${r.solution_name} ${r.solution_version}` === S.matrixSystem);
+  if (S.matrixModel) rows = rows.filter((r) => r.model_id === S.matrixModel);
+  if (S.matrixQuery) {
+    const q = S.matrixQuery.toLowerCase();
+    rows = rows.filter((r) =>
+      `${r.solution_name} ${r.solution_version} ${r.model_id || ""} ${r.config_label || ""}`
+        .toLowerCase().includes(q));
+  }
+  const key = S.matrixSort;
+  const keyOf = (r) => key === "system" ? `${r.solution_name} ${r.solution_version}`
+    : key === "model" ? (r.model_id || "") : key === "config" ? (r.config_label || "") : r[key];
+  return [...rows].sort((a, b) => {
+    const x = keyOf(a), y = keyOf(b);
+    if (x === null || x === undefined) return 1;      // unknown sorts last, both directions
+    if (y === null || y === undefined) return -1;
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * S.matrixSortDir;
+  });
+}
+
+function renderMatrixRows() {
+  const rows = matrixSelection();
+  document.querySelectorAll("#v-matrix th.sort").forEach((th) => {
+    const base = th.textContent.replace(/[▲▼]\s*$/, "").trim();
+    th.innerHTML = esc(base) + (th.dataset.sort === S.matrixSort
+      ? ` <span class="arrow">${S.matrixSortDir < 0 ? "▼" : "▲"}</span>` : "");
+  });
+  document.getElementById("matrix-count").textContent =
+    `showing ${rows.length} of ${S.matrixRows.length}`;
+  document.getElementById("matrix-rows").innerHTML = rows.length ? rows.map((row, index) =>
     `<tr class="click" data-cell="${index}">
       <td>${esc(row.solution_name)} <span class="dim">${esc(row.solution_version)}</span></td>
       <td>${esc(row.model_id || "")}</td>
@@ -478,9 +559,9 @@ const loadMatrix = guard(async () => {
       <td class="num dim">${row.median_tokens === null ? "–" : Math.round(row.median_tokens)}</td>
       <td class="num dim">${row.median_runtime_ms === null ? "–" : Math.round(row.median_runtime_ms) + "ms"}</td>
       <td class="dim" style="font-size:11px">open →</td></tr>`).join("")
-    : '<tr><td colspan="13"><div class="empty">No graded runs in this benchmark yet.</div></td></tr>';
-  document.getElementById("matrix-rows").dataset.payload = JSON.stringify(body.rows);
-});
+    : '<tr><td colspan="13"><div class="empty">No configuration matches these filters.</div></td></tr>';
+  document.getElementById("matrix-rows").dataset.payload = JSON.stringify(rows);
+}
 
 const openCell = guard(async (row) => {
   go("cell");
@@ -820,6 +901,28 @@ document.addEventListener("click", (event) => {
   if (nav) go(nav.dataset.go);
 });
 
+document.getElementById("matrix-q").addEventListener("input", (event) => {
+  S.matrixQuery = event.target.value; renderMatrixRows();
+});
+document.getElementById("matrix-system").addEventListener("change", (event) => {
+  S.matrixSystem = event.target.value; renderMatrixRows();
+});
+document.getElementById("matrix-model").addEventListener("change", (event) => {
+  S.matrixModel = event.target.value; renderMatrixRows();
+});
+document.getElementById("matrix-clear").addEventListener("click", () => {
+  S.matrixQuery = ""; S.matrixSystem = ""; S.matrixModel = ""; S.matrixDifficulty = "";
+  document.getElementById("matrix-q").value = "";
+  loadMatrix();
+});
+document.addEventListener("click", (event) => {
+  const th = event.target.closest("#v-matrix th.sort");
+  if (!th) return;
+  const key = th.dataset.sort;
+  if (S.matrixSort === key) S.matrixSortDir = -S.matrixSortDir;
+  else { S.matrixSort = key; S.matrixSortDir = ["system", "model", "config"].includes(key) ? 1 : -1; }
+  renderMatrixRows();
+});
 document.getElementById("runs-show-invalidated").addEventListener("click", () => {
   S.showInvalidated = !S.showInvalidated; loadRuns();
 });
@@ -837,6 +940,28 @@ document.getElementById("set-team").addEventListener("change", guard(async (even
 }));
 document.getElementById("set-project").addEventListener("change", guard(async (event) => {
   S.projectId = event.target.value; S.suiteId = null; S.suites = [];
+  await bootstrapWorkspace(); loadSettings();
+}));
+document.getElementById("set-create-team").addEventListener("click", guard(async () => {
+  const name = document.getElementById("set-new-team").value.trim();
+  if (!name) return;
+  const created = await api("createTeam", {}, { body: { name, description: "" } });
+  document.getElementById("set-new-team").value = "";
+  S.teamId = String(created.id); S.projectId = null; S.suiteId = null; S.suites = [];
+  await bootstrapWorkspace(); loadSettings();
+}));
+document.getElementById("set-create-project").addEventListener("click", guard(async () => {
+  const name = document.getElementById("set-new-project").value.trim();
+  if (!name) return;
+  const created = await api("createProject", {}, { query: { team_id: S.teamId }, body: { name, description: "" } });
+  document.getElementById("set-new-project").value = "";
+  S.projectId = String(created.id); S.suiteId = null; S.suites = [];
+  await bootstrapWorkspace(); loadSettings();
+}));
+document.getElementById("set-archive-project").addEventListener("click", guard(async () => {
+  if (!window.confirm("Archive this project? It disappears from listings; nothing is deleted.")) return;
+  await api("archiveProject", { project_id: S.projectId });
+  S.projectId = null; S.suiteId = null; S.suites = [];
   await bootstrapWorkspace(); loadSettings();
 }));
 document.getElementById("set-invite-btn").addEventListener("click", guard(async () => {
