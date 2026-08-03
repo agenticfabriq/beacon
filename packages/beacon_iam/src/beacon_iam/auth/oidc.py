@@ -35,6 +35,10 @@ class OidcClaims:
     subject: str
     email: str
     name: str
+    # Group memberships the identity provider asserts. Empty means the token
+    # carried no groups claim, which is different from asserting no groups --
+    # see UserService.grant_memberships_from_groups.
+    groups: tuple[str, ...] = ()
 
 
 class OidcVerifier:
@@ -71,7 +75,14 @@ class OidcVerifier:
         if not isinstance(name, str):
             name = email
 
-        return OidcClaims(subject=subject, email=email, name=name)
+        raw_groups = payload.get("groups")
+        groups = (
+            tuple(str(group) for group in raw_groups if isinstance(group, str))
+            if isinstance(raw_groups, list)
+            else ()
+        )
+
+        return OidcClaims(subject=subject, email=email, name=name, groups=groups)
 
 
 @dataclass(frozen=True)

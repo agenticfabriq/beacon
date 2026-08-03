@@ -90,7 +90,9 @@ def get_current_user(
             )
         )
         claims = verifier.verify_id_token(authorization.removeprefix("Bearer ").strip())
-        user = UserService(session).upsert_from_oidc(claims)
+        service = UserService(session)
+        user = service.upsert_from_oidc(claims)
+        service.grant_memberships_from_groups(user, claims)
         set_current_user(session, user.id)
         return user
 

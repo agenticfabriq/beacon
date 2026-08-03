@@ -1,11 +1,30 @@
-"""Dashboard session-state facade."""
+"""Dashboard session-state facade.
+
+Credentials come from the session first, and fall back to the same ambient
+context the CLI uses: ``BEACON_API_KEY`` / ``BEACON_API_BASE`` and the
+``~/.beacon/ctx.json`` written by ``beacon login``. Without that fallback the
+dashboard could not be pre-authenticated for a demo, a kiosk or an automated
+screenshot, and every session began by hand-pasting a key -- while the rest of
+the product had read those settings all along.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from beacon_ui.cli.ctx import load_context
+
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
+
+
+def _ambient() -> tuple[str | None, str | None]:
+    """Return the API key and base the environment supplies, if any."""
+    try:
+        context = load_context()
+    except OSError:  # pragma: no cover - an unreadable context is simply absent
+        return None, None
+    return context.api_key, context.api_base
 
 
 class DashboardState:
@@ -30,15 +49,25 @@ class DashboardState:
 
     @property
     def api_key(self) -> str | None:
-        """Return the stored API key, or None when unauthenticated."""
+        """Return the session's API key, or the one the environment supplies.
+
+        An explicit sign-in wins; logging out clears it and is not undone by the
+        ambient key, so signing out of a pre-authenticated dashboard works.
+        """
         value = self.bag.get("api_key")
-        return value if isinstance(value, str) and value else None
+        if isinstance(value, str) and value:
+            return value
+        if "api_key" in self.bag:
+            return None
+        return _ambient()[0]
 
     @property
     def api_base(self) -> str:
-        """Return the stored API base URL or the local default."""
+        """Return the session's API base, the environment's, or the local default."""
         value = self.bag.get("api_base")
-        return value if isinstance(value, str) and value else "http://localhost:8000"
+        if isinstance(value, str) and value:
+            return value
+        return _ambient()[1] or "http://localhost:8000"
 
     @property
     def current_team_id(self) -> str | None:

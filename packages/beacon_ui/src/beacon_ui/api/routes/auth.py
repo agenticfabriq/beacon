@@ -62,7 +62,9 @@ def oidc_exchange(
         )
     )
     claims = verifier.verify_id_token(body.id_token)
-    user = UserService(session).upsert_from_oidc(claims)
+    service = UserService(session)
+    user = service.upsert_from_oidc(claims)
+    service.grant_memberships_from_groups(user, claims)
     return _issue_key(session, user_id=user.id, label=body.label, prefix=config.api_key_prefix)
 
 
@@ -172,7 +174,9 @@ def oidc_callback(
         redirect_uri=redirect_uri,
     )
     claims = OidcVerifier(oidc_config).verify_id_token(id_token)
-    user = UserService(session).upsert_from_oidc(claims)
+    service = UserService(session)
+    user = service.upsert_from_oidc(claims)
+    service.grant_memberships_from_groups(user, claims)
     issued = _issue_key(
         session,
         user_id=user.id,
