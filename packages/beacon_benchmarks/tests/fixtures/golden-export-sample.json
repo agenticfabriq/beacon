@@ -1,0 +1,36 @@
+{
+  "schema_version": "semantic_layer.golden_questions.v1",
+  "tenant_id": "acme",
+  "golden_questions": [
+    {
+      "golden_question": {
+        "tenant_id": "acme",
+        "golden_question_id": "gq-1",
+        "question": "What was revenue last quarter?",
+        "expected_answer": "1200",
+        "expected_result": {
+          "kind": "number",
+          "value": 1200.0
+        },
+        "status": "approved",
+        "version": 3,
+        "owner": "analyst@acme",
+        "reviewer": "lead@acme",
+        "expected_result_hash": "abc123",
+        "tolerance": {
+          "numeric_abs": 0.5,
+          "numeric_rel": null,
+          "row_order_insensitive": true
+        },
+        "semantic_version_hashes": [
+          "h1"
+        ],
+        "semantic_version_refs": [
+          "sem-v7"
+        ],
+        "deprecation": null
+      },
+      "history": []
+    }
+  ]
+}

@@ -40,12 +40,12 @@ def _question(**over: Any) -> dict[str, Any]:
         "golden_question_id": "gq-1",
         "question": "What was revenue last quarter?",
         "expected_answer": "1200",
-        "expected_result": {"Number": {"value": 1200.0}},
-        "status": "Approved",
+        "expected_result": {"kind": "number", "value": 1200.0},
+        "status": "approved",
         "version": 3,
         "owner": "analyst@acme",
         "reviewer": "lead@acme",
-        "tolerance": {"numeric_abs": 0.5, "row_order_insensitive": True},
+        "tolerance": {"numeric_abs": 0.5, "numeric_rel": None, "row_order_insensitive": True},
         "semantic_version_refs": ["sem-v7"],
     }
     q.update(over)
@@ -89,7 +89,7 @@ def test_the_curated_tolerance_survives_the_import(session: Session, ctx: tuple[
     assert tol.row_order_insensitive is True
 
 
-@pytest.mark.parametrize("status", ["Draft", "InReview", "Deprecated"])
+@pytest.mark.parametrize("status", ["draft", "in_review", "deprecated"])
 def test_unapproved_questions_are_not_imported(
     session: Session, ctx: tuple[Any, Any], status: str
 ) -> None:
@@ -116,7 +116,7 @@ def test_a_question_with_no_usable_expected_result_is_skipped(
 
     report = import_golden_package(
         session,
-        _package(_question(expected_result={"Unsupported": {}})),
+        _package(_question(expected_result={"kind": "unsupported"})),
         team_id=team.id,
         suite=SUITE,
         created_by=user.id,
@@ -144,10 +144,10 @@ def test_reimporting_the_same_package_is_a_no_op(session: Session, ctx: tuple[An
 def test_text_and_table_results_both_map(session: Session, ctx: tuple[Any, Any]) -> None:
     team, user = ctx
     package = _package(
-        _question(golden_question_id="t1", expected_result={"Text": {"value": "yes"}}),
+        _question(golden_question_id="t1", expected_result={"kind": "text", "value": "yes"}),
         _question(
             golden_question_id="t2",
-            expected_result={"Table": {"columns": ["a"], "rows": [[1], [2]]}},
+            expected_result={"kind": "table", "columns": ["a"], "rows": [[1], [2]]},
         ),
     )
 
@@ -179,6 +179,43 @@ def test_provenance_records_that_this_gold_was_imported(
     assert metadata["golden_question_id"] == "gq-1"
     assert metadata["golden_version"] == 3
     assert metadata["semantic_version_refs"] == ["sem-v7"]
+
+
+def test_the_fixture_generated_by_veritys_own_serde_imports(
+    session: Session, ctx: tuple[Any, Any]
+) -> None:
+    """The invented-format importer passed every unit test and imported zero
+    questions from a real export. This fixture was printed by verity's serde,
+    so the test fails if either side's idea of the wire format moves."""
+    import json
+    from pathlib import Path
+
+    team, user = ctx
+    package = json.loads(
+        (Path(__file__).parent.parent / "fixtures" / "golden-export-sample.json").read_text()
+    )
+    suite = f"{SUITE}_serde"
+
+    report = import_golden_package(
+        session, package, team_id=team.id, suite=suite, created_by=user.id
+    )
+
+    assert report.imported == 1, report.skipped_reasons
+    item = EvalItemRepo(session).list_active(suite=suite, team_id=team.id)[0]
+    assert item.gold_answer == {"answer": 1200.0}
+    assert item.item_metadata["tolerance"] == {"numeric_abs": 0.5, "row_order_insensitive": True}
+    assert item.dataset_version == "semantic_layer.golden_questions.v1"
+    # And the tolerance, nulls stripped, must actually validate for grading.
+    tol = Tolerance.model_validate(item.item_metadata["tolerance"])
+    assert tol.numeric_abs == 0.5
+
+
+def test_a_null_tolerance_field_does_not_break_grading() -> None:
+    """Verity serializes an absent bound as null; grading must read it as
+    "no curated opinion", not raise at verdict time."""
+    tol = Tolerance.model_validate({"numeric_abs": None, "numeric_rel": None})
+
+    assert tol.numeric_abs == DEFAULT_NUMERIC_ABS
 
 
 def test_dataset_version_defaults_to_the_package_schema_version(

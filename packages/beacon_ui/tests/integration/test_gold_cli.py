@@ -41,8 +41,8 @@ def _question(**over: Any) -> dict[str, Any]:
         "golden_question_id": f"gq-{uuid4().hex[:6]}",
         "question": "What was revenue last quarter?",
         "expected_answer": "1200",
-        "expected_result": {"Number": {"value": 1200.0}},
-        "status": "Approved",
+        "expected_result": {"kind": "number", "value": 1200.0},
+        "status": "approved",
         "version": 3,
         "owner": "analyst@acme",
         "reviewer": "lead@acme",
@@ -95,14 +95,14 @@ def test_it_reports_what_it_refused(
 ) -> None:
     """A package that imports nothing because it is all in review must say so."""
     team_name, actor = gold_team
-    package = _package(tmp_path, _question(status="Draft"), _question(status="InReview"))
+    package = _package(tmp_path, _question(status="draft"), _question(status="in_review"))
 
     result = _run(package, team_name, actor, f"cli_gold_{uuid4().hex[:6]}", db_url)
 
     assert result.exit_code == 0, result.output
     assert "imported        0" in result.output
     assert "not approved    2" in result.output
-    assert "Draft" in result.output
+    assert "draft" in result.output
 
 
 def test_the_curated_tolerance_survives_the_command(

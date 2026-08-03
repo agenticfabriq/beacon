@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # The absolute equivalent of the 6-decimal rounding this replaces. Wide enough
 # to absorb a DECIMAL-vs-REAL cast, tight enough that two genuinely different
@@ -51,6 +51,14 @@ class Tolerance(BaseModel):
     # None means "no curated opinion" -- fall back to inferring from the gold
     # query, which is what beacon has always done.
     row_order_insensitive: bool | None = None
+
+    @field_validator("numeric_abs", "numeric_rel", mode="before")
+    @classmethod
+    def _null_means_default(cls, value: object) -> object:
+        """Verity serializes an absent bound as null; that is "no curated
+        opinion", not a value, so it falls back to the default rather than
+        failing validation at grading time."""
+        return cls.model_fields["numeric_abs"].default if value is None else value
 
     @classmethod
     def for_item(cls, item: Any) -> Tolerance:
