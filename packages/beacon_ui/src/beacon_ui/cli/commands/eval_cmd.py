@@ -38,18 +38,3 @@ def run_eval(project: str | None, sut: str, suite: str, mode: str, k: int) -> No
     click.echo(format_output(out, format="json"))
 
 
-@cli.command("gate")
-@click.option("--project", default=None, help="Project ID. Defaults to BEACON_PROJECT or ctx.")
-@click.option("--sut", required=True, help="Solution UUID.")
-@click.option("--commit", required=True, help="Commit SHA.")
-@click.option("--ci-url", default=None)
-def gate(project: str | None, sut: str, commit: str, ci_url: str | None) -> None:
-    """Run the PR gate for a commit and exit non-zero on a fail decision."""
-    client = http_client_from_context(load_context())
-    body: dict[str, object] = {"solution_id": sut, "commit_sha": commit}
-    if ci_url:
-        body["ci_run_url"] = ci_url
-    out = client.post(f"/v1/projects/{_require_project_id(project)}/gate", body)
-    click.echo(format_output(out, format="json"))
-    if isinstance(out, dict) and out.get("decision") == "fail":
-        raise click.exceptions.Exit(1)
