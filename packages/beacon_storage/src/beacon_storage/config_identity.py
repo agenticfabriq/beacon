@@ -22,9 +22,17 @@ if TYPE_CHECKING:
 # Excluded from the digest: a credential reference says nothing about what was
 # measured, and rotating one would otherwise look like a new configuration.
 EXCLUDED_KEYS = frozenset({"secret_refs"})
-# Also excluded: bookkeeping the loader attaches to a run, which varies between
-# two runs of the very same configuration.
-EXCLUDED_EXTRAS = frozenset({"source_report", "run_tokens", "llm_calls", "config_label"})
+# Also excluded: bookkeeping a loader attaches to a run, which varies between two
+# runs of the very same configuration and says nothing about what was measured.
+#
+# `config_label` is deliberately NOT excluded. It looks like a display name, but
+# a runner's captured config does not always cover every knob it turned --
+# constrained decoding, for instance, changes what a run measures and appears in
+# no field here. When two runs carry identical config and different labels, the
+# label is the only remaining evidence that they are different experiments, and
+# the runner is the authority on that. Excluding it merged seven real
+# configurations of one model into a single row.
+EXCLUDED_EXTRAS = frozenset({"source_report", "run_tokens", "llm_calls"})
 
 
 def _canonical(config: Mapping[str, Any]) -> dict[str, Any]:

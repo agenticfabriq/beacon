@@ -7,7 +7,9 @@ suite but no configuration at all, so "does the verifier help?" averaged over
 whatever models happened to be swept and could not be asked per model.
 
 ``config_digest`` is a deterministic hash of the runtime config with secrets
-excluded -- it makes grouping correct. ``config_label`` is what the runner calls
+excluded -- it makes grouping correct. It is backfilled here in Python, with the
+same helper the application uses, because a SQL reimplementation that drifted
+from it would silently split rows. ``config_label`` is what the runner calls
 that configuration -- it makes grouping readable. Both nullable: runs written
 before this are backfilled where the JSONB carries the value and left NULL where
 it does not, rather than being given an invented identity.
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from beacon_storage.config_identity import config_digest
 
 revision = "0016_config_identity"
 down_revision = "0015_drop_gate_policy"
@@ -51,6 +54,16 @@ def upgrade() -> None:
             "WHERE config -> 'extras' ->> 'config_label' IS NOT NULL"
         )
     )
+
+    # The digest must match what the application computes, so it is filled in
+    # Python with the same helper rather than reimplemented in SQL.
+    connection = op.get_bind()
+    rows = connection.execute(sa.text("SELECT id, config FROM runs")).all()
+    for run_id, config in rows:
+        connection.execute(
+            sa.text("UPDATE runs SET config_digest = :digest WHERE id = :id"),
+            {"digest": config_digest(config or {}), "id": run_id},
+        )
 
     op.create_index("ix_runs_model", "runs", ["model_id"])
     op.create_index("ix_runs_config_digest", "runs", ["config_digest"])

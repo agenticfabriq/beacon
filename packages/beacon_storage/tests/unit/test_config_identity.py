@@ -7,7 +7,7 @@ run becomes its own row and nothing is ever compared.
 
 from __future__ import annotations
 
-from beacon_runner.config_identity import config_digest, config_label_of, model_id_of
+from beacon_storage.config_identity import config_digest, config_label_of, model_id_of
 
 
 def _config(**over: object) -> dict[str, object]:
@@ -54,11 +54,19 @@ def test_rotating_a_secret_does_not_split_a_row() -> None:
     assert config_digest(rotated) == config_digest(_config())
 
 
-def test_the_label_does_not_decide_identity() -> None:
-    """Two names for the same knobs are one configuration, not two."""
-    labelled = _config(extras={"config_label": "+guided_json"})
+def test_the_label_is_part_of_the_identity() -> None:
+    """A runner's captured config does not always cover every knob it turned.
 
-    assert config_digest(labelled) == config_digest(_config())
+    Constrained decoding changes what a run measures and appears in no field
+    here, so two runs with identical config and different labels are different
+    experiments. Treating the label as cosmetic merged baseline, +guided_json,
+    +assertive and +verify for one model into a single row.
+    """
+    labelled = _config(extras={"config_label": "+guided_json"})
+    other = _config(extras={"config_label": "baseline"})
+
+    assert config_digest(labelled) != config_digest(other)
+    assert config_digest(labelled) != config_digest(_config())
 
 
 def test_loader_bookkeeping_does_not_split_a_row() -> None:

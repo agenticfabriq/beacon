@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 import numpy as np
-from beacon_runner.config_identity import config_digest, model_id_of
+from beacon_storage.config_identity import config_digest, model_id_of
 from beacon_storage.ids import uuid7
 from beacon_storage.models.attribution import Attribution
 

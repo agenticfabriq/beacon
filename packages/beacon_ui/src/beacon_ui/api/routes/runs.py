@@ -14,8 +14,8 @@ from beacon_ablation.metrics import (
     suite_pass_hat_k,
 )
 from beacon_iam.permissions import Permission
-from beacon_runner.config_identity import config_digest as compute_config_digest
-from beacon_runner.config_identity import config_label_of, model_id_of
+from beacon_storage.config_identity import config_digest as compute_config_digest
+from beacon_storage.config_identity import config_label_of, model_id_of
 from beacon_storage.errors import ConflictingSolutionDeclarationError
 from beacon_storage.ids import uuid7
 from beacon_storage.models.project_solutions import ProjectSolution
