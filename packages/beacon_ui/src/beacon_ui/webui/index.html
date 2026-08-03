@@ -369,6 +369,9 @@ async function api(name, params = {}, { query = {}, body } = {}) {
 }
 
 /* ---- rendering helpers: server data is text, never markup ---- */
+/* Some routes return a bare list, some wrap it ({teams:[...]}). Tolerate both:
+ * reading .teams off a bare list left the whole workspace empty. */
+const asList = (body, key) => Array.isArray(body) ? body : (body && body[key]) || [];
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g,
   (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const pct = (value) => (value === null || value === undefined) ? "n/a" : (value * 100).toFixed(1) + "%";
@@ -428,14 +431,14 @@ function loginError(error) {
 
 /* ------------------------- workspace ------------------------- */
 async function bootstrapWorkspace() {
-  const teams = (await api("teams")).teams || [];
+  const teams = asList(await api("teams"), "teams");
   if (!S.teamId && teams.length) S.teamId = String(teams[0].id);
   if (!S.teamId) return;
-  const projects = (await api("projects", {}, { query: { team_id: S.teamId } })).projects || [];
+  const projects = asList(await api("projects", {}, { query: { team_id: S.teamId } }), "projects");
   if (!S.projectId && projects.length) S.projectId = String(projects[0].id);
   if (!S.projectId) return;
   S.baselineRunId = (projects.find((p) => String(p.id) === S.projectId) || {}).baseline_run_id;
-  S.suites = (await api("suites", { project_id: S.projectId })) || [];
+  S.suites = asList(await api("suites", { project_id: S.projectId }), "suites");
   if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
   renderRail();
 }
@@ -666,7 +669,7 @@ const loadQuestions = guard(async () => {
 
 /* -------------------------- benchmarks -------------------------- */
 const loadBenchmarks = guard(async () => {
-  S.suites = (await api("suites", { project_id: S.projectId })) || [];
+  S.suites = asList(await api("suites", { project_id: S.projectId }), "suites");
   const runs = await api("runs", { project_id: S.projectId },
     { query: { limit: 500, include_invalidated: "true" } });
   const bySuite = {};
@@ -681,10 +684,10 @@ const loadBenchmarks = guard(async () => {
 
 /* --------------------------- settings --------------------------- */
 const loadSettings = guard(async () => {
-  const teams = (await api("teams")).teams || [];
+  const teams = asList(await api("teams"), "teams");
   document.getElementById("set-team").innerHTML = teams.map((team) =>
     `<option value="${esc(team.id)}" ${String(team.id) === S.teamId ? "selected" : ""}>${esc(team.name)}</option>`).join("");
-  const projects = (await api("projects", {}, { query: { team_id: S.teamId } })).projects || [];
+  const projects = asList(await api("projects", {}, { query: { team_id: S.teamId } }), "projects");
   document.getElementById("set-project").innerHTML = projects.map((project) =>
     `<option value="${esc(project.id)}" ${String(project.id) === S.projectId ? "selected" : ""}>${esc(project.name)}</option>`).join("");
 
@@ -694,8 +697,7 @@ const loadSettings = guard(async () => {
      reference run ${S.baselineRunId ? short(S.baselineRunId) : "not set"} — pin from Runs, where you
      can see what you are pinning. Gold arrives via <code>beacon gold import</code>.</p>`;
 
-  const systems = await api("teamSystems", { team_id: S.teamId });
-  const systemRows = (systems.solutions || systems || []);
+  const systemRows = asList(await api("teamSystems", { team_id: S.teamId }), "solutions");
   document.getElementById("set-systems").innerHTML = systemRows.length
     ? `<div class="tw"><table><thead><tr><th>System</th><th>Version</th><th>Declared layers</th></tr></thead><tbody>` +
       systemRows.map((row) => `<tr><td>${esc(row.solution_id)}</td><td class="dim">${esc(row.version)}</td>
@@ -703,7 +705,7 @@ const loadSettings = guard(async () => {
       "</tbody></table></div>"
     : '<div class="empty">Nothing registered yet — a runner registers itself on first push.</div>';
 
-  const members = (await api("members", { team_id: S.teamId })).members || [];
+  const members = asList(await api("members", { team_id: S.teamId }), "members");
   document.getElementById("set-members").innerHTML = members.length
     ? `<div class="tw"><table><thead><tr><th>Member</th><th>Role</th><th></th></tr></thead><tbody>` +
       members.map((member) => `<tr><td>${esc(member.email)}</td><td class="dim">${esc(member.role)}</td>
@@ -711,7 +713,7 @@ const loadSettings = guard(async () => {
       "</tbody></table></div>"
     : '<div class="empty">No members.</div>';
 
-  const keys = (await api("keys")).keys || [];
+  const keys = asList(await api("keys"), "keys");
   document.getElementById("set-keys").innerHTML = keys.length
     ? `<div class="tw"><table><thead><tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>` +
       keys.map((key) => `<tr><td>${esc(key.label)}</td><td class="dim">${esc((key.created_at || "").slice(0, 10))}</td>

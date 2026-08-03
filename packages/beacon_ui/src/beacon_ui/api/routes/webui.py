@@ -19,4 +19,4 @@ router = APIRouter(include_in_schema=False)
 def web_ui() -> HTMLResponse:
     """Return the single-page UI."""
     page = (files("beacon_ui.webui") / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(page)
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
