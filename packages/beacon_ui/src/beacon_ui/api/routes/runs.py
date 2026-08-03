@@ -14,6 +14,8 @@ from beacon_ablation.metrics import (
     suite_pass_hat_k,
 )
 from beacon_iam.permissions import Permission
+from beacon_runner.config_identity import config_digest as compute_config_digest
+from beacon_runner.config_identity import config_label_of, model_id_of
 from beacon_storage.errors import ConflictingSolutionDeclarationError
 from beacon_storage.ids import uuid7
 from beacon_storage.models.project_solutions import ProjectSolution
@@ -155,6 +157,9 @@ def _run_out(run: Run, session: Session) -> RunOut:
         completed_at=run.completed_at,
         parent_sweep_id=run.parent_sweep_id,
         sweep_arm=run.sweep_arm,
+        model_id=run.model_id,
+        config_label=run.config_label,
+        config_digest=run.config_digest,
         invalidated_at=run.invalidated_at,
         invalidation_reason=run.invalidation_reason,
         summary=_summary(run, session),
@@ -288,6 +293,9 @@ def kick_off_run(
         team_id=project.team_id,
         project_id=project_id,
         solution_id=solution.id,
+        model_id=model_id_of(config),
+        config_label=config_label_of(config),
+        config_digest=compute_config_digest(config),
         suite=suite.name,
         dataset_version=_dataset_version_for_suite(suite.suite_metadata),
         mode=body.mode,
@@ -342,6 +350,8 @@ def list_runs(
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     parent_sweep_id: UUID | None = None,
     sweep_arm: str | None = None,
+    model_id: str | None = None,
+    config_digest: str | None = None,
     include_invalidated: bool = False,
 ) -> list[RunOut]:
     """List runs in the project, filtered by solution, suite, mode, status or sweep arm."""
@@ -360,6 +370,8 @@ def list_runs(
         suite=suite_name,
         mode=mode,
         status=_parse_status_filter(status_filter),
+        model_id=model_id,
+        config_digest=config_digest,
         include_invalidated=include_invalidated,
     )
     if suite_id is not None:

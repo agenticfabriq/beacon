@@ -26,6 +26,11 @@ class Attribution(Base, TimestampsMixin):
         ForeignKey("solutions.id", ondelete="CASCADE"), nullable=False
     )
     solution_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Which model and which knobs this layer effect was measured under. A layer
+    # that helps a 7B may do nothing on a 32B, and without these the two are
+    # indistinguishable by the attribution's own columns.
+    model_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    config_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     suite: Mapped[str] = mapped_column(String(200), nullable=False)
     dataset_version: Mapped[str] = mapped_column(String(100), nullable=False)
     layer_name: Mapped[str] = mapped_column(String(100), nullable=False)

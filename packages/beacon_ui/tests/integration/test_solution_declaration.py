@@ -237,3 +237,53 @@ def test_a_declaration_with_no_layers_is_allowed(
     response = _declare(api_client, world, suite_id, solution_id="flat-sut", layers=[])
 
     assert response.status_code == 202
+
+
+def test_a_run_carries_its_configuration_identity(
+    api_client: TestClient, world: _World, suite_id: str
+) -> None:
+    """Without this nothing can decide which runs belong in the same row (B19)."""
+    response = _declare(api_client, world, suite_id)
+
+    body = response.json()
+    assert body["model_id"] == "m"
+    assert body["config_digest"]
+
+
+def test_two_runs_of_one_configuration_share_a_digest(
+    api_client: TestClient, world: _World, suite_id: str
+) -> None:
+    first = _declare(api_client, world, suite_id).json()
+    second = _declare(api_client, world, suite_id).json()
+
+    assert first["config_digest"] == second["config_digest"]
+
+
+def test_runs_can_be_filtered_by_model(
+    api_client: TestClient, world: _World, suite_id: str
+) -> None:
+    _declare(api_client, world, suite_id)
+
+    listed = api_client.get(
+        f"/v1/projects/{world.chat_to_data_id}/runs",
+        params={"model_id": "m"},
+        headers={"X-API-Key": world.alice_key},
+    ).json()
+
+    assert listed
+    assert {row["model_id"] for row in listed} == {"m"}
+
+
+def test_runs_can_be_filtered_by_configuration(
+    api_client: TestClient, world: _World, suite_id: str
+) -> None:
+    digest = _declare(api_client, world, suite_id).json()["config_digest"]
+
+    listed = api_client.get(
+        f"/v1/projects/{world.chat_to_data_id}/runs",
+        params={"config_digest": digest},
+        headers={"X-API-Key": world.alice_key},
+    ).json()
+
+    assert listed
+    assert {row["config_digest"] for row in listed} == {digest}

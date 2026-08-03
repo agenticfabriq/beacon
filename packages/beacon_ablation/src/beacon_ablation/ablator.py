@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from beacon_ablation.errors import InvalidConfigurationError, LayerNotDeclaredError
 
@@ -24,15 +24,21 @@ class _HasModelCopy(Protocol):
         ...
 
 
+# The ablator only ever copies a config and flips a layer, so it must hand back
+# the same type it was given -- narrowing to this protocol would strip whatever
+# the caller needs from it downstream.
+_ConfigT = TypeVar("_ConfigT", bound=_HasModelCopy)
+
+
 class Ablator:
     """Enumerates SolutionConfig permutations for substrate ablation sweeps."""
 
     def enumerate_loo_configs(
         self,
-        base_config: _HasModelCopy,
+        base_config: _ConfigT,
         *,
         sut: _HasLayers,
-    ) -> list[tuple[str, _HasModelCopy]]:
+    ) -> list[tuple[str, _ConfigT]]:
         """Return labeled configs for a leave-one-out sweep."""
         layers_enabled = dict(base_config.layers_enabled)
         if not layers_enabled:
@@ -47,11 +53,14 @@ class Ablator:
                     f"layer '{name}' not declared by SUT; declared layers: {sorted(declared)}"
                 )
 
-        out: list[tuple[str, _HasModelCopy]] = [("baseline", base_config)]
+        out: list[tuple[str, _ConfigT]] = [("baseline", base_config)]
         for layer_name, is_on in layers_enabled.items():
             if not is_on:
                 continue
-            ablated = base_config.model_copy(deep=True)
+            # model_copy is declared on the protocol as returning the protocol,
+            # but a copy is the same class as its original; the cast keeps that
+            # fact rather than losing the caller's type here.
+            ablated = cast("_ConfigT", base_config.model_copy(deep=True))
             ablated.layers_enabled[layer_name] = False
             out.append((f"no_{layer_name}", ablated))
 

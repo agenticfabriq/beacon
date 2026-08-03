@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 import numpy as np
+from beacon_runner.config_identity import config_digest, model_id_of
 from beacon_storage.ids import uuid7
 from beacon_storage.models.attribution import Attribution
 
@@ -39,9 +40,14 @@ class _IdentityLike(Protocol):
 
 class _ConfigLike(Protocol):
     layers_enabled: dict[str, bool]
+    model_id: str
 
     def model_copy(self, *, deep: bool = False) -> _ConfigLike:
         """Return a (deep) copy of the config so its layers_enabled can be mutated."""
+        ...
+
+    def model_dump(self) -> dict[str, Any]:
+        """Return the config as a mapping, for the identity a sweep is measured under."""
         ...
 
 
@@ -149,6 +155,9 @@ class AttributionEngine:
                 results_by_label[label].extend(harness_runner.list_results_for_run(run_id))
 
         identity = sut.identity()
+        # The identity every row in this sweep was measured under. A layer
+        # effect is a claim about one model and one configuration.
+        base_config_payload = base_config.model_dump()
         baseline_results = results_by_label["baseline"]
         attributions: list[Attribution] = []
         for label, _config in configs:
@@ -161,6 +170,8 @@ class AttributionEngine:
                 team_id=team_id,
                 solution_id=solution_id,
                 solution_version=identity.version,
+                model_id=model_id_of(base_config_payload),
+                config_digest=config_digest(base_config_payload),
                 suite=suite,
                 dataset_version=dataset_version,
                 layer_name=layer_name,
@@ -186,6 +197,8 @@ class AttributionEngine:
         team_id: UUID,
         solution_id: UUID,
         solution_version: str,
+        model_id: str | None,
+        config_digest: str | None,
         suite: str,
         dataset_version: str,
         layer_name: str,
@@ -266,6 +279,8 @@ class AttributionEngine:
             team_id=team_id,
             solution_id=solution_id,
             solution_version=solution_version,
+            model_id=model_id,
+            config_digest=config_digest,
             suite=suite,
             dataset_version=dataset_version,
             layer_name=layer_name,

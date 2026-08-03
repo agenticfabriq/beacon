@@ -91,6 +91,10 @@ class RunOut(BaseModel):
     # against a baseline you must separately identify.
     parent_sweep_id: UUID | None = None
     sweep_arm: str | None = None
+    # A benchmark row is (model x config); these are what make one addressable.
+    model_id: str | None = None
+    config_label: str | None = None
+    config_digest: str | None = None
     # Set when the run has been retired. The row stays and keeps its results;
     # it just stops counting. A reader has to be able to see that and why.
     invalidated_at: datetime | None = None

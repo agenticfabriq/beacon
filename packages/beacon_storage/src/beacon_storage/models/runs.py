@@ -86,6 +86,12 @@ class Run(Base, IdMixin, TimestampsMixin):
     parent_sweep_id: Mapped[UUID | None] = mapped_column(nullable=True)
     sweep_arm: Mapped[str | None] = mapped_column(String(100), nullable=True)
     config: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    # A configuration's identity, lifted out of `config` so it can be grouped,
+    # filtered and indexed. `config_digest` decides which runs are the same
+    # configuration; `config_label` is what the runner calls it.
+    model_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    config_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    config_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[RunStatus] = mapped_column(String(20), nullable=False, default=RunStatus.PENDING)
     started_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)

@@ -32,6 +32,9 @@ class RunRepo:
         mode: HarnessMode,
         pass_idx: int,
         config: dict[str, object],
+        model_id: str | None = None,
+        config_label: str | None = None,
+        config_digest: str | None = None,
         created_by: UUID,
         parent_sweep_id: UUID | None = None,
         sweep_arm: str | None = None,
@@ -64,6 +67,9 @@ class RunRepo:
             parent_sweep_id=parent_sweep_id,
             sweep_arm=sweep_arm,
             config=config,
+            model_id=model_id,
+            config_label=config_label,
+            config_digest=config_digest,
             status=RunStatus.PENDING,
             created_by=created_by,
         )
@@ -157,6 +163,8 @@ class RunRepo:
         suite: str | None = None,
         mode: HarnessMode | None = None,
         status: RunStatus | None = None,
+        model_id: str | None = None,
+        config_digest: str | None = None,
         include_invalidated: bool = False,
     ) -> list[Run]:
         """Return runs in ``project_id`` filtered by optional facets, newest first.
@@ -176,6 +184,10 @@ class RunRepo:
             stmt = stmt.where(Run.mode == mode)
         if status is not None:
             stmt = stmt.where(Run.status == status)
+        if model_id is not None:
+            stmt = stmt.where(Run.model_id == model_id)
+        if config_digest is not None:
+            stmt = stmt.where(Run.config_digest == config_digest)
         stmt = stmt.order_by(Run.created_at.desc()).offset(offset)
         if limit is not None:
             stmt = stmt.limit(limit)
