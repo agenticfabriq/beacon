@@ -74,6 +74,14 @@ class Tolerance(BaseModel):
         Either bound satisfies it: the absolute one carries small magnitudes,
         where a relative bound would be vanishingly tight, and the relative one
         carries large magnitudes, where an absolute bound is unsatisfiable.
+
+        Except between whole numbers, which are compared exactly. A relative
+        bound on a large integer admits being off by one, and a count, a year or
+        an id is either right or wrong -- 1234567891 rows is not 1234567890 rows
+        to within 8e-10. Found by the shared conformance suite, against this
+        method, the day the relative bound was added.
         """
         difference = abs(candidate - gold)
+        if float(candidate).is_integer() and float(gold).is_integer():
+            return difference == 0.0
         return difference <= self.numeric_abs or difference <= self.numeric_rel * abs(gold)
