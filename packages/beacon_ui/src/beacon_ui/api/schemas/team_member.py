@@ -19,3 +19,16 @@ class TeamMemberOut(BaseModel):
     scope_kind: ScopeKind
     scope_id: UUID
     role: Role
+
+
+class TeamMemberRowOut(BaseModel):
+    """A member as a roster shows them: who, not just which id."""
+
+    user_id: UUID
+    email: str
+    name: str
+    role: Role
+
+
+class TeamMemberListOut(BaseModel):
+    members: list[TeamMemberRowOut]

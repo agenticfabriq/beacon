@@ -42,24 +42,19 @@ def test_client_raises_on_403() -> None:
         assert exc.value.message == "no perm"
 
 
-def test_list_review_queue_passes_filters() -> None:
+def test_list_runs_passes_filters() -> None:
     with patch("beacon_ui.dashboard.client.httpx.Client") as mock_cls:
         mock_client = Mock()
         mock_client.get.return_value.status_code = 200
-        mock_client.get.return_value.json.return_value = {
-            "items": [],
-            "total": 0,
-            "limit": 20,
-            "offset": 0,
-        }
+        mock_client.get.return_value.json.return_value = []
         mock_cls.return_value = mock_client
 
         client = BeaconApiClient(base_url="http://api", api_key="x")
-        client.list_review_queue(project_id="p1", suite="bird", limit=10)
+        client.list_runs(project_id="p1", sweep_arm="baseline", limit=10)
 
         _, kwargs = mock_client.get.call_args
         params: dict[str, Any] = kwargs["params"]
-        assert params["suite"] == "bird"
+        assert params["sweep_arm"] == "baseline"
         assert params["limit"] == 10
 
 

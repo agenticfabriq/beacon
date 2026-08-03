@@ -153,8 +153,12 @@ class BeaconApiClient:
         """Return a run's status and summary metrics."""
         return cast("dict[str, Any]", self._get(f"/v1/projects/{project_id}/runs/{run_id}"))
 
-    def kick_off_run(self, project_id: str, **body: Any) -> dict[str, Any]:
-        """Queue a new evaluation run."""
+    def register_run(self, project_id: str, **body: Any) -> dict[str, Any]:
+        """Register a run for a runner to execute elsewhere and push results to.
+
+        Renamed from ``kick_off_run``: beacon does not execute anything, and the
+        old name promised a queue that never existed.
+        """
         return cast("dict[str, Any]", self._post(f"/v1/projects/{project_id}/runs", body))
 
     def get_attribution(self, project_id: str, *, sut: str, suite: str) -> dict[str, Any]:
@@ -162,38 +166,6 @@ class BeaconApiClient:
         return cast(
             "dict[str, Any]",
             self._get(f"/v1/projects/{project_id}/attribution", sut=sut, suite=suite),
-        )
-
-    def list_review_queue(self, project_id: str, **filters: Any) -> dict[str, Any]:
-        """List pending review-queue items for a project."""
-        return cast(
-            "dict[str, Any]",
-            self._get(f"/v1/projects/{project_id}/review-queue", **filters),
-        )
-
-    def get_review_item(self, project_id: str, item_id: str) -> dict[str, Any]:
-        """Return a single review-queue item."""
-        return cast(
-            "dict[str, Any]",
-            self._get(f"/v1/projects/{project_id}/review-queue/{item_id}"),
-        )
-
-    def decide_review(
-        self,
-        project_id: str,
-        item_id: str,
-        *,
-        action: str,
-        reason: str,
-        defer_days: int | None = None,
-    ) -> dict[str, Any]:
-        """Accept, reject, or defer a review-queue item."""
-        body: dict[str, Any] = {"action": action, "reason": reason}
-        if defer_days is not None:
-            body["defer_days"] = defer_days
-        return cast(
-            "dict[str, Any]",
-            self._post(f"/v1/projects/{project_id}/review-queue/{item_id}/decide", body),
         )
 
     def cost_leaderboard(self, *, suite: str) -> dict[str, Any]:
