@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import streamlit as st
 
@@ -18,28 +18,6 @@ def _state() -> DashboardState:
     return DashboardState(cast("MutableMapping[str, object]", st.session_state))
 
 
-def _team_memberships(me: dict[str, Any], *, team_id: str) -> list[dict[str, Any]]:
-    memberships = me.get("memberships", [])
-    if not isinstance(memberships, list):
-        return []
-
-    rows: list[dict[str, Any]] = []
-    for membership in memberships:
-        if not isinstance(membership, dict):
-            continue
-        if str(membership.get("scope_kind")) != "team":
-            continue
-        if str(membership.get("scope_id")) != team_id:
-            continue
-        rows.append(
-            {
-                "scope_id": membership.get("scope_id"),
-                "role": membership.get("role"),
-            }
-        )
-    return rows
-
-
 def render() -> None:
     """Render the team Members view and a form to invite users."""
     state = _state()
@@ -48,22 +26,43 @@ def render() -> None:
         return
 
     client = client_from_state()
+    st.subheader("Team members")
     try:
-        me = client.me()
+        # The real roster. This view used to fall back to /v1/me and display
+        # the viewer's own memberships as though they were the team's.
+        members = client.list_team_members(state.current_team_id)
     except BeaconApiError as exc:
-        st.error(f"Failed to load memberships: {exc.message}")
+        st.error(f"Failed to load the roster: {exc.message}")
         return
 
-    st.subheader("Team members")
-    user = me.get("user", {})
-    if isinstance(user, dict):
-        st.caption(f"Signed in as {user.get('email', 'unknown')}.")
-
-    rows = _team_memberships(me, team_id=state.current_team_id)
-    if rows:
-        st.dataframe(rows, width="stretch", hide_index=True)
+    if members:
+        st.dataframe(
+            [
+                {"email": m.get("email"), "name": m.get("name"), "role": m.get("role")}
+                for m in members
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+        removable = [m for m in members if isinstance(m.get("user_id"), str)]
+        target = st.selectbox(
+            "Remove a member",
+            options=[str(m["user_id"]) for m in removable],
+            format_func=lambda uid: next(
+                str(m.get("email")) for m in removable if str(m["user_id"]) == uid
+            ),
+            key="team_members_remove_select",
+        )
+        if st.button("Remove", key="team_members_remove_btn"):
+            try:
+                client.remove_team_member(state.current_team_id, target)
+            except BeaconApiError as exc:
+                # Removing the last admin is refused so a team stays recoverable.
+                st.error(exc.message)
+                return
+            st.rerun()
     else:
-        st.caption("No team membership is visible for this session.")
+        st.caption("No members.")
 
     st.divider()
     st.subheader("Invite member")

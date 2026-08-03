@@ -113,7 +113,7 @@ class BeaconApiClient:
         return cast("dict[str, Any]", self._get(f"/v1/projects/{project_id}"))
 
     def patch_project_settings(self, project_id: str, **body: Any) -> dict[str, Any]:
-        """Update project settings such as baseline pin and gate policy."""
+        """Update project settings, e.g. the pinned baseline run."""
         return cast(
             "dict[str, Any]",
             self._patch(f"/v1/projects/{project_id}/settings", body),
@@ -160,6 +160,42 @@ class BeaconApiClient:
         old name promised a queue that never existed.
         """
         return cast("dict[str, Any]", self._post(f"/v1/projects/{project_id}/runs", body))
+
+    def list_results(self, project_id: str, run_id: str, **filters: Any) -> dict[str, Any]:
+        """List a run's per-item results with facet counts."""
+        return cast(
+            "dict[str, Any]",
+            self._get(f"/v1/projects/{project_id}/runs/{run_id}/results", **filters),
+        )
+
+    def get_result(self, project_id: str, run_id: str, item_id: str) -> dict[str, Any]:
+        """Return one item's answer beside the gold it was graded against."""
+        return cast(
+            "dict[str, Any]",
+            self._get(f"/v1/projects/{project_id}/runs/{run_id}/results/{item_id}"),
+        )
+
+    def invalidate_run(self, project_id: str, run_id: str, *, reason: str) -> dict[str, Any]:
+        """Retire a run without deleting it. The reason is required."""
+        return cast(
+            "dict[str, Any]",
+            self._post(f"/v1/projects/{project_id}/runs/{run_id}/invalidate", {"reason": reason}),
+        )
+
+    def restore_run(self, project_id: str, run_id: str) -> dict[str, Any]:
+        """Undo an invalidation."""
+        return cast(
+            "dict[str, Any]",
+            self._post(f"/v1/projects/{project_id}/runs/{run_id}/restore", {}),
+        )
+
+    def list_team_members(self, team_id: str) -> list[dict[str, Any]]:
+        """Return the team roster."""
+        return _list_body(self._get(f"/v1/teams/{team_id}/members"), key="members")
+
+    def remove_team_member(self, team_id: str, user_id: str) -> None:
+        """Revoke a team membership."""
+        self._delete(f"/v1/teams/{team_id}/members/{user_id}")
 
     def get_attribution(self, project_id: str, *, sut: str, suite: str) -> dict[str, Any]:
         """Return the latest attribution snapshot for a solution and suite."""
