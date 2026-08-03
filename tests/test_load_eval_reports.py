@@ -107,7 +107,7 @@ def test_right_data_in_the_wrong_shape_is_agreement_not_disagreement() -> None:
     """`correct_facts` is the second metric, so exact match calling it FAIL agrees."""
     comparison = Comparison()
 
-    comparison.record("correct_facts", "FAIL")
+    comparison.record(_record(outcome="correct_facts"), "FAIL")
 
     assert comparison.agreed == 1
     assert comparison.disagreed == 0
@@ -116,7 +116,7 @@ def test_right_data_in_the_wrong_shape_is_agreement_not_disagreement() -> None:
 def test_a_real_disagreement_is_counted_and_marked() -> None:
     comparison = Comparison()
 
-    comparison.record("correct", "FAIL")
+    comparison.record(_record(outcome="correct"), "FAIL")
 
     assert comparison.disagreed == 1
     assert any("differs" in line for line in comparison.report_lines())
@@ -126,7 +126,7 @@ def test_an_unknown_reported_outcome_counts_as_a_disagreement() -> None:
     """A vocabulary beacon does not model must be visible, not silently agreed."""
     comparison = Comparison()
 
-    comparison.record("partially_correct", "PASS")
+    comparison.record(_record(outcome="partially_correct"), "PASS")
 
     assert comparison.disagreed == 1
 
@@ -218,3 +218,28 @@ def test_a_record_with_no_db_id_cannot_be_checked_and_is_not_refused() -> None:
     index = {"5": ItemRef(item_id="i5", db_id="california_schools")}
 
     check_corpus(records, index)
+
+
+def test_a_correct_refusal_is_still_a_deferral_on_the_wire() -> None:
+    """ACME-style suites have unanswerable questions; refusing one is mnemiq's
+    success case, and pushing it as an empty answer would grade it FAIL."""
+    payload = ingest_payload(_record(outcome="deferred_correctly", sql=""), item_id="i")
+
+    assert payload["deferred"] is True
+
+
+def test_an_answer_the_runner_knows_is_unportable_is_expected_to_fail_here() -> None:
+    """Beacon executes on the gold's engine, so this is agreement, not a grader
+    disagreement -- counting it as one buries the table in a known cause."""
+    record = _record(outcome="correct", portable_to_gold_engine=False)
+    comparison = Comparison()
+
+    comparison.record(record, "FAIL")
+
+    assert comparison.agreed == 1
+
+
+def test_portability_rides_along_in_the_output() -> None:
+    payload = ingest_payload(_record(portable_to_gold_engine=False), item_id="i")
+
+    assert payload["output"]["reported_portable"] is False

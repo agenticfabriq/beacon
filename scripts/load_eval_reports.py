@@ -58,15 +58,18 @@ if TYPE_CHECKING:
 
 # What each runner-reported outcome means, and what beacon's exact-match grader
 # should therefore say. ``correct_facts`` is right data in a shape exact match
-# does not accept, so FAIL is the agreeing answer, not a disagreement.
+# does not accept, so FAIL is the agreeing answer, not a disagreement. Both
+# deferral outcomes are DEFER here: whether the refusal was the right call is
+# the runner's distinction, not a different fact about what happened.
 OUTCOME_MEANING: dict[str, str] = {
     "correct": "PASS",
     "correct_facts": "FAIL",
     "wrong": "FAIL",
     "deferred_wrongly": "DEFER",
+    "deferred_correctly": "DEFER",
     "error": "ERROR",
 }
-DEFERRED_OUTCOME = "deferred_wrongly"
+DEFERRED_OUTCOMES = frozenset({"deferred_wrongly", "deferred_correctly"})
 ERRORED_OUTCOME = "error"
 
 
@@ -84,11 +87,14 @@ class ReportRecord:
     answer: str
     runtime_ms: int
     db_id: str = ""
+    # Whether the SQL also runs on the gold's engine. None on single-engine
+    # reports and reports written before the runner recorded it.
+    portable_to_gold_engine: bool | None = None
 
     @property
     def deferred(self) -> bool:
         """Whether the runner declined to answer this item."""
-        return self.outcome == DEFERRED_OUTCOME
+        return self.outcome in DEFERRED_OUTCOMES
 
     @property
     def errored(self) -> bool:
@@ -120,13 +126,31 @@ class Comparison:
     skipped: int = 0
     cross: dict[tuple[str, str], int] = field(default_factory=dict)
 
-    def record(self, reported: str, computed: str) -> None:
+    def record(self, record: ReportRecord, computed: str) -> None:
         """Count one item against what beacon computed for it."""
+        reported = record.outcome
         self.cross[reported, computed] = self.cross.get((reported, computed), 0) + 1
-        if OUTCOME_MEANING.get(reported) == computed:
+        if self.expected(record) == computed:
             self.agreed += 1
         else:
             self.disagreed += 1
+
+    @staticmethod
+    def expected(record: ReportRecord) -> str | None:
+        """What beacon should say about this record.
+
+        Beacon executes the candidate on the gold's own engine, so an answer the
+        runner already knows is unportable will fail here even when the runner
+        scored it correct on its own executor. That is agreement about the
+        facts, not a grader disagreement, and counting it as one buries the
+        table in a known cause.
+        """
+        if record.portable_to_gold_engine is False and record.outcome in (
+            "correct",
+            "correct_facts",
+        ):
+            return "FAIL"
+        return OUTCOME_MEANING.get(record.outcome)
 
     def report_lines(self) -> list[str]:
         """Render the cross-tabulation, disagreements marked."""
@@ -158,6 +182,11 @@ def parse_report(content: str) -> list[ReportRecord]:
                 answer=str(raw.get("answer") or ""),
                 runtime_ms=int(float(raw.get("ms") or 0)),
                 db_id=str(raw.get("db_id") or ""),
+                portable_to_gold_engine=(
+                    bool(raw["portable_to_gold_engine"])
+                    if isinstance(raw.get("portable_to_gold_engine"), bool)
+                    else None
+                ),
             )
         )
     return records
@@ -185,6 +214,9 @@ def ingest_payload(record: ReportRecord, *, item_id: str) -> dict[str, Any]:
             "sql": record.sql,
             "answer": record.answer,
             "reported_outcome": record.outcome,
+            # Ride-along evidence: which answers the runner already knows are
+            # unportable, so a cross-grader diff can separate dialect from wrongness.
+            "reported_portable": record.portable_to_gold_engine,
         },
         "output_kind": "sql",
         # A run-level token total cannot be divided across items honestly.
@@ -374,7 +406,7 @@ def load_one(
             comparison.skipped += 1
             continue
         computed = client.push(run_id, ingest_payload(record, item_id=ref.item_id))
-        comparison.record(record.outcome, computed)
+        comparison.record(record, computed)
     client.complete(run_id)
     return run_id, comparison
 
