@@ -21,3 +21,21 @@ class DuplicateRunError(BeaconStorageError):
     """
 
     code = "duplicate_run"
+
+
+class ConflictingSolutionDeclarationError(BeaconStorageError):
+    """A registered version was re-declared with different layers.
+
+    A version's declared layers are part of what its scores mean: they are what
+    the attribution engine ablates one at a time, so changing them retroactively
+    reinterprets every comparison already drawn against that version. Silently
+    accepting the new declaration would do exactly that, so the push is refused
+    and the runner is told to publish a new version instead.
+    """
+
+    code = "conflicting_solution_declaration"
+
+    def __init__(self, message: str, *, registered: list[str], declared: list[str]) -> None:
+        super().__init__(message)
+        self.registered = registered
+        self.declared = declared

@@ -14,9 +14,11 @@ from beacon_ablation.metrics import (
     suite_pass_hat_k,
 )
 from beacon_iam.permissions import Permission
+from beacon_storage.errors import ConflictingSolutionDeclarationError
 from beacon_storage.ids import uuid7
 from beacon_storage.models.project_solutions import ProjectSolution
 from beacon_storage.models.runs import HarnessMode, Run, RunStatus, VerdictOutcome
+from beacon_storage.models.solutions import Solution  # noqa: TC002
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.projects import ProjectRepo
 from beacon_storage.repository.results import ResultRepo
@@ -28,7 +30,13 @@ from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
-from beacon_ui.api.schemas.run import RunCreate, RunInvalidateIn, RunOut, RunSummaryOut
+from beacon_ui.api.schemas.run import (
+    RunCreate,
+    RunInvalidateIn,
+    RunOut,
+    RunSummaryOut,
+    SolutionDeclarationIn,
+)
 
 router = APIRouter(prefix="/v1/projects", tags=["runs"])
 
@@ -173,6 +181,51 @@ def _dataset_version_for_suite(suite_metadata: dict[str, object]) -> str:
     return "v1"
 
 
+def _declared_solution(
+    session: Session,
+    *,
+    declaration: SolutionDeclarationIn,
+    team_id: UUID,
+    actor_id: UUID,
+) -> Solution:
+    """Register what the runner declared, or reuse the identical registration.
+
+    A divergent re-declaration is a 409 rather than an overwrite: the layers a
+    version declares are what attribution ablates, so rewriting them would
+    reinterpret every comparison already drawn against that version.
+    """
+    try:
+        solution, _created = SolutionRepo(session).ensure_declared(
+            team_id=team_id,
+            solution_id=declaration.solution_id,
+            version=declaration.version,
+            summary=declaration.summary,
+            supported_modes=declaration.supported_modes,
+            layers=list(declaration.layers),
+            created_by=actor_id,
+        )
+    except ConflictingSolutionDeclarationError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return solution
+
+
+def _link_project_solution(session: Session, *, project_id: UUID, solution_id: UUID) -> None:
+    """Attach a declared solution to the project it just pushed a run for.
+
+    A runner that declares itself has no separate step in which to be attached,
+    and refusing the run for a link it could not have made would be a dead end.
+    """
+    if session.get(ProjectSolution, (project_id, solution_id)) is None:
+        solution = SolutionRepo(session).get(solution_id)
+        assert solution is not None
+        session.add(
+            ProjectSolution(
+                team_id=solution.team_id, project_id=project_id, solution_id=solution_id
+            )
+        )
+        session.flush()
+
+
 @router.post(
     "/{project_id}/runs",
     response_model=RunOut,
@@ -189,26 +242,34 @@ def kick_off_run(
     ],
     session: Annotated[Session, Depends(get_session)],
 ) -> RunOut:
-    """Queue a new evaluation run for a project solution and suite."""
+    """Register a run, for a catalogued solution or one the runner declares."""
     project = ProjectRepo(session).get(project_id)
     assert project is not None
 
-    solution = SolutionRepo(session).get(body.solution_id)
-    if solution is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"solution {body.solution_id} not found",
+    if body.solution is not None:
+        solution = _declared_solution(
+            session, declaration=body.solution, team_id=project.team_id, actor_id=actor.id
         )
-    if solution.team_id != project.team_id:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "solution belongs to a different team than this project",
+        _link_project_solution(session, project_id=project_id, solution_id=solution.id)
+    else:
+        assert body.solution_id is not None
+        found = SolutionRepo(session).get(body.solution_id)
+        if found is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                f"solution {body.solution_id} not found",
+            )
+        solution = found
+        if solution.team_id != project.team_id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "solution belongs to a different team than this project",
+            )
+        _assert_project_solution_linked(
+            session,
+            project_id=project_id,
+            solution_id=body.solution_id,
         )
-    _assert_project_solution_linked(
-        session,
-        project_id=project_id,
-        solution_id=body.solution_id,
-    )
     if body.mode.value not in solution.supported_modes:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -226,7 +287,7 @@ def kick_off_run(
     run = RunRepo(session).create(
         team_id=project.team_id,
         project_id=project_id,
-        solution_id=body.solution_id,
+        solution_id=solution.id,
         suite=suite.name,
         dataset_version=_dataset_version_for_suite(suite.suite_metadata),
         mode=body.mode,

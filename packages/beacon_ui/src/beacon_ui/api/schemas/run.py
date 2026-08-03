@@ -7,17 +7,46 @@ from typing import Any
 from uuid import UUID  # noqa: TC003
 
 from beacon_storage.models.runs import HarnessMode  # noqa: TC002
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class SolutionDeclarationIn(BaseModel):
+    """What a runner says about itself when it registers a run.
+
+    Beacon does not execute, so the runner is the only thing that knows its
+    identity, version and layers. Declaring them here means they cannot drift
+    from a form someone filled in months ago.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    solution_id: str = Field(min_length=1, max_length=100)
+    version: str = Field(min_length=1, max_length=100)
+    summary: str = ""
+    supported_modes: list[str] = Field(default_factory=lambda: ["EVAL"])
+    # Layer objects are SUT-defined; only `name` is interpreted, as the key the
+    # attribution engine ablates by.
+    layers: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    solution_id: UUID
+    # Give one or the other: a solution already in the catalog, or what this
+    # runner declares about itself. Declaring is the tracker-shaped path.
+    solution_id: UUID | None = None
+    solution: SolutionDeclarationIn | None = None
     suite_id: UUID
     mode: HarnessMode
     # Runner configs are SUT-defined JSON objects, so the API accepts arbitrary values here.
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_solution(self) -> RunCreate:
+        """Require exactly one way of naming the system under test."""
+        if (self.solution_id is None) == (self.solution is None):
+            raise ValueError("give exactly one of solution_id or solution")
+        return self
 
 
 class RunInvalidateIn(BaseModel):
