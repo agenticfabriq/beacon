@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from beacon_ui.api.routes import api_keys as api_keys_routes
 from beacon_ui.api.routes import attribution as attribution_routes
 from beacon_ui.api.routes import auth as auth_routes
 from beacon_ui.api.routes import gate as gate_routes
@@ -28,6 +29,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(leaderboards_routes.router)
     app.include_router(attribution_routes.router)
     app.include_router(me_routes.router)
+    app.include_router(api_keys_routes.router)
     app.include_router(teams_routes.router)
     app.include_router(team_members_routes.router)
     app.include_router(team_solutions_routes.router)

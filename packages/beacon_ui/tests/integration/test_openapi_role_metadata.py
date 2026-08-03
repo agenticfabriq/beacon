@@ -11,6 +11,12 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
+# Endpoints authorized by identity alone: they are public, or they act only on
+# the caller's own resources, so there is no team- or project-scoped permission
+# for them to declare. Everything else must carry @requires().
+#
+# Keep this list free of paths that no longer exist. A stale entry silently
+# exempts whatever is mounted there next, which is how a guard stops guarding.
 EXEMPT_PATHS: set[tuple[str, str]] = {
     ("/v1/auth/oidc/callback", "get"),
     ("/v1/auth/oidc/exchange", "post"),
@@ -19,14 +25,25 @@ EXEMPT_PATHS: set[tuple[str, str]] = {
     ("/v1/leaderboards/cost", "get"),
     ("/v1/leaderboards/latency", "get"),
     ("/v1/me", "get"),
+    ("/v1/me/api-keys", "get"),
+    ("/v1/me/api-keys", "post"),
+    ("/v1/me/api-keys/{api_key_id}", "delete"),
     ("/v1/projects", "get"),
     ("/v1/projects", "post"),
     ("/v1/projects/{project_id}/members", "post"),
-    ("/v1/registry/items", "get"),
     ("/v1/teams", "get"),
     ("/v1/teams", "post"),
-    ("/v1/traces", "post"),
 }
+
+
+def test_no_exemption_names_a_route_that_no_longer_exists(api_client: TestClient) -> None:
+    """A stale exemption is a hole waiting for a route to be mounted into it."""
+    schema = api_client.get("/openapi.json").json()
+    live = {
+        (path, method) for path, methods in schema.get("paths", {}).items() for method in methods
+    }
+
+    assert not EXEMPT_PATHS - live, f"exemptions for missing routes: {sorted(EXEMPT_PATHS - live)}"
 
 
 def test_every_protected_endpoint_has_required_permissions(api_client: TestClient) -> None:
