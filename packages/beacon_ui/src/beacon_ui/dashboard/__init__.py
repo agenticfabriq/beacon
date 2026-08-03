@@ -1,1 +1,0 @@
-"""Beacon Streamlit dashboard."""

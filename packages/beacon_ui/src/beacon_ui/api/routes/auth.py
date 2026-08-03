@@ -196,7 +196,7 @@ def oidc_callback(
         response.delete_cookie("beacon_oidc_cli_state")
         return response
 
-    response = RedirectResponse(url=config.dashboard_url or "/", status_code=302)
+    response = RedirectResponse(url=config.dashboard_url or "/ui", status_code=302)
     response.delete_cookie("beacon_oidc_state")
     response.set_cookie(
         "beacon_api_key_once",

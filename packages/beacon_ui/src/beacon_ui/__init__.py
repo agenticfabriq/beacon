@@ -1,1 +1,1 @@
-"""Beacon UI: REST API, dashboard, and CLI entry points."""
+"""Beacon UI: REST API, the served web UI, and CLI entry points."""

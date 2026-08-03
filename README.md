@@ -84,14 +84,17 @@ DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
 
 ## Launching the UI
 
-Two processes: the API, and the Streamlit dashboard that reads it.
-
-**API** (terminal 1):
+One process. The UI is a single page served by the API itself:
 
 ```bash
 DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
   uv run uvicorn beacon_ui.api.app:app --reload --port 8000
 ```
+
+Open <http://localhost:8000/ui> and sign in with an API key (one is printed by
+`beacon demo seed`) or with email and password. For a pre-authenticated demo or
+kiosk, append `?api_key=bcn_...` — the key moves to local storage and leaves
+the URL.
 
 Suites graded by SQL execution need the database that SQL runs against. Without
 it, ingestion refuses to grade rather than marking every item `ERROR`:
@@ -100,23 +103,10 @@ it, ingestion refuses to grade rather than marking every item `ERROR`:
 BEACON_BENCHMARK_DB_URLS='{"bird_minidev_v2":"postgresql+psycopg://user:pw@localhost:5432/bird_dev"}'
 ```
 
-**Dashboard** (terminal 2):
-
-```bash
-DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
-  uv run streamlit run packages/beacon_ui/src/beacon_ui/dashboard/app.py
-```
-
-Open <http://localhost:8501>. The dashboard reads credentials from the same
-places the CLI does — `BEACON_API_KEY`, `BEACON_API_BASE`, and the
-`~/.beacon/ctx.json` written by `beacon login` — so it can be pre-authenticated:
-
-```bash
-export BEACON_API_KEY=bcn_...          # or: uv run beacon login
-export BEACON_API_BASE=http://localhost:8000
-```
-
-Otherwise sign in with the API base and a key from `beacon demo seed`.
+Same origin on purpose: the page's every request goes to the API that served
+it, and the UI declares its endpoints in one manifest that a test holds against
+the OpenAPI schema — the UI cannot silently reference an endpoint that does not
+exist.
 
 `make demo` runs `db-up` and `migrate` in one step.
 

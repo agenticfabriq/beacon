@@ -18,6 +18,7 @@ from beacon_ui.api.routes import suites as suites_routes
 from beacon_ui.api.routes import team_members as team_members_routes
 from beacon_ui.api.routes import team_solutions as team_solutions_routes
 from beacon_ui.api.routes import teams as teams_routes
+from beacon_ui.api.routes import webui as webui_routes
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -40,4 +41,5 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(runs_routes.router)
     app.include_router(results_routes.router)
     app.include_router(matrix_routes.router)
+    app.include_router(webui_routes.router)
     app.include_router(ingest_routes.router)

@@ -181,12 +181,12 @@ def test_the_projection_search_is_bounded() -> None:
     from beacon_graders.graders.execution_grounded_sql import ResultSet
     from beacon_graders.tolerance import Tolerance
 
-    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type]
+    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type, return-value]
     wide = ResultSet(
         columns=[f"c{i}" for i in range(16)],
         # the gold pair exists only as the LAST of C(16,2)=120 projections,
         # which is past the cap of 100
-        rows=[tuple([*range(100, 114), 7777, 8888])],
+        rows=[(*range(100, 114), 7777, 8888)],
     )
     gold = ResultSet(columns=["x", "y"], rows=[(7777, 8888)])
 
@@ -196,6 +196,6 @@ def test_the_projection_search_is_bounded() -> None:
 def test_the_strict_verdict_still_decides_the_outcome() -> None:
     """Two verdicts, one outcome: exact match is emitted first and carries the
     exact_match metric, so the tolerant reading can never flip PASS."""
-    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type]
+    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type, return-value]
 
     assert grader.metric == "exact_match"

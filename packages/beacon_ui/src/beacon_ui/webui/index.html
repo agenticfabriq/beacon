@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beacon</title>
+<style>
+  :root{
+    --ground:#FAFBFC;--surface:#FFFFFF;--surface-2:#F2F5F7;--line:#DCE3E8;--line-soft:#E9EEF1;
+    --ink:#0F1419;--ink-2:#43515C;--ink-3:#6E7E8A;
+    --accent:#0F7B8A;--accent-soft:#E2F1F3;
+    --pass:#2F7D5C;--pass-soft:#E3F1EA;--defer:#B07C1E;--defer-soft:#FBF0DA;
+    --wrong:#B4462F;--wrong-soft:#FBE7E2;--error:#6E7A85;--error-soft:#ECEFF1;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --prose:system-ui,-apple-system,"Segoe UI",sans-serif;--r:3px;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --ground:#0B0F13;--surface:#11171D;--surface-2:#161E25;--line:#232E37;--line-soft:#1B242C;
+    --ink:#E4EBF0;--ink-2:#A2B0BB;--ink-3:#71818D;--accent:#3AA7B5;--accent-soft:#0E2A2F;
+    --pass:#4FA87C;--pass-soft:#10241B;--defer:#D5A249;--defer-soft:#2A2010;
+    --wrong:#D2705A;--wrong-soft:#2A1512;--error:#8593A0;--error-soft:#1A2128;}}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--ground);color:var(--ink);font-family:var(--mono);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent)} :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+  .app{display:grid;grid-template-columns:196px 1fr;min-height:100vh}
+  .app.hidden,.screen.hidden{display:none}
+  .rail{border-right:1px solid var(--line);background:var(--surface);padding:14px 10px;display:flex;flex-direction:column;gap:14px}
+  .brand{display:flex;align-items:baseline;gap:6px;padding:0 6px 2px}
+  .brand b{font-size:14px;font-weight:700;letter-spacing:-.01em}
+  .brand span{font-size:9px;color:var(--ink-3);letter-spacing:.1em;text-transform:uppercase}
+  .bench{border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2);padding:8px 9px;display:flex;flex-direction:column;gap:2px;cursor:pointer;text-align:left;font:inherit;width:100%;color:var(--ink)}
+  .bench .l{font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+  .bench .v{font-size:12px;font-weight:650}
+  .bench .m{font-size:10px;color:var(--ink-3)}
+  .navgrp{display:flex;flex-direction:column;gap:1px}
+  .nav{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r);color:var(--ink-2);cursor:pointer;background:none;border:none;font:inherit;text-align:left;width:100%}
+  .nav:hover{background:var(--surface-2);color:var(--ink)}
+  .nav[aria-current="page"]{background:var(--accent-soft);color:var(--accent);font-weight:650}
+  .nav i{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.5;flex:none}
+  .rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px}
+  .whoami{border-top:1px solid var(--line-soft);padding-top:9px}
+  .whoami .u{font-size:11px;color:var(--ink-2);padding:0 8px;overflow:hidden;text-overflow:ellipsis}
+
+  main{padding:20px 26px 60px;min-width:0}
+  .crumb{font-size:11px;color:var(--ink-3);display:flex;gap:6px;align-items:center;margin-bottom:4px;flex-wrap:wrap}
+  .crumb button{background:none;border:none;font:inherit;color:var(--accent);cursor:pointer;padding:0}
+  h1{font-size:17px;font-weight:650;margin:0;letter-spacing:-.01em}
+  h2{font-size:13px;font-weight:650;margin:0}
+  .sub{font-family:var(--prose);font-size:12.5px;color:var(--ink-3);line-height:1.55;max-width:80ch;margin:5px 0 0}
+  section{margin-top:22px}
+  .sechead{display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  th{text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:650;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:7px 10px;border-bottom:1px solid var(--line-soft);white-space:nowrap;vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.click{cursor:pointer} tbody tr.click:hover td{background:var(--surface-2)}
+  tbody tr.sel td{background:var(--accent-soft)}
+  tr.gone td{opacity:.5}
+  .qcell{white-space:normal;max-width:430px;font-family:var(--prose);font-size:12.5px;line-height:1.45}
+  .ex{color:var(--pass);font-weight:650} .def{color:var(--defer);font-weight:650}
+  .wr{color:var(--wrong)} .er{color:var(--error)}
+  .num{text-align:right} .dim{color:var(--ink-3)}
+  .ref td{box-shadow:inset 3px 0 0 var(--accent)}
+  .pill{display:inline-block;padding:2px 6px;border-radius:2px;font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:650;white-space:nowrap}
+  .p-pass{background:var(--pass-soft);color:var(--pass)} .p-def{background:var(--defer-soft);color:var(--defer)}
+  .p-wr{background:var(--wrong-soft);color:var(--wrong)} .p-er{background:var(--error-soft);color:var(--error)}
+  .p-wait{background:var(--accent-soft);color:var(--accent)} .p-ref{background:var(--accent-soft);color:var(--accent)}
+  .p-gone{background:var(--error-soft);color:var(--error)}
+  .tag{display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;border:1px solid var(--line);color:var(--ink-3);background:var(--surface-2)}
+  .cfgcell{font-size:12px;color:var(--ink-2)} .cfgcell em{font-style:normal;color:var(--ink-3);font-size:10.5px;display:block}
+
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 10px;align-items:center}
+  .chip{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:20px;padding:3px 10px;font:inherit;font-size:11.5px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+  .chip:hover{border-color:var(--ink-3)}
+  .chip[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+  .chip .c{font-size:10px;opacity:.7}
+  .chipsep{width:1px;height:18px;background:var(--line);margin:0 3px}
+  .chiplabel{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-right:2px}
+  .btn{border:1px solid var(--line);background:var(--surface);color:var(--ink-2);border-radius:var(--r);padding:3px 9px;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--ink-3);color:var(--ink)}
+  .btn.danger:hover{border-color:var(--wrong);color:var(--wrong)}
+  .btn.primary{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+  .btn.primary:hover{opacity:.85;color:var(--ground)}
+  input[type=text],input[type=password],input[type=search],select{border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2);color:var(--ink);font:inherit;font-size:12px;padding:4px 9px}
+  .inline{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  @media(max-width:960px){.split{grid-template-columns:1fr}}
+  .pane{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden}
+  .pane.ours{border-top:2px solid var(--wrong)} .pane.ours.ok{border-top-color:var(--pass)}
+  .pane.gold{border-top:2px solid var(--ink-3)}
+  .pane-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--line-soft);background:var(--surface-2)}
+  .pane-t{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;font-weight:650}
+  pre{margin:0;padding:11px;font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;color:var(--ink-2)}
+  .kw{color:var(--accent);font-weight:650} .lit{color:var(--pass)}
+  .rs{border-top:1px solid var(--line-soft)} .rs table{font-size:11.5px} .rs th{font-size:8.5px;padding:5px 9px} .rs td{padding:4px 9px}
+  .why{border:1px solid var(--line);border-left:3px solid var(--wrong);border-radius:var(--r);background:var(--surface);padding:11px 13px;margin-bottom:11px}
+  .why.def{border-left-color:var(--defer)} .why.ok{border-left-color:var(--pass)}
+  .why .t{font-weight:650;font-size:12.5px;margin-bottom:3px}
+  .why .d{font-family:var(--prose);font-size:12.5px;color:var(--ink-2);line-height:1.55}
+  .qhead{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px 14px;margin-bottom:11px}
+  .qhead .q{font-family:var(--prose);font-size:14.5px;line-height:1.5;margin:0 0 7px}
+  .qmeta{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--ink-3);align-items:center}
+  .empty{padding:30px 16px;text-align:center;color:var(--ink-3);font-family:var(--prose);font-size:12.5px}
+  .view{display:none}.view.on{display:block}
+  .note{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);border-radius:var(--r);padding:11px 13px;font-family:var(--prose);font-size:12.5px;color:var(--ink-2);line-height:1.55}
+  .note b{color:var(--ink)}
+  .errbar{border:1px solid var(--wrong);background:var(--wrong-soft);color:var(--wrong);border-radius:var(--r);padding:8px 12px;font-family:var(--prose);font-size:12.5px;margin:10px 0;display:none}
+  .errbar.on{display:block}
+  code{font-family:var(--mono);font-size:11px;background:var(--surface-2);padding:1px 4px;border-radius:2px;border:1px solid var(--line-soft)}
+
+  .screen{min-height:100vh;display:grid;place-items:center;padding:40px 20px;background:var(--ground)}
+  .loginwrap{width:100%;max-width:378px;display:flex;flex-direction:column;gap:16px}
+  .loginbrand{display:flex;align-items:baseline;gap:7px;justify-content:center}
+  .loginbrand b{font-size:20px;font-weight:700;letter-spacing:-.02em}
+  .loginbrand span{font-size:9px;color:var(--ink-3);letter-spacing:.14em;text-transform:uppercase}
+  .loginbox{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field label{font-size:9px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);font-weight:650}
+  .field input{width:100%;padding:7px 10px;font-size:13px}
+  .wide{width:100%;justify-content:center;padding:8px 10px;font-size:12.5px}
+  .or{display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+  .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+  .loginfoot{font-family:var(--prose);font-size:11.5px;color:var(--ink-3);text-align:center;line-height:1.5}
+  .reveal{border:1px solid var(--accent);border-radius:var(--r);background:var(--accent-soft);padding:11px 13px;display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
+  .reveal .t{font-family:var(--prose);font-size:12px;color:var(--ink-2)} .reveal .t b{color:var(--accent)}
+  .reveal .k{display:flex;gap:8px;align-items:center}
+  .reveal code{flex:1;background:var(--surface);border:1px solid var(--line);padding:6px 9px;font-size:11.5px;overflow-x:auto;white-space:nowrap;border-radius:var(--r)}
+  footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-family:var(--prose);font-size:12px;color:var(--ink-3);line-height:1.6}
+</style>
+</head>
+<body>
+
+<div class="screen" id="screen-login">
+  <div class="loginwrap">
+    <div class="loginbrand"><b>Beacon</b><span>tracker</span></div>
+    <div class="loginbox">
+      <div class="field"><label for="l-key">API key</label>
+        <input id="l-key" type="password" placeholder="bcn_..." autocomplete="off"></div>
+      <button class="btn primary wide" id="login-key-btn">Sign in with a key</button>
+      <div class="or">or</div>
+      <div class="field"><label for="l-email">Email</label>
+        <input id="l-email" type="text" autocomplete="username"></div>
+      <div class="field"><label for="l-pw">Password</label>
+        <input id="l-pw" type="password" autocomplete="current-password"></div>
+      <button class="btn wide" id="login-pw-btn">Sign in with a password</button>
+      <div class="errbar" id="login-err"></div>
+    </div>
+    <div class="loginfoot">Signing in with a password issues a fresh API key for this browser.
+    Runners use their own named keys, created in Settings.</div>
+  </div>
+</div>
+
+<div class="app hidden" id="app">
+  <nav class="rail">
+    <div class="brand"><b>Beacon</b><span>tracker</span></div>
+    <button class="bench" data-go="benchmarks">
+      <span class="l">Benchmark</span>
+      <span class="v" id="rail-bench-name">–</span>
+      <span class="m" id="rail-bench-meta">switch ▾</span>
+    </button>
+    <div class="navgrp">
+      <button class="nav" data-go="matrix" aria-current="page"><i></i>Results</button>
+      <button class="nav" data-go="runs"><i></i>Runs</button>
+      <button class="nav" data-go="questions"><i></i>Questions</button>
+    </div>
+    <div class="rail-foot">
+      <button class="nav" data-go="settings"><i></i>Settings</button>
+      <div class="whoami"><div class="u" id="rail-user">–</div>
+        <button class="nav" id="signout" style="font-size:11px"><i></i>Sign out</button></div>
+    </div>
+  </nav>
+
+  <main>
+    <div class="errbar" id="app-err"></div>
+
+    <div class="view on" id="v-matrix">
+      <div class="crumb" id="matrix-crumb"></div>
+      <h1>Results</h1>
+      <p class="sub">One row per <b>system · version · model · config</b>, over that
+      configuration's valid runs. Two readings of correctness side by side — exact match decides,
+      got-facts is the tolerant one — with what each row costs. Open a row for its layer effect
+      and its runs. Invalidated runs are out of every number here.</p>
+      <div class="chips" id="matrix-chips"></div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th>System</th><th>Model</th><th>Config</th><th class="num">runs</th><th class="num">n</th>
+          <th class="num">EX</th><th class="num">got-facts</th><th class="num">deferred</th>
+          <th class="num">wrong</th><th class="num">infra</th><th class="num">tokens</th>
+          <th class="num">latency</th><th></th></tr></thead>
+        <tbody id="matrix-rows"></tbody></table></div>
+    </div>
+
+    <div class="view" id="v-cell">
+      <div class="crumb"><button data-go="matrix">Results</button> › <span id="cell-crumb"></span></div>
+      <h1 id="cell-title"></h1>
+      <p class="sub">Everything scoped to this one configuration. A layer that helps here may do
+      nothing on a different model, which is why this is never one global number.</p>
+      <section><div class="sechead"><h2>Layer effect</h2></div><div id="cell-attribution"></div></section>
+      <section><div class="sechead"><h2>Runs in this row</h2></div><div id="cell-runs"></div></section>
+    </div>
+
+    <div class="view" id="v-runs">
+      <div class="crumb" id="runs-crumb"></div>
+      <h1>Runs</h1>
+      <p class="sub">Registered here, executed on your hardware, graded on arrival. Pin one as the
+      reference; retire a bad experiment by invalidating it — the row and its results stay, with
+      who and why, and it leaves every aggregate.</p>
+      <div class="chips">
+        <button class="chip" id="runs-show-invalidated" aria-pressed="false">Show invalidated</button>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>Run</th><th>System</th><th>Model</th><th>Config</th><th>Arm</th><th>State</th>
+        <th class="num">pass@1</th><th class="num">items</th><th class="num">errors</th><th></th></tr></thead>
+        <tbody id="runs-rows"></tbody></table></div>
+    </div>
+
+    <div class="view" id="v-run">
+      <div class="crumb"><button data-go="runs">Runs</button> › <span id="run-crumb"></span></div>
+      <h1 id="run-title"></h1>
+      <p class="sub" id="run-sub"></p>
+      <div class="chips" id="run-chips"></div>
+      <div class="tw"><table>
+        <thead><tr><th>Item</th><th>Question</th><th>Difficulty</th><th>Outcome</th>
+        <th class="num">rows ours</th><th class="num">rows gold</th><th>mismatch</th><th></th></tr></thead>
+        <tbody id="run-items"></tbody></table></div>
+      <section id="run-detail"><div class="empty">Select a question to compare it against gold.</div></section>
+    </div>
+
+    <div class="view" id="v-questions">
+      <div class="crumb" id="questions-crumb"></div>
+      <h1>Questions</h1>
+      <p class="sub">The gold this benchmark scores against. Beacon does not author it — public
+      corpora are ingested, and customer gold is curated in the semantic layer and imported here as
+      an approved export.</p>
+      <div class="chips" id="questions-chips"></div>
+      <div class="tw"><table>
+        <thead><tr><th>Item</th><th>Question</th><th>Difficulty</th><th>Database</th>
+        <th>Tolerance</th><th>Source</th><th>Gold</th></tr></thead>
+        <tbody id="questions-rows"></tbody></table></div>
+    </div>
+
+    <div class="view" id="v-benchmarks">
+      <h1>Benchmarks</h1>
+      <p class="sub">The container runs are compared within. Picking one is the only navigation step
+      before a result. <b>How a result is addressed:</b> Benchmark → System → Version → Model →
+      Config → Run → Result; the middle four together are one row in Results. Team is the access
+      boundary, not a level.</p>
+      <div class="tw" style="margin-top:14px"><table>
+        <thead><tr><th>Benchmark</th><th class="num">Questions</th><th class="num">Runs</th><th></th></tr></thead>
+        <tbody id="benchmarks-rows"></tbody></table></div>
+      <section><div class="sechead"><h2>Create a benchmark</h2></div>
+        <div class="inline">
+          <input type="text" id="bench-new-name" placeholder="name">
+          <input type="text" id="bench-new-desc" placeholder="description">
+          <button class="btn primary" id="bench-create-btn">Create</button>
+        </div></section>
+    </div>
+
+    <div class="view" id="v-settings">
+      <h1>Settings</h1>
+      <p class="sub">Configuration, not measurement — nothing here answers a question about how a
+      system is doing, so none of it is in the navigation.</p>
+      <section><div class="sechead"><h2>Workspace</h2></div>
+        <div class="inline">
+          <select id="set-team"></select>
+          <select id="set-project"></select>
+        </div></section>
+      <section><div class="sechead"><h2>This benchmark</h2></div><div id="set-bench"></div></section>
+      <section><div class="sechead"><h2>Systems under test</h2>
+        <span class="sub" style="margin:0">Registered by the runner on first push; a divergent
+        re-declaration is refused. This table lists — it does not author.</span></div>
+        <div id="set-systems"></div></section>
+      <section><div class="sechead"><h2>Access</h2>
+        <span class="sub" style="margin:0">Who can see this data. Team is the isolation boundary,
+        not a hierarchy level.</span></div>
+        <div id="set-members"></div>
+        <div class="inline" style="margin-top:8px">
+          <input type="text" id="set-invite-email" placeholder="teammate@example.com">
+          <select id="set-invite-role"><option>team_member</option><option>team_admin</option></select>
+          <button class="btn" id="set-invite-btn">Add member</button>
+        </div></section>
+      <section><div class="sechead"><h2>API keys</h2>
+        <span class="sub" style="margin:0">What a runner sends when it pushes results. Shown once;
+        stored as a hash.</span></div>
+        <div id="set-key-reveal"></div>
+        <div class="inline" style="margin-bottom:8px">
+          <input type="text" id="set-key-label" placeholder="label, e.g. mnemiq-ci">
+          <button class="btn primary" id="set-key-create">Create key</button>
+        </div>
+        <div id="set-keys"></div></section>
+    </div>
+
+    <footer>Beacon · a tracker: you run the eval, beacon keeps the record. A deferral is not a
+    failure, an error is not a zero, two metrics per run, and a bad run is invalidated, never
+    deleted.</footer>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ------------------------------------------------------------------ *
+ * The endpoint manifest. Every path the UI touches, exactly as it
+ * appears in the OpenAPI schema. A test parses this block and fails if
+ * any entry is not served -- the API-matches-UI audit, automated.
+ * ------------------------------------------------------------------ */
+const ENDPOINTS = {
+  login:        ["POST",   "/v1/auth/password/login"],
+  me:           ["GET",    "/v1/me"],
+  teams:        ["GET",    "/v1/teams"],
+  members:      ["GET",    "/v1/teams/{team_id}/members"],
+  addMember:    ["POST",   "/v1/teams/{team_id}/members"],
+  removeMember: ["DELETE", "/v1/teams/{team_id}/members/{user_id}"],
+  teamSystems:  ["GET",    "/v1/teams/{team_id}/solutions"],
+  projects:     ["GET",    "/v1/projects"],
+  settings:     ["PATCH",  "/v1/projects/{project_id}/settings"],
+  suites:       ["GET",    "/v1/projects/{project_id}/suites"],
+  createSuite:  ["POST",   "/v1/projects/{project_id}/suites"],
+  suiteItems:   ["GET",    "/v1/projects/{project_id}/suites/{suite_id}/items"],
+  matrix:       ["GET",    "/v1/projects/{project_id}/results-matrix"],
+  attribution:  ["GET",    "/v1/projects/{project_id}/attribution"],
+  runs:         ["GET",    "/v1/projects/{project_id}/runs"],
+  run:          ["GET",    "/v1/projects/{project_id}/runs/{run_id}"],
+  invalidate:   ["POST",   "/v1/projects/{project_id}/runs/{run_id}/invalidate"],
+  restore:      ["POST",   "/v1/projects/{project_id}/runs/{run_id}/restore"],
+  results:      ["GET",    "/v1/projects/{project_id}/runs/{run_id}/results"],
+  result:       ["GET",    "/v1/projects/{project_id}/runs/{run_id}/results/{item_id}"],
+  keys:         ["GET",    "/v1/me/api-keys"],
+  createKey:    ["POST",   "/v1/me/api-keys"],
+  revokeKey:    ["DELETE", "/v1/me/api-keys/{api_key_id}"],
+};
+
+const S = {  // client state; everything else lives on the server
+  key: null, user: null,
+  teamId: null, projectId: null, suiteId: null,
+  suites: [], baselineRunId: null,
+  matrixDifficulty: "", showInvalidated: false,
+  runOutcome: "", runDifficulty: "", selectedItem: null,
+  questionsDifficulty: "", questionsSource: "",
+};
+
+function url(name, params = {}, query = {}) {
+  let path = ENDPOINTS[name][1];
+  for (const [k, v] of Object.entries(params)) path = path.replace(`{${k}}`, encodeURIComponent(v));
+  const qs = new URLSearchParams(
+    Object.entries(query).filter(([, v]) => v !== "" && v !== null && v !== undefined)
+  ).toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+async function api(name, params = {}, { query = {}, body } = {}) {
+  const [method] = ENDPOINTS[name];
+  const response = await fetch(url(name, params, query), {
+    method,
+    headers: { "X-API-Key": S.key || "", ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (response.status === 401) { signOut(); throw new Error("signed out"); }
+  if (!response.ok) {
+    let detail = response.statusText;
+    try { detail = (await response.json()).detail || detail; } catch { /* not json */ }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+/* ---- rendering helpers: server data is text, never markup ---- */
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g,
+  (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const pct = (value) => (value === null || value === undefined) ? "n/a" : (value * 100).toFixed(1) + "%";
+const short = (value) => String(value ?? "").slice(0, 8);
+const KW = /\b(SELECT|FROM|WHERE|JOIN|INNER|LEFT|ON|AS|AND|OR|NOT|NULL|IS|ORDER|BY|GROUP|HAVING|LIMIT|DISTINCT|COUNT|MAX|MIN|SUM|AVG|CAST|RANK|OVER|NULLIF|DESC|ASC|BETWEEN|IN|LIKE|CASE|WHEN|THEN|ELSE|END)\b/g;
+const sqlfmt = (sql) => esc(sql)
+  .replace(KW, (m) => `<span class="kw">${m}</span>`)
+  .replace(/&#39;([^&]*?)&#39;/g, "<span class='lit'>&#39;$1&#39;</span>");
+function errbar(message) {
+  const bar = document.getElementById("app-err");
+  bar.textContent = message; bar.classList.add("on");
+  setTimeout(() => bar.classList.remove("on"), 6000);
+}
+const guard = (fn) => (...args) => fn(...args).catch((error) => {
+  if (error.message !== "signed out") errbar(error.message);
+});
+
+/* ---------------------------- auth ---------------------------- */
+function signOut() {
+  localStorage.removeItem("beacon_api_key");
+  S.key = null;
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("screen-login").classList.remove("hidden");
+}
+async function signIn(key) {
+  S.key = key;
+  const me = await api("me");
+  S.user = me.user;
+  localStorage.setItem("beacon_api_key", key);
+  document.getElementById("rail-user").textContent = me.user.email;
+  document.getElementById("screen-login").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  await bootstrapWorkspace();
+  go("matrix");
+}
+document.getElementById("login-key-btn").addEventListener("click", guard(async () => {
+  const key = document.getElementById("l-key").value.trim();
+  if (key) await signIn(key).catch((error) => { loginError(error); });
+}));
+document.getElementById("login-pw-btn").addEventListener("click", guard(async () => {
+  const email = document.getElementById("l-email").value.trim();
+  const password = document.getElementById("l-pw").value;
+  try {
+    S.key = "";
+    const response = await fetch(url("login"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, label: "web-ui" }),
+    });
+    if (!response.ok) throw new Error((await response.json()).detail || "login failed");
+    await signIn((await response.json()).api_key);
+  } catch (error) { loginError(error); }
+}));
+function loginError(error) {
+  const bar = document.getElementById("login-err");
+  bar.textContent = error.message; bar.classList.add("on");
+}
+
+/* ------------------------- workspace ------------------------- */
+async function bootstrapWorkspace() {
+  const teams = (await api("teams")).teams || [];
+  if (!S.teamId && teams.length) S.teamId = String(teams[0].id);
+  if (!S.teamId) return;
+  const projects = (await api("projects", {}, { query: { team_id: S.teamId } })).projects || [];
+  if (!S.projectId && projects.length) S.projectId = String(projects[0].id);
+  if (!S.projectId) return;
+  S.baselineRunId = (projects.find((p) => String(p.id) === S.projectId) || {}).baseline_run_id;
+  S.suites = (await api("suites", { project_id: S.projectId })) || [];
+  if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
+  renderRail();
+}
+function renderRail() {
+  const suite = S.suites.find((s) => String(s.id) === S.suiteId);
+  document.getElementById("rail-bench-name").textContent = suite ? suite.name : "none";
+  document.getElementById("rail-bench-meta").textContent =
+    suite ? `${suite.item_count} questions · switch ▾` : "switch ▾";
+}
+
+/* --------------------------- matrix --------------------------- */
+const loadMatrix = guard(async () => {
+  if (!S.suiteId) return;
+  const body = await api("matrix", { project_id: S.projectId },
+    { query: { suite_id: S.suiteId, difficulty: S.matrixDifficulty } });
+  const counts = body.difficulty_counts || {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  document.getElementById("matrix-chips").innerHTML =
+    '<span class="chiplabel">Difficulty</span>' +
+    [["", `all <span class="c">${total}</span>`],
+     ...Object.keys(counts).sort().filter((k) => k !== "unknown")
+       .map((k) => [k, `${esc(k)} <span class="c">${counts[k]}</span>`])]
+      .map(([value, label]) =>
+        `<button class="chip" data-diff="${esc(value)}" aria-pressed="${String(value === S.matrixDifficulty)}">${label}</button>`)
+      .join("");
+  document.getElementById("matrix-rows").innerHTML = body.rows.length ? body.rows.map((row, index) =>
+    `<tr class="click" data-cell="${index}">
+      <td>${esc(row.solution_name)} <span class="dim">${esc(row.solution_version)}</span></td>
+      <td>${esc(row.model_id || "")}</td>
+      <td class="cfgcell">${esc(row.config_label || "")}</td>
+      <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
+      <td class="num ex">${pct(row.ex_rate)}</td>
+      <td class="num dim">${pct(row.got_facts_rate)}</td>
+      <td class="num def">${pct(row.defer_rate)}</td>
+      <td class="num wr">${pct(row.wrong_rate)}</td>
+      <td class="num ${row.n_errors ? "er" : "dim"}">${row.n_errors}</td>
+      <td class="num dim">${row.median_tokens === null ? "–" : Math.round(row.median_tokens)}</td>
+      <td class="num dim">${row.median_runtime_ms === null ? "–" : Math.round(row.median_runtime_ms) + "ms"}</td>
+      <td class="dim" style="font-size:11px">open →</td></tr>`).join("")
+    : '<tr><td colspan="13"><div class="empty">No graded runs in this benchmark yet.</div></td></tr>';
+  document.getElementById("matrix-rows").dataset.payload = JSON.stringify(body.rows);
+});
+
+const openCell = guard(async (row) => {
+  go("cell");
+  const title = `${row.config_label || "(unlabelled)"} on ${row.model_id || "?"}`;
+  document.getElementById("cell-crumb").textContent =
+    `${row.solution_name} ${row.solution_version} · ${row.model_id || "?"} · ${row.config_label || ""}`;
+  document.getElementById("cell-title").textContent = title;
+
+  const attributionBox = document.getElementById("cell-attribution");
+  try {
+    const snapshot = await api("attribution", { project_id: S.projectId },
+      { query: { sut: row.solution_id, suite: S.suiteId } });
+    const layers = snapshot.layers || [];
+    attributionBox.innerHTML = !snapshot.supported
+      ? '<div class="empty">This system declares no ablatable layers.</div>'
+      : !layers.length
+        ? '<div class="empty">No sweep has produced a snapshot for this system and benchmark.</div>'
+        : `<div class="tw"><table><thead><tr><th>Layer</th><th class="num">Δ pass@k</th>
+            <th>95% CI</th><th class="num">p (BH)</th></tr></thead><tbody>` +
+          layers.map((layer) => `<tr><td>${esc(layer.layer_name || layer.layer)}</td>
+            <td class="num">${esc(JSON.stringify(layer.delta_pass_at_k ?? layer.delta ?? ""))}</td>
+            <td class="dim">[${esc(layer.ci_low)}, ${esc(layer.ci_high)}]</td>
+            <td class="num dim">${esc(layer.bh_adjusted_p ?? layer.mcnemar_p ?? "")}</td></tr>`).join("") +
+          "</tbody></table></div>";
+  } catch (error) { attributionBox.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+
+  const runs = await api("runs", { project_id: S.projectId }, { query: {
+    suite_id: S.suiteId, model_id: row.model_id || "", config_digest: row.config_digest || "", limit: 50 } });
+  document.getElementById("cell-runs").innerHTML = `<div class="tw"><table>
+    <thead><tr><th>Run</th><th>Arm</th><th>State</th><th class="num">pass@1</th>
+    <th class="num">items</th><th></th></tr></thead><tbody>` +
+    runs.map((run) => `<tr class="click" data-run="${esc(run.run_id)}"><td>${short(run.run_id)}</td>
+      <td class="dim">${esc(run.sweep_arm || "")}</td>
+      <td><span class="pill ${run.invalidated_at ? "p-gone" : "p-pass"}">${run.invalidated_at ? "invalidated" : esc(run.status)}</span></td>
+      <td class="num">${pct(run.summary?.pass_at_1)}</td>
+      <td class="num dim">${run.summary?.n_items ?? ""}</td>
+      <td class="dim" style="font-size:11px">open →</td></tr>`).join("") +
+    "</tbody></table></div>";
+});
+
+/* ---------------------------- runs ---------------------------- */
+const loadRuns = guard(async () => {
+  const runs = await api("runs", { project_id: S.projectId }, { query: {
+    suite_id: S.suiteId, limit: 200,
+    include_invalidated: S.showInvalidated ? "true" : "" } });
+  document.getElementById("runs-show-invalidated")
+    .setAttribute("aria-pressed", String(S.showInvalidated));
+  document.getElementById("runs-rows").innerHTML = runs.length ? runs.map((run) => {
+    const isRef = S.baselineRunId && String(run.run_id) === String(S.baselineRunId);
+    const gone = Boolean(run.invalidated_at);
+    return `<tr class="click ${isRef ? "ref" : ""} ${gone ? "gone" : ""}" data-run="${esc(run.run_id)}">
+      <td>${short(run.run_id)}</td>
+      <td class="dim">${esc(run.model_id ? "" : "")}${esc(run.suite_id ? "" : "")}${""}</td>
+      <td class="dim">${esc(run.model_id || "")}</td>
+      <td class="cfgcell">${esc(run.config_label || "")}${isRef ? ' <span class="pill p-ref">reference</span>' : ""}</td>
+      <td class="dim">${esc(run.sweep_arm || "")}</td>
+      <td><span class="pill ${gone ? "p-gone" : "p-pass"}">${gone ? "invalidated" : esc(run.status)}</span></td>
+      <td class="num">${pct(run.summary?.pass_at_1)}</td>
+      <td class="num dim">${run.summary?.n_items ?? ""}</td>
+      <td class="num ${run.summary?.n_errors ? "er" : "dim"}">${run.summary?.n_errors ?? 0}</td>
+      <td>${gone
+        ? `<button class="btn" data-restore="${esc(run.run_id)}">restore</button>`
+        : `${isRef ? "" : `<button class="btn" data-pin="${esc(run.run_id)}">pin as reference</button> `}` +
+          `<button class="btn danger" data-invalidate="${esc(run.run_id)}">invalidate</button>`}
+      </td></tr>` + (gone && run.invalidation_reason
+        ? `<tr class="gone"><td></td><td colspan="9" class="dim qcell">${esc(run.invalidation_reason)}</td></tr>` : "");
+  }).join("") : '<tr><td colspan="10"><div class="empty">No runs in this benchmark.</div></td></tr>';
+});
+
+/* ------------------------- run drilldown ------------------------- */
+const openRun = guard(async (runId) => {
+  go("run");
+  S.selectedItem = null;
+  const run = await api("run", { project_id: S.projectId, run_id: runId });
+  document.getElementById("run-crumb").textContent = short(runId);
+  document.getElementById("run-title").textContent = `Run ${short(runId)}`;
+  document.getElementById("run-sub").textContent =
+    `${run.model_id || "?"} · ${run.config_label || run.sweep_arm || ""} · ${run.status}` +
+    (run.invalidated_at ? ` · invalidated: ${run.invalidation_reason || ""}` : "");
+  document.getElementById("v-run").dataset.runId = runId;
+  await loadRunItems(runId);
+});
+
+const loadRunItems = guard(async (runId) => {
+  const body = await api("results", { project_id: S.projectId, run_id: runId },
+    { query: { outcome: S.runOutcome, difficulty: S.runDifficulty, limit: 500 } });
+  const oc = body.outcome_counts || {}, dc = body.difficulty_counts || {};
+  const chip = (group, value, label, pressed) =>
+    `<button class="chip" data-${group}="${esc(value)}" aria-pressed="${String(pressed)}">${label}</button>`;
+  document.getElementById("run-chips").innerHTML =
+    '<span class="chiplabel">Outcome</span>' +
+    chip("oc", "", `all <span class="c">${Object.values(oc).reduce((a, b) => a + b, 0)}</span>`, S.runOutcome === "") +
+    Object.keys(oc).sort().map((k) =>
+      chip("oc", k, `${esc(k)} <span class="c">${oc[k]}</span>`, S.runOutcome === k)).join("") +
+    '<span class="chipsep"></span><span class="chiplabel">Difficulty</span>' +
+    chip("dc", "", "all", S.runDifficulty === "") +
+    Object.keys(dc).sort().filter((k) => k !== "unknown").map((k) =>
+      chip("dc", k, `${esc(k)} <span class="c">${dc[k]}</span>`, S.runDifficulty === k)).join("");
+  const pillFor = (outcome) => ({ PASS: "p-pass", FAIL: "p-wr", DEFER: "p-def" }[outcome] || "p-er");
+  document.getElementById("run-items").innerHTML = body.results.length ? body.results.map((row) =>
+    `<tr class="click ${S.selectedItem === row.item_id ? "sel" : ""}" data-item="${esc(row.item_id)}">
+      <td>${short(row.item_id)}</td><td class="qcell">${esc(row.question)}</td>
+      <td>${row.difficulty ? `<span class="tag">${esc(row.difficulty)}</span>` : ""}</td>
+      <td><span class="pill ${pillFor(row.outcome)}">${esc(row.outcome || row.status)}</span></td>
+      <td class="num ${row.candidate_row_count === null ? "dim" : ""}">${row.candidate_row_count ?? "–"}</td>
+      <td class="num dim">${row.gold_row_count ?? "–"}</td>
+      <td class="dim">${esc(row.mismatch_kind || "")}</td>
+      <td class="dim" style="font-size:11px">compare →</td></tr>`).join("")
+    : '<tr><td colspan="8"><div class="empty">No results match these filters.</div></td></tr>';
+});
+
+const openItem = guard(async (runId, itemId) => {
+  S.selectedItem = itemId;
+  await loadRunItems(runId);
+  const detail = await api("result", { project_id: S.projectId, run_id: runId, item_id: itemId });
+  const verdicts = detail.verdicts || [];
+  const evidence = (verdicts.find((v) => v.evidence && v.evidence.candidate_sql) || {}).evidence || {};
+  const sampleTable = (columns, rows) => (!columns || !rows) ? "" :
+    `<div class="rs"><table><thead><tr>${columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+     <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  const mismatch = evidence.mismatch;
+  const why = detail.deferred
+    ? `<div class="why def"><div class="t">The system declined to answer</div>
+       <div class="d">Not a wrong answer: counting it as one is what hides over-deferral.</div></div>`
+    : detail.outcome === "PASS"
+      ? `<div class="why ok"><div class="t">Exact match</div>
+         <div class="d">Values, row count and column arity all agree with gold.</div></div>`
+      : mismatch
+        ? `<div class="why"><div class="t">Mismatch: ${esc(mismatch.kind)}</div><div class="d">${esc(mismatch.detail)}</div></div>`
+        : "";
+  const gotFacts = verdicts.find((v) => v.metric === "got_facts");
+  const factsNote = gotFacts && gotFacts.passed && detail.outcome === "FAIL"
+    ? `<div class="why def"><div class="t">Right answer, wrong shape</div>
+       <div class="d">The got-facts reading passes: gold's data is present in a tolerant shape.</div></div>` : "";
+  document.getElementById("run-detail").innerHTML =
+    `<div class="qhead"><p class="q">${esc(detail.question)}</p><div class="qmeta">
+      <span>item ${short(itemId)}</span>
+      ${detail.difficulty ? `<span class="tag">${esc(detail.difficulty)}</span>` : ""}
+      ${detail.database ? `<span>${esc(detail.database)}</span>` : ""}
+      <span>${detail.tokens_input + detail.tokens_output} tokens</span>
+      <span>${detail.runtime_ms}ms</span></div></div>` + why + factsNote +
+    `<div class="split">
+      <div class="pane ours ${detail.outcome === "PASS" ? "ok" : ""}">
+        <div class="pane-h"><span class="pane-t">Our SQL</span>${detail.deferred ? '<span class="pill p-def">declined</span>' : ""}</div>
+        ${detail.deferred
+          ? '<div class="empty">No SQL produced.</div>'
+          : `<pre>${sqlfmt(detail.output.sql || detail.output.answer || "")}</pre>`}
+        ${sampleTable(evidence.candidate_columns, evidence.candidate_sample)}
+      </div>
+      <div class="pane gold">
+        <div class="pane-h"><span class="pane-t">Gold</span></div>
+        <pre>${sqlfmt(detail.gold.sql || JSON.stringify(detail.gold))}</pre>
+        ${sampleTable(evidence.gold_columns, evidence.gold_sample)}
+      </div>
+    </div>` +
+    verdicts.map((v) =>
+      `<p class="sub">${esc(v.grader)}${v.metric ? ` [${esc(v.metric)}]` : ""}: ${esc(v.justification || "")}</p>`).join("");
+});
+
+/* -------------------------- questions -------------------------- */
+const loadQuestions = guard(async () => {
+  if (!S.suiteId) return;
+  const body = await api("suiteItems", { project_id: S.projectId, suite_id: S.suiteId },
+    { query: { difficulty: S.questionsDifficulty, source: S.questionsSource, limit: 200 } });
+  const dc = body.difficulty_counts || {}, sc = body.source_counts || {};
+  const chip = (group, value, label, pressed) =>
+    `<button class="chip" data-${group}="${esc(value)}" aria-pressed="${String(pressed)}">${label}</button>`;
+  document.getElementById("questions-chips").innerHTML =
+    '<span class="chiplabel">Difficulty</span>' +
+    chip("qd", "", "all", S.questionsDifficulty === "") +
+    Object.keys(dc).sort().filter((k) => k !== "unknown").map((k) =>
+      chip("qd", k, `${esc(k)} <span class="c">${dc[k]}</span>`, S.questionsDifficulty === k)).join("") +
+    '<span class="chipsep"></span><span class="chiplabel">Source</span>' +
+    chip("qs", "", "all", S.questionsSource === "") +
+    Object.keys(sc).sort().map((k) =>
+      chip("qs", k, `${esc(k)} <span class="c">${sc[k]}</span>`, S.questionsSource === k)).join("");
+  document.getElementById("questions-rows").innerHTML = body.items.length ? body.items.map((item) =>
+    `<tr><td>${short(item.item_id)}</td><td class="qcell">${esc(item.question)}</td>
+      <td>${item.difficulty ? `<span class="tag">${esc(item.difficulty)}</span>` : ""}</td>
+      <td class="dim">${esc(item.database || "")}</td>
+      <td class="dim">${item.tolerance ? esc(JSON.stringify(item.tolerance)) : "default"}</td>
+      <td class="dim">${esc(item.source || "")}</td>
+      <td class="dim">${item.has_gold_sql ? "sql" : "answer"}</td></tr>`).join("")
+    : '<tr><td colspan="7"><div class="empty">No questions match.</div></td></tr>';
+});
+
+/* -------------------------- benchmarks -------------------------- */
+const loadBenchmarks = guard(async () => {
+  S.suites = (await api("suites", { project_id: S.projectId })) || [];
+  const runs = await api("runs", { project_id: S.projectId },
+    { query: { limit: 500, include_invalidated: "true" } });
+  const bySuite = {};
+  for (const run of runs) bySuite[String(run.suite_id)] = (bySuite[String(run.suite_id)] || 0) + 1;
+  document.getElementById("benchmarks-rows").innerHTML = S.suites.length ? S.suites.map((suite) =>
+    `<tr class="click" data-suite="${esc(suite.id)}"><td>${esc(suite.name)}</td>
+      <td class="num dim">${suite.item_count}</td>
+      <td class="num dim">${bySuite[String(suite.id)] || 0}</td>
+      <td class="dim" style="font-size:11px">${String(suite.id) === S.suiteId ? "current" : "open →"}</td></tr>`).join("")
+    : '<tr><td colspan="4"><div class="empty">No benchmarks yet.</div></td></tr>';
+});
+
+/* --------------------------- settings --------------------------- */
+const loadSettings = guard(async () => {
+  const teams = (await api("teams")).teams || [];
+  document.getElementById("set-team").innerHTML = teams.map((team) =>
+    `<option value="${esc(team.id)}" ${String(team.id) === S.teamId ? "selected" : ""}>${esc(team.name)}</option>`).join("");
+  const projects = (await api("projects", {}, { query: { team_id: S.teamId } })).projects || [];
+  document.getElementById("set-project").innerHTML = projects.map((project) =>
+    `<option value="${esc(project.id)}" ${String(project.id) === S.projectId ? "selected" : ""}>${esc(project.name)}</option>`).join("");
+
+  const suite = S.suites.find((s) => String(s.id) === S.suiteId);
+  document.getElementById("set-bench").innerHTML =
+    `<p class="sub">${suite ? `${esc(suite.name)} · ${suite.item_count} questions` : "none selected"} ·
+     reference run ${S.baselineRunId ? short(S.baselineRunId) : "not set"} — pin from Runs, where you
+     can see what you are pinning. Gold arrives via <code>beacon gold import</code>.</p>`;
+
+  const systems = await api("teamSystems", { team_id: S.teamId });
+  const systemRows = (systems.solutions || systems || []);
+  document.getElementById("set-systems").innerHTML = systemRows.length
+    ? `<div class="tw"><table><thead><tr><th>System</th><th>Version</th><th>Declared layers</th></tr></thead><tbody>` +
+      systemRows.map((row) => `<tr><td>${esc(row.solution_id)}</td><td class="dim">${esc(row.version)}</td>
+        <td class="qcell dim">${esc((row.layers || []).map((l) => l.name).join(", "))}</td></tr>`).join("") +
+      "</tbody></table></div>"
+    : '<div class="empty">Nothing registered yet — a runner registers itself on first push.</div>';
+
+  const members = (await api("members", { team_id: S.teamId })).members || [];
+  document.getElementById("set-members").innerHTML = members.length
+    ? `<div class="tw"><table><thead><tr><th>Member</th><th>Role</th><th></th></tr></thead><tbody>` +
+      members.map((member) => `<tr><td>${esc(member.email)}</td><td class="dim">${esc(member.role)}</td>
+        <td><button class="btn danger" data-remove-member="${esc(member.user_id)}">remove</button></td></tr>`).join("") +
+      "</tbody></table></div>"
+    : '<div class="empty">No members.</div>';
+
+  const keys = (await api("keys")).keys || [];
+  document.getElementById("set-keys").innerHTML = keys.length
+    ? `<div class="tw"><table><thead><tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>` +
+      keys.map((key) => `<tr><td>${esc(key.label)}</td><td class="dim">${esc((key.created_at || "").slice(0, 10))}</td>
+        <td class="${key.last_used_at ? "" : "dim"}">${esc(key.last_used_at ? key.last_used_at.slice(0, 16).replace("T", " ") : "never")}</td>
+        <td><button class="btn danger" data-revoke-key="${esc(key.id)}">revoke</button></td></tr>`).join("") +
+      "</tbody></table></div>"
+    : '<div class="empty">No keys. Create one for your runner.</div>';
+});
+
+/* --------------------------- events --------------------------- */
+function go(view) {
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.id === `v-${view}`));
+  document.querySelectorAll(".rail .nav[data-go]").forEach((n) => {
+    n.toggleAttribute("aria-current", false);
+    if (n.dataset.go === view) n.setAttribute("aria-current", "page");
+  });
+  renderRail();
+  window.scrollTo({ top: 0 });
+  if (view === "matrix") loadMatrix();
+  if (view === "runs") loadRuns();
+  if (view === "questions") loadQuestions();
+  if (view === "benchmarks") loadBenchmarks();
+  if (view === "settings") loadSettings();
+}
+
+document.addEventListener("click", (event) => {
+  const t = event.target;
+  const withData = (name) => t.closest(`[data-${name}]`)?.dataset[name.replace(/-([a-z])/g, (_, c) => c.toUpperCase())];
+
+  const invalidateId = withData("invalidate");
+  if (invalidateId) {
+    const reason = window.prompt("Why is this run invalid? (the reason is the point of keeping the row)");
+    if (reason && reason.trim()) {
+      guard(async () => {
+        await api("invalidate", { project_id: S.projectId, run_id: invalidateId }, { body: { reason: reason.trim() } });
+        loadRuns();
+      })();
+    }
+    return;
+  }
+  const restoreId = withData("restore");
+  if (restoreId) {
+    guard(async () => { await api("restore", { project_id: S.projectId, run_id: restoreId }); loadRuns(); })();
+    return;
+  }
+  const pinId = withData("pin");
+  if (pinId) {
+    guard(async () => {
+      await api("settings", { project_id: S.projectId }, { body: { baseline_run_id: pinId } });
+      S.baselineRunId = pinId;
+      loadRuns();
+    })();
+    return;
+  }
+  const removeMemberId = withData("remove-member");
+  if (removeMemberId) {
+    guard(async () => {
+      await api("removeMember", { team_id: S.teamId, user_id: removeMemberId });
+      loadSettings();
+    })();
+    return;
+  }
+  const revokeKeyId = withData("revoke-key");
+  if (revokeKeyId) {
+    guard(async () => { await api("revokeKey", { api_key_id: revokeKeyId }); loadSettings(); })();
+    return;
+  }
+
+  const diffChip = t.closest("[data-diff]");
+  if (diffChip) { S.matrixDifficulty = diffChip.dataset.diff; loadMatrix(); return; }
+  const ocChip = t.closest("[data-oc]"); const dcChip = t.closest("[data-dc]");
+  if (ocChip || dcChip) {
+    if (ocChip) S.runOutcome = ocChip.dataset.oc;
+    if (dcChip) S.runDifficulty = dcChip.dataset.dc;
+    loadRunItems(document.getElementById("v-run").dataset.runId);
+    return;
+  }
+  const qdChip = t.closest("[data-qd]"); const qsChip = t.closest("[data-qs]");
+  if (qdChip || qsChip) {
+    if (qdChip) S.questionsDifficulty = qdChip.dataset.qd;
+    if (qsChip) S.questionsSource = qsChip.dataset.qs;
+    loadQuestions();
+    return;
+  }
+
+  const cellRow = t.closest("[data-cell]");
+  if (cellRow) {
+    const rows = JSON.parse(document.getElementById("matrix-rows").dataset.payload || "[]");
+    openCell(rows[Number(cellRow.dataset.cell)]);
+    return;
+  }
+  const runRow = t.closest("[data-run]");
+  if (runRow) { openRun(runRow.dataset.run); return; }
+  const itemRow = t.closest("[data-item]");
+  if (itemRow) { openItem(document.getElementById("v-run").dataset.runId, itemRow.dataset.item); return; }
+  const suiteRow = t.closest("[data-suite]");
+  if (suiteRow) {
+    S.suiteId = suiteRow.dataset.suite;
+    S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
+    renderRail(); go("matrix");
+    return;
+  }
+  const nav = t.closest("[data-go]");
+  if (nav) go(nav.dataset.go);
+});
+
+document.getElementById("runs-show-invalidated").addEventListener("click", () => {
+  S.showInvalidated = !S.showInvalidated; loadRuns();
+});
+document.getElementById("bench-create-btn").addEventListener("click", guard(async () => {
+  const name = document.getElementById("bench-new-name").value.trim();
+  if (!name) return;
+  const created = await api("createSuite", { project_id: S.projectId },
+    { body: { name, description: document.getElementById("bench-new-desc").value, kind: "manual" } });
+  S.suiteId = String(created.id);
+  loadBenchmarks(); renderRail();
+}));
+document.getElementById("set-team").addEventListener("change", guard(async (event) => {
+  S.teamId = event.target.value; S.projectId = null; S.suiteId = null; S.suites = [];
+  await bootstrapWorkspace(); loadSettings();
+}));
+document.getElementById("set-project").addEventListener("change", guard(async (event) => {
+  S.projectId = event.target.value; S.suiteId = null; S.suites = [];
+  await bootstrapWorkspace(); loadSettings();
+}));
+document.getElementById("set-invite-btn").addEventListener("click", guard(async () => {
+  const email = document.getElementById("set-invite-email").value.trim();
+  if (!email) return;
+  await api("addMember", { team_id: S.teamId },
+    { body: { user_email: email, role: document.getElementById("set-invite-role").value } });
+  document.getElementById("set-invite-email").value = "";
+  loadSettings();
+}));
+document.getElementById("set-key-create").addEventListener("click", guard(async () => {
+  const label = document.getElementById("set-key-label").value.trim();
+  if (!label) return;
+  const created = await api("createKey", {}, { body: { label } });
+  document.getElementById("set-key-reveal").innerHTML =
+    `<div class="reveal"><div class="t"><b>Copy this now.</b> It is shown once and stored only as a
+     hash — beacon cannot show it again.</div>
+     <div class="k"><code>${esc(created.api_key)}</code>
+     <button class="btn" id="set-key-dismiss">Done</button></div></div>`;
+  document.getElementById("set-key-dismiss").addEventListener("click", () => {
+    document.getElementById("set-key-reveal").innerHTML = "";
+  });
+  document.getElementById("set-key-label").value = "";
+  loadSettings();
+}));
+document.getElementById("signout").addEventListener("click", signOut);
+
+/* ---------------------------- boot ---------------------------- */
+(async () => {
+  // Ambient credentials, the web equivalent: a stored key, or ?api_key= for
+  // a pre-authenticated demo or kiosk.
+  const fromQuery = new URLSearchParams(window.location.search).get("api_key");
+  const stored = fromQuery || localStorage.getItem("beacon_api_key");
+  if (fromQuery) window.history.replaceState(null, "", window.location.pathname);
+  if (stored) {
+    try { await signIn(stored); return; } catch { signOut(); }
+  }
+})();
+</script>
+</body>
+</html>
