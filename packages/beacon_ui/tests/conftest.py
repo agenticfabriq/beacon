@@ -246,7 +246,7 @@ def world(session: Session) -> SeededWorld:
         version="0.1",
         owner_team=acme.id,
         summary="Seeded ACME SUT",
-        supported_modes=["EVAL", "PR_GATE"],
+        supported_modes=["EVAL"],
         layers=[{"name": "ontology"}, {"name": "retry_loop"}],
         created_by=alice.id,
     )

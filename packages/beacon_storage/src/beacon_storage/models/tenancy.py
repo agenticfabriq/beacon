@@ -15,7 +15,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
@@ -63,7 +62,6 @@ class Project(Base, IdMixin, TimestampsMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     baseline_run_id: Mapped[UUID | None] = mapped_column(nullable=True)  # FK added in P2
-    gate_policy: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     archived_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 

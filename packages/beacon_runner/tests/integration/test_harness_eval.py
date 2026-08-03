@@ -141,21 +141,21 @@ def test_harness_rejects_unsupported_mode(engine: Engine) -> None:
             suite="s",
             dataset_version="v0",
             pass_idx=0,
-            mode=HarnessMode.PR_GATE,
+            mode=HarnessMode.NIGHTLY_LOO,
         )
 
 
-def test_harness_runs_pr_gate_using_eval_loop(engine: Engine) -> None:
+def test_a_non_eval_mode_runs_the_same_loop_and_honours_pass_idx(engine: Engine) -> None:
     factory = make_session_factory(engine)
 
-    class _PrGateSut:
+    class _NonEvalSut:
         def identity(self) -> SolutionIdentity:
             return SolutionIdentity(
                 solution_id="pr-gate",
                 version="0.1",
                 owner_team=uuid4(),
                 summary="",
-                supported_modes=["PR_GATE"],
+                supported_modes=["NIGHTLY_LOO"],
                 layers=[],
             )
 
@@ -186,7 +186,7 @@ def test_harness_runs_pr_gate_using_eval_loop(engine: Engine) -> None:
             version="0.1",
             owner_team=team.id,
             summary="",
-            supported_modes=["PR_GATE"],
+            supported_modes=["NIGHTLY_LOO"],
             layers=[],
             created_by=user.id,
         )
@@ -199,7 +199,7 @@ def test_harness_runs_pr_gate_using_eval_loop(engine: Engine) -> None:
         )
 
     registry = SutRegistry()
-    registry.register(_PrGateSut())
+    registry.register(_NonEvalSut())
     runner = HarnessRunner(
         session_factory=factory,
         registry=registry,
@@ -212,17 +212,17 @@ def test_harness_runs_pr_gate_using_eval_loop(engine: Engine) -> None:
         user_id=user_id,
         solution_record_id=solution_record_id,
         items=_items(2),
-        config=SolutionConfig(model_id="pr-gate"),
+        config=SolutionConfig(model_id="loo"),
         suite="s",
         dataset_version="v0",
         pass_idx=2,
-        mode=HarnessMode.PR_GATE,
+        mode=HarnessMode.NIGHTLY_LOO,
     )
 
     with factory() as session:
         run = RunRepo(session).get(run_id)
         assert run is not None
-        assert run.mode == HarnessMode.PR_GATE
+        assert run.mode == HarnessMode.NIGHTLY_LOO
         assert run.status == RunStatus.COMPLETED
         results = ResultRepo(session).list_for_run(run_id)
         assert len(results) == 2

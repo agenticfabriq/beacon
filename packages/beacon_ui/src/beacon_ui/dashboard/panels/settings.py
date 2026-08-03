@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, cast
 
 import streamlit as st
@@ -27,13 +26,8 @@ def selected_project(projects: list[dict[str, Any]], project_id: str) -> dict[st
     return None
 
 
-def _policy_text(project: dict[str, Any]) -> str:
-    policy = project.get("gate_policy")
-    return json.dumps(policy if isinstance(policy, dict) else {}, indent=2, sort_keys=True)
-
-
 def render() -> None:
-    """Render the project Settings tab with baseline, gate policy, and archive."""
+    """Render the project Settings tab with the reference run and archive."""
     state = _state()
     if state.current_team_id is None:
         st.info("Select a team.")
@@ -56,7 +50,7 @@ def render() -> None:
         return
 
     st.subheader("Baseline run")
-    st.caption("Pinned baseline drives PR_GATE comparisons and the Overview delta tile.")
+    st.caption("Every other run is read against this one.")
     options = [""] + [str(run["run_id"]) for run in runs]
     current = str(project.get("baseline_run_id") or "")
     baseline = st.selectbox(
@@ -76,30 +70,6 @@ def render() -> None:
             st.error(exc.message)
             return
         st.success("Baseline saved.")
-        st.rerun()
-
-    st.divider()
-    st.subheader("Gate policy")
-    policy_text = st.text_area(
-        "Policy JSON",
-        value=_policy_text(project),
-        height=200,
-        key="settings_policy_text",
-    )
-    if st.button("Save policy", key="settings_policy_btn"):
-        try:
-            policy = json.loads(policy_text)
-            if not isinstance(policy, dict):
-                st.error("Policy JSON must be an object.")
-                return
-            client.patch_project_settings(state.current_project_id, gate_policy=policy)
-        except json.JSONDecodeError as exc:
-            st.error(f"Invalid JSON: {exc}")
-            return
-        except BeaconApiError as exc:
-            st.error(exc.message)
-            return
-        st.success("Policy saved.")
         st.rerun()
 
     st.divider()

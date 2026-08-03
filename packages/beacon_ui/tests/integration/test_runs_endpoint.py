@@ -33,7 +33,7 @@ def _ensure_solution(session: Session, world: _World) -> Solution:
         version="0.1",
         owner_team=world.acme_team_id,
         summary="Dummy runner",
-        supported_modes=["EVAL", "PR_GATE"],
+        supported_modes=["EVAL"],
         layers=[],
         created_by=world.alice_id,
     )

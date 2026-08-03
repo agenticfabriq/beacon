@@ -44,7 +44,7 @@ def render() -> None:
     with fcols[0]:
         mode = st.selectbox(
             "Mode",
-            options=["", "EVAL", "PR_GATE", "NIGHTLY_LOO", "TRACE_PROMOTION"],
+            options=["", "EVAL", "NIGHTLY_LOO"],
             format_func=lambda value: value or "any",
         )
     with fcols[1]:

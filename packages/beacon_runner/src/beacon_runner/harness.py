@@ -36,9 +36,7 @@ if TYPE_CHECKING:
     from beacon_runner.types import EvalItem, SolutionConfig
 
 
-_SUPPORTED_MODES = frozenset(
-    {HarnessMode.EVAL, HarnessMode.PR_GATE, HarnessMode.NIGHTLY_LOO},
-)
+_SUPPORTED_MODES = frozenset({HarnessMode.EVAL, HarnessMode.NIGHTLY_LOO})
 
 
 @dataclass(frozen=True)
@@ -81,7 +79,7 @@ class HarnessRunner:
         parent_sweep_id: UUID | None = None,
         sweep_arm: str | None = None,
     ) -> UUID:
-        """Execute one EVAL, PR_GATE or NIGHTLY_LOO pass over ``items`` and persist results.
+        """Execute one EVAL or NIGHTLY_LOO pass over ``items`` and persist results.
 
         ``sweep_arm`` labels which arm of an ablation sweep this pass belongs to
         (``baseline``, ``no_<layer>``); it is part of the run's identity, so the

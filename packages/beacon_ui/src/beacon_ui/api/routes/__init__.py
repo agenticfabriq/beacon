@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from beacon_ui.api.routes import api_keys as api_keys_routes
 from beacon_ui.api.routes import attribution as attribution_routes
 from beacon_ui.api.routes import auth as auth_routes
-from beacon_ui.api.routes import gate as gate_routes
 from beacon_ui.api.routes import ingest as ingest_routes
 from beacon_ui.api.routes import leaderboards as leaderboards_routes
 from beacon_ui.api.routes import me as me_routes
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
 def register_routes(app: FastAPI) -> None:
     """Mount every Beacon API router on the given FastAPI application."""
     app.include_router(auth_routes.router)
-    app.include_router(gate_routes.router)
     app.include_router(leaderboards_routes.router)
     app.include_router(attribution_routes.router)
     app.include_router(me_routes.router)

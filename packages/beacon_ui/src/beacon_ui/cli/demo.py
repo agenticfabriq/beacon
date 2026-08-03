@@ -271,18 +271,12 @@ def _ensure_project(
     for project in repo.list_for_team(team_id, include_archived=True):
         if project.name == name:
             return project
-    project = repo.create(
+    return repo.create(
         team_id=team_id,
         name=name,
         description=description,
         created_by=created_by,
     )
-    project.gate_policy = {
-        "mode": "enforce",
-        "pass_hat_3_drop_threshold": 0.02,
-        "mcnemar_alpha": 0.05,
-    }
-    return project
 
 
 def _ensure_membership(
@@ -333,7 +327,7 @@ def _ensure_solution(
         version=version,
         owner_team=team.id,
         summary=summary,
-        supported_modes=["EVAL", "PR_GATE", "NIGHTLY_LOO"],
+        supported_modes=["EVAL", "NIGHTLY_LOO"],
         layers=[
             {
                 "name": "ontology",

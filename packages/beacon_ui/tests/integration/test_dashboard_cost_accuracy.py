@@ -32,7 +32,7 @@ def test_frontier_points_filter_runs_without_cost_metrics() -> None:
             },
             {
                 "run_id": "87654321-0000-0000-0000-000000000000",
-                "mode": "PR_GATE",
+                "mode": "EVAL",
                 "summary": {"pass_at_3": None, "median_tokens": 1000},
             },
         ],

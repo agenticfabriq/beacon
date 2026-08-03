@@ -19,12 +19,12 @@ def test_selected_project_matches_by_id() -> None:
     project = selected_project(
         [
             {"id": "p1", "name": "one"},
-            {"id": "p2", "name": "two", "gate_policy": {"mode": "warn"}},
+            {"id": "p2", "name": "two"},
         ],
         "p2",
     )
 
-    assert project == {"id": "p2", "name": "two", "gate_policy": {"mode": "warn"}}
+    assert project == {"id": "p2", "name": "two"}
 
 
 def test_settings_panel_renders(

@@ -43,12 +43,9 @@ def patch_project_settings(
 
     if "baseline_run_id" in body.model_fields_set:
         project.baseline_run_id = body.baseline_run_id
-    if body.gate_policy is not None:
-        project.gate_policy = body.gate_policy
 
     session.flush()
     return ProjectSettingsOut(
         project_id=project.id,
         baseline_run_id=project.baseline_run_id,
-        gate_policy=project.gate_policy or {},
     )

@@ -31,10 +31,15 @@ from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
 
 
 class HarnessMode(StrEnum):
+    """How a run was produced.
+
+    PR_GATE went with the gate, which demanded a suite nothing could create and
+    executed the model itself. TRACE_PROMOTION never had a reference outside
+    this enum.
+    """
+
     EVAL = "EVAL"
-    PR_GATE = "PR_GATE"
     NIGHTLY_LOO = "NIGHTLY_LOO"
-    TRACE_PROMOTION = "TRACE_PROMOTION"
 
 
 class RunStatus(StrEnum):
