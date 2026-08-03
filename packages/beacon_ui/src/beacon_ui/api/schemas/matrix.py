@@ -27,6 +27,10 @@ class MatrixRowOut(BaseModel):
     n_graded: int
     n_errors: int
     ex_rate: float | None = None
+    # The tolerant reading: right data, shape-tolerant (mnemiq's CORRECT_FACTS,
+    # computed by beacon's own grader). None when no verdict carries the metric
+    # -- runs graded before the grader emitted it -- which must not read as 0%.
+    got_facts_rate: float | None = None
     defer_rate: float | None = None
     wrong_rate: float | None = None
     median_tokens: float | None = None

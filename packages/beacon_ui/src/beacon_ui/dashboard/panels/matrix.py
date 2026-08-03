@@ -4,8 +4,8 @@ The page the hand-maintained benchmark tracker becomes. Accuracy and what it
 cost sit side by side, so a cheaper configuration that scores the same reads as
 a win; a row opens into its layer effect and its runs.
 
-No got-facts column yet, deliberately: no shipped SQL grader stamps a second
-metric, so there is nothing honest to put in it.
+Two readings of correctness per row: exact match, and got-facts (right data,
+tolerant shape), both computed by beacon's grader from the same execution.
 """
 
 from __future__ import annotations
@@ -80,6 +80,7 @@ def render() -> None:
                 "runs": row.get("n_runs"),
                 "graded": row.get("n_graded"),
                 "EX": _pct(row.get("ex_rate")),
+                "got-facts": _pct(row.get("got_facts_rate")),
                 "deferred": _pct(row.get("defer_rate")),
                 "wrong": _pct(row.get("wrong_rate")),
                 "infra": row.get("n_errors"),

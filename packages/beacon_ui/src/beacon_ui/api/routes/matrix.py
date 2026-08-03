@@ -15,7 +15,7 @@ from uuid import UUID  # noqa: TC003
 import sqlalchemy as sa
 from beacon_iam.permissions import Permission
 from beacon_storage.models.eval_items import EvalItem
-from beacon_storage.models.runs import Result, Run
+from beacon_storage.models.runs import Result, Run, Verdict
 from beacon_storage.models.solutions import Solution
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.suites import SuiteRepo
@@ -85,11 +85,28 @@ def results_matrix(
             Run.config_label,
             Run.config_digest,
             sa.func.count(sa.func.distinct(Run.id)).label("n_runs"),
-            sa.func.count(Result.id).filter(Result.outcome.in_(_GRADED)).label("n_graded"),
-            sa.func.count(Result.id).filter(Result.outcome == "PASS").label("n_pass"),
-            sa.func.count(Result.id).filter(Result.outcome == "FAIL").label("n_fail"),
-            sa.func.count(Result.id).filter(Result.outcome == "DEFER").label("n_defer"),
-            sa.func.count(Result.id).filter(Result.outcome == "ERROR").label("n_errors"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Result.outcome.in_(_GRADED))
+            .label("n_graded"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Result.outcome == "PASS")
+            .label("n_pass"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Result.outcome == "FAIL")
+            .label("n_fail"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Result.outcome == "DEFER")
+            .label("n_defer"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Result.outcome == "ERROR")
+            .label("n_errors"),
+            # The tolerant reading of the same execution. DISTINCT because the
+            # verdict join is otherwise able to multiply outcome counts; the
+            # got_facts join is at most one row per result, but the guarantee
+            # belongs in the query, not in a comment about today's graders.
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Verdict.bool_value.is_(True))
+            .label("n_got_facts"),
             sa.func.percentile_cont(0.5)
             .within_group(Result.tokens_input + Result.tokens_output)
             .label("median_tokens"),
@@ -97,6 +114,11 @@ def results_matrix(
         )
         .join(Result, Result.run_id == Run.id)
         .join(Solution, Solution.id == Run.solution_id)
+        .join(
+            Verdict,
+            sa.and_(Verdict.result_id == Result.id, Verdict.metric == "got_facts"),
+            isouter=True,
+        )
         .where(*filters)
         .group_by(
             Run.solution_id,
@@ -127,6 +149,9 @@ def results_matrix(
                 n_graded=graded,
                 n_errors=int(record.n_errors),
                 ex_rate=_rate(int(record.n_pass), graded),
+                got_facts_rate=(
+                    _rate(int(record.n_got_facts), graded) if int(record.n_got_facts) else None
+                ),
                 defer_rate=_rate(int(record.n_defer), graded),
                 wrong_rate=_rate(int(record.n_fail), graded),
                 median_tokens=float(record.median_tokens)

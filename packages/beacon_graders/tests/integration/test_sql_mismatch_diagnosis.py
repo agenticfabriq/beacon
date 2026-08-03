@@ -121,3 +121,81 @@ def test_a_sample_cell_survives_json_storage(grader: ExecutionGroundedSqlGrader)
     for row in raw["candidate_sample"]:
         for cell in row:
             assert cell is None or isinstance(cell, bool | float | int | str)
+
+
+def _got_facts_verdict(grader: ExecutionGroundedSqlGrader, candidate: str, gold: str) -> Any:
+    verdicts = grader.grade(_item(gold), _result(candidate))
+    return next(v for v in verdicts if v.metric == "got_facts")
+
+
+def test_the_live_case_extra_column_fails_exact_and_passes_got_facts(
+    grader: ExecutionGroundedSqlGrader,
+) -> None:
+    """The 0269 shape: same rows, one column too many. Two readings, both true."""
+    exact, facts = (
+        grader.grade(_item("SELECT a FROM t"), _result("SELECT a, b FROM t"))[0],
+        _got_facts_verdict(grader, "SELECT a, b FROM t", "SELECT a FROM t"),
+    )
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+
+
+def test_reordered_columns_still_carry_the_facts(grader: ExecutionGroundedSqlGrader) -> None:
+    facts = _got_facts_verdict(grader, "SELECT b, a FROM t", "SELECT a, b FROM t")
+
+    assert facts.bool_value is True
+
+
+def test_wrong_values_fail_both_readings(grader: ExecutionGroundedSqlGrader) -> None:
+    """Extra columns cannot rescue wrong rows."""
+    facts = _got_facts_verdict(grader, "SELECT a + 10, b FROM t", "SELECT a FROM t")
+
+    assert facts.bool_value is False
+
+
+def test_a_truncated_result_fails_both_readings(grader: ExecutionGroundedSqlGrader) -> None:
+    facts = _got_facts_verdict(grader, "SELECT a, b FROM t WHERE a < 3", "SELECT a FROM t")
+
+    assert facts.bool_value is False
+
+
+def test_a_candidate_narrower_than_gold_fails_got_facts(
+    grader: ExecutionGroundedSqlGrader,
+) -> None:
+    """The candidate may add context columns but never omit a gold column."""
+    facts = _got_facts_verdict(grader, "SELECT a FROM t", "SELECT a, b FROM t")
+
+    assert facts.bool_value is False
+
+
+def test_an_exact_match_passes_got_facts_trivially(grader: ExecutionGroundedSqlGrader) -> None:
+    facts = _got_facts_verdict(grader, "SELECT a FROM t", "SELECT a FROM t")
+
+    assert facts.bool_value is True
+
+
+def test_the_projection_search_is_bounded() -> None:
+    """A pathological SELECT * must not stall the grader; past the cap the
+    tolerant reading gives up and says no."""
+    from beacon_graders.graders.execution_grounded_sql import ResultSet
+    from beacon_graders.tolerance import Tolerance
+
+    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type]
+    wide = ResultSet(
+        columns=[f"c{i}" for i in range(16)],
+        # the gold pair exists only as the LAST of C(16,2)=120 projections,
+        # which is past the cap of 100
+        rows=[tuple([*range(100, 114), 7777, 8888])],
+    )
+    gold = ResultSet(columns=["x", "y"], rows=[(7777, 8888)])
+
+    assert grader._got_facts(wide, gold, False, Tolerance()) is False  # noqa: SLF001
+
+
+def test_the_strict_verdict_still_decides_the_outcome() -> None:
+    """Two verdicts, one outcome: exact match is emitted first and carries the
+    exact_match metric, so the tolerant reading can never flip PASS."""
+    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type]
+
+    assert grader.metric == "exact_match"

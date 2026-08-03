@@ -6,6 +6,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import combinations
 from typing import TYPE_CHECKING, Any
 
 from beacon_graders.tolerance import Tolerance
@@ -75,11 +76,20 @@ class Mismatch:
         return {"kind": self.kind, "detail": self.detail}
 
 
+# Trying every way to project a wide candidate onto the gold's arity is
+# combinatorial; past this many projections the tolerant reading gives up and
+# says so, rather than stalling the grader on a pathological SELECT *.
+MAX_PROJECTIONS = 100
+
+
 class ExecutionGroundedSqlGrader:
     name = "execution_grounded_sql"
     version = "v1"
     kind = GraderKind.EXECUTION
-    metric: str | None = None
+    # The strict reading decides the outcome. grade() also emits a second,
+    # tolerant verdict under "got_facts"; the composer stamps this metric only
+    # onto verdicts that carry none, so the two stay distinct.
+    metric: str | None = "exact_match"
 
     def __init__(
         self,
@@ -156,6 +166,7 @@ class ExecutionGroundedSqlGrader:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
         passed = self._compare(candidate.rows, gold.rows, order_sensitive, tolerance)
+        got_facts = passed or self._got_facts(candidate, gold, order_sensitive, tolerance)
         mismatch = None if passed else self._diagnose(candidate, gold, order_sensitive, tolerance)
         raw: dict[str, Any] = {
             "candidate_sql": candidate_sql,
@@ -182,8 +193,62 @@ class ExecutionGroundedSqlGrader:
                     else f"Mismatch ({mismatch.kind}): {mismatch.detail}"
                 ),
                 raw=raw,
-            )
+            ),
+            # The second reading of the same execution: right data, tolerant
+            # shape. Reported beside exact match, never instead of it -- the
+            # explicit metric keeps the composer's stamp off it, and emission
+            # order keeps the strict verdict the one that decides the outcome.
+            Verdict(
+                grader=self.name,
+                grader_version=self.version,
+                metric="got_facts",
+                criterion="correctness",
+                bool_value=got_facts,
+                value=1.0 if got_facts else 0.0,
+                justification=(
+                    "Gold's data is present in the candidate (shape-tolerant)."
+                    if got_facts
+                    else "Gold's data is not present in the candidate, in any column projection."
+                ),
+                raw_output={"exact_match": passed},
+            ),
         ]
+
+    def _got_facts(
+        self,
+        candidate: ResultSet,
+        gold: ResultSet,
+        order_sensitive: bool,
+        tolerance: Tolerance,
+    ) -> bool:
+        """Whether the gold's data is present, allowing extra candidate columns.
+
+        mnemiq's CORRECT_FACTS, computed here so the second metric is beacon's
+        own claim rather than the runner grading itself. The candidate may add
+        context columns but never omit a gold column, extra columns cannot
+        rescue wrong rows, and column order is not meaning -- each projection is
+        also retried with every row's cells in a canonical order.
+        """
+        if len(candidate.rows) != len(gold.rows):
+            return False
+        gold_arity = len(gold.rows[0]) if gold.rows else len(gold.columns)
+        candidate_arity = len(candidate.rows[0]) if candidate.rows else len(candidate.columns)
+        if gold_arity > candidate_arity:
+            return False
+
+        def sort_cells(rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+            return [tuple(sorted(row, key=repr)) for row in rows]
+
+        gold_sorted = sort_cells(gold.rows)
+        for index, keep in enumerate(combinations(range(candidate_arity), gold_arity)):
+            if index >= MAX_PROJECTIONS:
+                return False
+            projected = [tuple(row[i] for i in keep) for row in candidate.rows]
+            if self._compare(projected, gold.rows, order_sensitive, tolerance):
+                return True
+            if self._compare(sort_cells(projected), gold_sorted, order_sensitive, tolerance):
+                return True
+        return False
 
     def _diagnose(
         self,
