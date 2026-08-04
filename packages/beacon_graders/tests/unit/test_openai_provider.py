@@ -1,0 +1,126 @@
+"""OpenAI-compatible judge provider: request shape, parsing, retries."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+import pytest
+from beacon_graders.errors import GraderJudgeError
+from beacon_graders.llm.openai_provider import OpenAICompatibleProvider
+from beacon_graders.llm.provider import JudgeRequest
+
+
+def _provider() -> OpenAICompatibleProvider:
+    return OpenAICompatibleProvider(
+        base_url="https://judge.example/v1", api_key="k", model="m-1"
+    )
+
+
+def _ok_body(text: str = "verdict") -> dict[str, Any]:
+    return {
+        "id": "resp-1",
+        "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 3},
+    }
+
+
+def test_generate_parses_a_chat_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_post(url: str, *, json: Any, headers: Any, timeout: Any) -> httpx.Response:
+        seen["url"] = url
+        seen["json"] = json
+        seen["headers"] = headers
+        return httpx.Response(200, json=_ok_body())
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    response = _provider().generate(
+        JudgeRequest(prompt="judge this", grader_version="v1", system="be strict")
+    )
+
+    assert response.text == "verdict"
+    assert response.tokens_input == 12
+    assert response.tokens_output == 3
+    assert response.model_version == "m-1"
+    assert seen["url"] == "https://judge.example/v1/chat/completions"
+    assert seen["headers"]["Authorization"] == "Bearer k"
+    assert seen["json"]["model"] == "m-1"
+    assert seen["json"]["max_completion_tokens"] == 4096
+    assert [m["role"] for m in seen["json"]["messages"]] == ["system", "user"]
+
+
+def test_legacy_servers_get_the_max_tokens_spelling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 400 naming max_completion_tokens retries once in the legacy dialect."""
+    payloads: list[dict[str, Any]] = []
+
+    def fake_post(url: str, *, json: Any, headers: Any, timeout: Any) -> httpx.Response:
+        payloads.append(json)
+        if "max_completion_tokens" in json:
+            return httpx.Response(
+                400, text="Unrecognized request argument: max_completion_tokens"
+            )
+        return httpx.Response(200, json=_ok_body("ok"))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1"))
+
+    assert response.text == "ok"
+    assert "max_tokens" in payloads[-1]
+
+
+def test_a_non_retryable_status_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+
+    def fake_post(url: str, **_: Any) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(401, text="bad key")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    with pytest.raises(GraderJudgeError, match="HTTP 401"):
+        _provider().generate(JudgeRequest(prompt="p", grader_version="v1"))
+    assert len(calls) == 1
+
+
+def test_a_retryable_status_is_retried_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [httpx.Response(503, text="busy"), httpx.Response(200, json=_ok_body("ok"))]
+
+    def fake_post(url: str, **_: Any) -> httpx.Response:
+        return responses.pop(0)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1"))
+
+    assert response.text == "ok"
+
+
+def test_exhausted_retries_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_post(url: str, **_: Any) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    with pytest.raises(GraderJudgeError, match="after retries"):
+        _provider().generate(JudgeRequest(prompt="p", grader_version="v1"))
+
+
+def test_an_empty_choices_list_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        httpx, "post", lambda url, **_: httpx.Response(200, json={"choices": []})
+    )
+
+    with pytest.raises(GraderJudgeError, match="Empty response"):
+        _provider().generate(JudgeRequest(prompt="p", grader_version="v1"))
+
+
+def test_missing_configuration_is_refused() -> None:
+    with pytest.raises(GraderJudgeError, match="required"):
+        OpenAICompatibleProvider(base_url="", api_key="k", model="m")

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, cast
 import click
 from beacon_graders.graders.dabstep_answer_matcher import DabstepAnswerMatcher
 from beacon_graders.graders.hierarchical_rubric import HierarchicalRubricGrader
-from beacon_graders.llm.anthropic_provider import AnthropicLLMProvider
+from beacon_graders.llm.openai_provider import OpenAICompatibleProvider
 from beacon_graders.llm.provider import JudgeCache
 from beacon_storage.db import make_engine, make_session_factory
 from beacon_storage.models.runs import HarnessMode
@@ -276,10 +276,14 @@ def _load_items(path: Path) -> list[EvalItem]:
 
 
 def _judge_cache() -> JudgeCache | None:
-    """Return an LLM judge cache when an API key is configured, else None."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    """Return an LLM judge cache when the judge endpoint is fully configured."""
+    base_url = os.environ.get("BEACON_JUDGE_BASE_URL")
+    api_key = os.environ.get("BEACON_JUDGE_API_KEY")
+    model = os.environ.get("BEACON_JUDGE_MODEL")
+    if not (base_url and api_key and model):
         return None
-    return JudgeCache(provider=cast("LLMProvider", AnthropicLLMProvider()))
+    provider = OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model)
+    return JudgeCache(provider=cast("LLMProvider", provider))
 
 
 def _default_graders() -> list[Grader]:

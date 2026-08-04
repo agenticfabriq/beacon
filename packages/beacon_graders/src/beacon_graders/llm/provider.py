@@ -13,7 +13,9 @@ from typing import Any, Protocol, runtime_checkable
 class JudgeRequest:
     prompt: str
     grader_version: str
-    max_tokens: int = 1024
+    # Reasoning models spend completion tokens before emitting text, so the
+    # budget covers thinking + the JSON verdict, not just the verdict.
+    max_tokens: int = 4096
     system: str | None = None
 
 

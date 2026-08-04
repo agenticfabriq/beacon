@@ -159,6 +159,16 @@ corpus-qualified: two benchmarks can both number their cases `bird-0`, `bird-1`,
 and loading one against the other's gold produces a completely plausible-looking
 run over unrelated questions.
 
+## Configuration
+
+Everything reads environment variables (prefix `BEACON_`), and the API also
+loads a gitignored `.env` at the repo root — `cp .env.example .env` and fill
+it in. The LLM judge (narrative and rubric graders only; never the SQL path)
+activates when all three of `BEACON_JUDGE_BASE_URL`, `BEACON_JUDGE_API_KEY`
+and `BEACON_JUDGE_MODEL` are set, and speaks the OpenAI chat-completions
+dialect. The endpoint and key are deployment configuration: they live in
+`.env` and never in code or committed files.
+
 ## Background workers
 
 ```bash

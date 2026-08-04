@@ -23,9 +23,6 @@ class WorkerConfig(BaseSettings):
     retention_interval_seconds: int = 86400
     retention_days: int = 90
 
-    llm_provider: str = "anthropic"
-    embedding_provider: str = "anthropic"
-
     model_config = SettingsConfigDict(env_prefix="BEACON_WORKER_", case_sensitive=False)
 
     @field_validator("database_url")

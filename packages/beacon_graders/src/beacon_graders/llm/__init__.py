@@ -1,4 +1,4 @@
-from beacon_graders.llm.anthropic_provider import AnthropicLLMProvider
+from beacon_graders.llm.openai_provider import OpenAICompatibleProvider
 from beacon_graders.llm.prompts import (
     FREE_TEXT_REFERENCE_PROMPT,
     HIERARCHICAL_RUBRIC_PROMPT,
@@ -7,12 +7,12 @@ from beacon_graders.llm.prompts import (
 from beacon_graders.llm.provider import JudgeCache, JudgeRequest, JudgeResponse, LLMProvider
 
 __all__ = [
-    "AnthropicLLMProvider",
     "FREE_TEXT_REFERENCE_PROMPT",
     "HIERARCHICAL_RUBRIC_PROMPT",
     "JudgeCache",
     "JudgeRequest",
     "JudgeResponse",
     "LLMProvider",
+    "OpenAICompatibleProvider",
     "extract_json",
 ]

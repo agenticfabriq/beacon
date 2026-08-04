@@ -30,8 +30,20 @@ class ApiConfig(BaseSettings):
         default=False,
         validation_alias=AliasChoices("BEACON_API_COOKIES_SECURE", "BEACON_COOKIES_SECURE"),
     )
+    # LLM judge (narrative/rubric graders only; never the SQL path). All three
+    # must be set for the judge to activate. The endpoint is deployment
+    # configuration -- it never appears in code or committed files.
+    judge_base_url: str = ""
+    judge_api_key: str = ""
+    judge_model: str = ""
 
-    model_config = SettingsConfigDict(env_prefix="BEACON_", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_prefix="BEACON_",
+        case_sensitive=False,
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @field_validator("database_url")
     @classmethod

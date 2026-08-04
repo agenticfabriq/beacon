@@ -6,7 +6,7 @@ Protocol with a layered prompt-then-invoke loop driven by a pluggable
 the heavy LangChain / LlamaIndex / Spider-Agent-Lite frameworks as runtime
 dependencies, nor make hidden HTTP calls. Wire a real
 :class:`beacon_graders.llm.provider.LLMProvider` (e.g.
-:class:`~beacon_graders.llm.anthropic_provider.AnthropicProvider`) at
+:class:`~beacon_graders.llm.openai_provider.OpenAICompatibleProvider`) at
 construction time and the SUT will fan out a layered call per item.
 
 To plug an actual framework (LangChain SQLChain, LlamaIndex
