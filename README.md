@@ -4,12 +4,15 @@ Beacon tracks how well database-grounded data agents answer questions, and why
 one configuration answers better than another.
 
 It is a **tracker, not an executor**. You register a run, execute it on your own
-hardware with your own runner, and push the outputs back. Beacon grades them
-against gold it holds, keeps the record, and lets you compare runs — including
-down to a single question, with your SQL and its result beside the gold's.
+hardware with your own runner, and push the outputs back — for SQL suites, the
+rows your engine returned. Beacon grades them against gold answers it holds
+(materialized once at import), keeps the record, and lets you compare runs —
+including down to a single question, with your SQL and its result beside the
+gold's.
 
 The system under test never grades its own work. What you push is `output`; the
-verdict is computed here.
+verdict is computed here, by comparison — beacon executes nothing to grade, so
+no benchmark database is needed at runtime.
 
 ## The flow
 
@@ -22,8 +25,10 @@ verdict is computed here.
      elsewhere       beacon is not involved and does not want to be
                                 │
   3. push            POST /v1/runs/{run_id}/results   (per item)
-     outputs         POST /v1/runs/{run_id}/complete
-                     beacon grades each one on arrival
+     outputs         output carries your SQL and the rows your engine
+                     returned; beacon compares them against its gold rows
+                     on arrival — no execution, no dialect
+                     POST /v1/runs/{run_id}/complete
                                 │
   4. read            GET  /v1/runs/{run_id}/results          which went which way
      the answer      GET  /v1/runs/{run_id}/results/{item}   yours beside gold
@@ -48,6 +53,13 @@ Four things that shape the whole design:
 - **A bad run is invalidated, never deleted.** The row and its results stay, with
   who retired it and why. A tracker whose operator can erase inconvenient results
   cannot be cited.
+- **SQL is evidence, never scored.** Two different queries returning the right
+  rows are both right answers. The SQL string is kept for the drill-down; the
+  runner's `portable_to_gold_engine` flag feeds the optional BIRD-comparable
+  `EX*` column; `beacon audit spot-check` can re-execute a sample on demand.
+- **Beacon owns its grading semantics.** Tolerance, canonicalization and the
+  got-facts projection rule are beacon's own; a runner's self-reported numbers
+  may sit at a different level, and the disagreement table names why.
 
 ## Requirements
 
@@ -125,13 +137,17 @@ talks to the API using the context from `beacon login`.
 | `beacon suites create` | Create a benchmark — the set of questions a run is scored over |
 | `beacon eval run` | Register a run for a solution and suite |
 | `beacon attribution sweep` \| `show` | Leave-one-out layer sweep, and its latest snapshot |
+| `beacon audit spot-check` | Re-execute a sample of a run's pushed SQL on a named engine; report divergence |
 | `beacon benchmarks list` \| `download` \| `ingest` | Benchmark adapters and their data |
 | `beacon gold import` | Import approved gold from the semantic layer |
 | `beacon demo seed` | Demo fixtures and API keys |
 
 Beacon does not author gold. Public corpora are ingested; customer gold is
 curated, reviewed and given a per-question tolerance in the semantic layer, and
-arrives here as an approved export. `beacon gold import` prints what it refused
+arrives here as an approved export. After import, run
+`scripts/materialize_gold.py` once to execute each item's gold SQL against the
+reference engine and store the answer rows — the one-time step that lets
+grading run forever after without any database. `beacon gold import` prints what it refused
 as well as what it took — a package that imports nothing because everything is
 still in review should say so, not look like a no-op.
 
@@ -146,10 +162,12 @@ uv run python scripts/load_eval_reports.py \
   --manifest reports.json --reports-dir path/to/reports
 ```
 
-Beacon re-grades everything, so each load doubles as a conformance check between
-two independent graders — the disagreement table it prints is the reason to run
-it. The manifest supplies model and config per file, because nothing in a report
-says which model produced it.
+Beacon re-grades everything from the rows the report carries (`engine_rows` +
+the true count), so each load doubles as a conformance check between two
+independent graders — the disagreement table it prints is the reason to run it.
+The manifest supplies model, config and engine per file, because nothing in a
+report says which model or engine produced it; the runner's portability flag
+rides along and feeds `EX*`.
 
 It refuses a report whose cases belong to another corpus. Case ids are not
 corpus-qualified: two benchmarks can both number their cases `bird-0`, `bird-1`,
@@ -160,11 +178,21 @@ run over unrelated questions.
 
 Everything reads environment variables (prefix `BEACON_`), and the API also
 loads a gitignored `.env` at the repo root — `cp .env.example .env` and fill
-it in. The LLM judge (narrative and rubric graders only; never the SQL path)
-activates when all three of `BEACON_JUDGE_BASE_URL`, `BEACON_JUDGE_API_KEY`
-and `BEACON_JUDGE_MODEL` are set, and speaks the OpenAI chat-completions
-dialect. The endpoint and key are deployment configuration: they live in
-`.env` and never in code or committed files.
+it in.
+
+| Variable | What it configures |
+|---|---|
+| `DATABASE_URL` / `BEACON_DATABASE_URL` | The tracker's own Postgres |
+| `BEACON_OBJECT_STORAGE` | Trace object storage (`local:///...`) |
+| `BEACON_JWT_SIGNING_KEY`, `BEACON_OIDC_*` | Auth |
+| `BEACON_API_KEY_PREFIX` | Prefix minted keys carry |
+| `BEACON_JUDGE_BASE_URL` / `_API_KEY` / `_MODEL` | The LLM judge endpoint (OpenAI chat-completions dialect) |
+
+The LLM judge serves narrative and rubric graders only — never the SQL path —
+and activates only when all three `BEACON_JUDGE_*` variables are set. The
+endpoint and key are deployment configuration: they live in `.env` and never
+in code or committed files. Judge configuration is grader-side and never
+enters a run's config identity.
 
 ## Background workers
 
@@ -209,7 +237,7 @@ change has to be argued.
 | `beacon_storage` | SQLAlchemy models, repositories, RLS helpers, Alembic migrations |
 | `beacon_iam` | Users, memberships, roles, permissions, OIDC and API-key auth |
 | `beacon_runner` | SUT protocol, harness modes, run orchestration, result persistence |
-| `beacon_graders` | Grader protocol, shipped graders, comparison tolerance |
+| `beacon_graders` | Grader protocol, result-set comparison core, shipped graders, tolerance |
 | `beacon_ablation` | Leave-one-out attribution and the statistics behind it |
 | `beacon_registry` | Suites and item selectors |
 | `beacon_benchmarks` | Benchmark adapters, and the importer for curated gold |
