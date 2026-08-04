@@ -27,7 +27,7 @@
   .app{display:grid;grid-template-columns:196px 1fr;min-height:100vh}
   .app.hidden,.screen.hidden{display:none}
   .hidden{display:none}
-  .rail{border-right:1px solid var(--line);background:var(--surface);padding:14px 10px;display:flex;flex-direction:column;gap:14px}
+  .rail{border-right:1px solid var(--line);background:var(--surface);padding:14px 10px;display:flex;flex-direction:column;gap:14px;position:sticky;top:0;height:100vh;overflow-y:auto}
   .brand{display:flex;align-items:baseline;gap:6px;padding:0 6px 2px}
   .brand b{font-size:14px;font-weight:700;letter-spacing:-.01em}
   .brand span{font-size:9px;color:var(--ink-3);letter-spacing:.1em;text-transform:uppercase}
@@ -41,7 +41,7 @@
   .nav[aria-current="page"]{background:var(--accent-soft);color:var(--accent);font-weight:650}
   .nav i{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.5;flex:none}
   .rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px}
-  .whoami{border-top:1px solid var(--line-soft);padding-top:9px}
+  .whoami{border-top:1px solid var(--line-soft);padding-top:9px;margin-top:auto}
   .whoami .u{font-size:11px;color:var(--ink-2);padding:0 8px;overflow:hidden;text-overflow:ellipsis}
 
   main{padding:20px 26px 60px;min-width:0}
