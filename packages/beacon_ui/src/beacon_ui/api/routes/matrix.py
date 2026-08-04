@@ -69,6 +69,7 @@ def results_matrix(
         Run.suite_id == suite_id,
         Run.invalidated_at.is_(None),
     ]
+    engine_expr = sa.func.coalesce(Run.config["engine"].astext, "")
 
     stmt = (
         sa.select(
@@ -78,6 +79,7 @@ def results_matrix(
             Run.model_id,
             Run.config_label,
             Run.config_digest,
+            engine_expr.label("engine"),
             sa.func.count(sa.func.distinct(Run.id)).label("n_runs"),
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome.in_(_GRADED))
@@ -94,6 +96,19 @@ def results_matrix(
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome == "ERROR")
             .label("n_errors"),
+            # BIRD-comparable numerator: a pass whose SQL the runner verified
+            # against the gold's engine. Only meaningful when the runner
+            # supplied the flag at all -- see n_portability_flagged.
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(
+                Result.outcome == "PASS",
+                sa.func.coalesce(Result.output["portable_to_gold_engine"].astext, "true")
+                != "false",
+            )
+            .label("n_pass_target_engine"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(Result.output["portable_to_gold_engine"].astext.isnot(None))
+            .label("n_portability_flagged"),
             # The tolerant reading of the same execution. DISTINCT because the
             # verdict join is otherwise able to multiply outcome counts; the
             # got_facts join is at most one row per result, but the guarantee
@@ -121,6 +136,7 @@ def results_matrix(
             Run.model_id,
             Run.config_label,
             Run.config_digest,
+            engine_expr,
         )
     )
     if difficulty is not None:
@@ -139,10 +155,16 @@ def results_matrix(
                 model_id=record.model_id,
                 config_label=record.config_label,
                 config_digest=record.config_digest,
+                engine=str(record.engine) or None,
                 n_runs=int(record.n_runs),
                 n_graded=graded,
                 n_errors=int(record.n_errors),
                 ex_rate=_rate(int(record.n_pass), graded),
+                ex_target_engine_rate=(
+                    _rate(int(record.n_pass_target_engine), graded)
+                    if int(record.n_portability_flagged)
+                    else None
+                ),
                 got_facts_rate=(
                     _rate(int(record.n_got_facts), graded) if int(record.n_got_facts) else None
                 ),

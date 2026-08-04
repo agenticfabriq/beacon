@@ -53,9 +53,10 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
     loudly -- composing anyway would mark the item ERROR and store it as
     though the solution had failed.
     """
-    if body.output_kind != "sql" or body.deferred:
-        # Answer-and-friends grade by the matcher; a deferral never needs
-        # rows -- the composer scores it DEFER before any grader runs.
+    if body.output_kind != "sql" or body.deferred or body.error:
+        # Answer-and-friends grade by the matcher; deferrals and errored
+        # attempts never need rows -- the composer scores them DEFER/ERROR
+        # before any grader runs.
         return VerdictComposer(graders=[DabstepAnswerMatcher()])
 
     gold = item.ground_truth or {}

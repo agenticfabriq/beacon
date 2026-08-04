@@ -72,7 +72,9 @@ def test_malformed_json_names_its_line() -> None:
 
 def test_the_payload_carries_outputs_and_never_a_verdict() -> None:
     """Beacon grades server-side; a loader that shipped verdicts would break that."""
-    payload = ingest_payload(_record(), item_id="0197a0b1-0000-7000-8000-000000000000")
+    payload = ingest_payload(
+        _record(), item_id="0197a0b1-0000-7000-8000-000000000000", engine="duckdb"
+    )
 
     assert payload["output"]["sql"] == "SELECT 1"
     assert payload["output"]["reported_outcome"] == "correct"
@@ -82,14 +84,16 @@ def test_the_payload_carries_outputs_and_never_a_verdict() -> None:
 
 def test_a_deferral_is_flagged_rather_than_pushed_as_an_empty_answer() -> None:
     """Without the flag an empty SQL grades FAIL, which is the whole of B16."""
-    payload = ingest_payload(_record(outcome="deferred_wrongly", sql=""), item_id="i")
+    payload = ingest_payload(
+        _record(outcome="deferred_wrongly", sql=""), item_id="i", engine="duckdb"
+    )
 
     assert payload["deferred"] is True
     assert payload["error"] is None
 
 
 def test_an_errored_item_carries_an_error_rather_than_a_deferral() -> None:
-    payload = ingest_payload(_record(outcome="error"), item_id="i")
+    payload = ingest_payload(_record(outcome="error"), item_id="i", engine="duckdb")
 
     assert payload["deferred"] is False
     assert payload["error"] is not None
@@ -97,7 +101,7 @@ def test_an_errored_item_carries_an_error_rather_than_a_deferral() -> None:
 
 def test_per_item_tokens_are_zero_because_the_format_only_has_a_run_total() -> None:
     """Dividing a run total across items would invent per-item cost data."""
-    payload = ingest_payload(_record(), item_id="i")
+    payload = ingest_payload(_record(), item_id="i", engine="duckdb")
 
     assert payload["tokens_input"] == 0
     assert payload["tokens_output"] == 0
@@ -223,23 +227,28 @@ def test_a_record_with_no_db_id_cannot_be_checked_and_is_not_refused() -> None:
 def test_a_correct_refusal_is_still_a_deferral_on_the_wire() -> None:
     """ACME-style suites have unanswerable questions; refusing one is mnemiq's
     success case, and pushing it as an empty answer would grade it FAIL."""
-    payload = ingest_payload(_record(outcome="deferred_correctly", sql=""), item_id="i")
+    payload = ingest_payload(
+        _record(outcome="deferred_correctly", sql=""), item_id="i", engine="duckdb"
+    )
 
     assert payload["deferred"] is True
 
 
-def test_an_answer_the_runner_knows_is_unportable_is_expected_to_fail_here() -> None:
-    """Beacon executes on the gold's engine, so this is agreement, not a grader
-    disagreement -- counting it as one buries the table in a known cause."""
+def test_an_unportable_answer_no_longer_flips_the_expectation() -> None:
+    """Beacon grades the runner's own rows now, so an unportable-but-right
+    answer is expected to PASS; portability is a facet, not a verdict."""
     record = _record(outcome="correct", portable_to_gold_engine=False)
     comparison = Comparison()
 
-    comparison.record(record, "FAIL")
+    comparison.record(record, "PASS")
 
     assert comparison.agreed == 1
 
 
 def test_portability_rides_along_in_the_output() -> None:
-    payload = ingest_payload(_record(portable_to_gold_engine=False), item_id="i")
+    payload = ingest_payload(
+        _record(portable_to_gold_engine=False), item_id="i", engine="duckdb"
+    )
 
-    assert payload["output"]["reported_portable"] is False
+    assert payload["output"]["portable_to_gold_engine"] is False
+    assert payload["output"]["engine"] == "duckdb"

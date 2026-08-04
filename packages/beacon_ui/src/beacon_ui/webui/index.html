@@ -199,8 +199,10 @@
       <div class="tw"><table>
         <thead><tr>
           <th class="sort" data-sort="system">System</th><th class="sort" data-sort="model">Model</th>
-          <th class="sort" data-sort="config">Config</th><th class="num">runs</th><th class="num">n</th>
+          <th class="sort" data-sort="config">Config</th><th>Engine</th>
+          <th class="num">runs</th><th class="num">n</th>
           <th class="num sort" data-sort="ex_rate">EX</th>
+          <th class="num sort" data-sort="ex_target_engine_rate" title="BIRD-comparable: passes whose SQL the runner verified on the gold engine">EX*</th>
           <th class="num sort" data-sort="got_facts_rate">got-facts</th>
           <th class="num sort" data-sort="defer_rate">deferred</th>
           <th class="num sort" data-sort="wrong_rate">wrong</th>
@@ -537,8 +539,10 @@ function renderMatrixRows() {
       <td>${esc(row.solution_name)} <span class="dim">${esc(row.solution_version)}</span></td>
       <td>${esc(row.model_id || "")}</td>
       <td class="cfgcell">${esc(row.config_label || "")}</td>
+      <td class="dim">${esc(row.engine || "")}</td>
       <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
       <td class="num ex">${pct(row.ex_rate)}</td>
+      <td class="num dim">${pct(row.ex_target_engine_rate)}</td>
       <td class="num dim">${pct(row.got_facts_rate)}</td>
       <td class="num def">${pct(row.defer_rate)}</td>
       <td class="num wr">${pct(row.wrong_rate)}</td>
@@ -546,7 +550,7 @@ function renderMatrixRows() {
       <td class="num dim">${row.median_tokens === null ? "–" : Math.round(row.median_tokens)}</td>
       <td class="num dim">${row.median_runtime_ms === null ? "–" : Math.round(row.median_runtime_ms) + "ms"}</td>
       <td class="dim" style="font-size:11px">open →</td></tr>`).join("")
-    : '<tr><td colspan="13"><div class="empty">No configuration matches these filters.</div></td></tr>';
+    : '<tr><td colspan="15"><div class="empty">No configuration matches these filters.</div></td></tr>';
   document.getElementById("matrix-rows").dataset.payload = JSON.stringify(rows);
 }
 

@@ -23,10 +23,15 @@ class MatrixRowOut(BaseModel):
     model_id: str | None = None
     config_label: str | None = None
     config_digest: str | None = None
+    # The engine the runner declared it executed against; a facet, not a verdict.
+    engine: str | None = None
     n_runs: int
     n_graded: int
     n_errors: int
     ex_rate: float | None = None
+    # BIRD-comparable exact match: passes whose SQL the runner verified against
+    # the gold's engine. None unless the runner supplied portability flags.
+    ex_target_engine_rate: float | None = None
     # The tolerant reading: right data, shape-tolerant (mnemiq's CORRECT_FACTS,
     # computed by beacon's own grader). None when no verdict carries the metric
     # -- runs graded before the grader emitted it -- which must not read as 0%.

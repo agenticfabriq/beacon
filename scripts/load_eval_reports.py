@@ -90,6 +90,10 @@ class ReportRecord:
     # Whether the SQL also runs on the gold's engine. None on single-engine
     # reports and reports written before the runner recorded it.
     portable_to_gold_engine: bool | None = None
+    # The rows the runner's engine returned: a bounded preview (mnemiq keeps
+    # 100) plus the true count. What the answer-authority grader grades.
+    engine_rows: list[Any] | None = None
+    engine_row_count: int | None = None
 
     @property
     def deferred(self) -> bool:
@@ -115,6 +119,8 @@ class ReportSpec:
     config_label: str
     layers: dict[str, bool] = field(default_factory=dict)
     prompt_version: str = "v0"
+    # The engine the runner executed against; a facet, never a verdict input.
+    engine: str = "duckdb"
 
 
 @dataclass
@@ -139,17 +145,10 @@ class Comparison:
     def expected(record: ReportRecord) -> str | None:
         """What beacon should say about this record.
 
-        Beacon executes the candidate on the gold's own engine, so an answer the
-        runner already knows is unportable will fail here even when the runner
-        scored it correct on its own executor. That is agreement about the
-        facts, not a grader disagreement, and counting it as one buries the
-        table in a known cause.
+        Beacon grades the rows the runner's engine returned, so portability no
+        longer moves the verdict -- an unportable-but-right answer passes here
+        and is BIRD-comparable only under ex_target_engine.
         """
-        if record.portable_to_gold_engine is False and record.outcome in (
-            "correct",
-            "correct_facts",
-        ):
-            return "FAIL"
         return OUTCOME_MEANING.get(record.outcome)
 
     def report_lines(self) -> list[str]:
@@ -187,6 +186,14 @@ def parse_report(content: str) -> list[ReportRecord]:
                     if isinstance(raw.get("portable_to_gold_engine"), bool)
                     else None
                 ),
+                engine_rows=(
+                    list(raw["engine_rows"]) if isinstance(raw.get("engine_rows"), list) else None
+                ),
+                engine_row_count=(
+                    int(raw["engine_row_count"])
+                    if raw.get("engine_row_count") is not None
+                    else None
+                ),
             )
         )
     return records
@@ -201,23 +208,43 @@ def read_meta(report_path: Path) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def ingest_payload(record: ReportRecord, *, item_id: str) -> dict[str, Any]:
+def _json_safe(value: Any) -> Any:
+    """Make a pushed cell JSON-compliant. Non-finite floats become strings:
+    an infinite answer is wrong on comparison, but it must not break the push."""
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def ingest_payload(record: ReportRecord, *, item_id: str, engine: str) -> dict[str, Any]:
     """Build the ingestion body for one record.
 
-    Carries outputs, never verdicts: ``reported_outcome`` rides along as data so
-    the two graders can be compared, and beacon still decides the outcome.
+    Carries outputs, never verdicts: the rows the runner's engine returned are
+    the evidence beacon grades; ``reported_outcome`` rides along as data so the
+    two graders can be compared, and beacon still decides the outcome.
     """
+    output: dict[str, Any] = {
+        "sql": record.sql,
+        "answer": record.answer,
+        "engine": engine,
+        "reported_outcome": record.outcome,
+        "portable_to_gold_engine": record.portable_to_gold_engine,
+    }
+    if record.engine_rows is not None:
+        output["rows"] = _json_safe(record.engine_rows)
+        output["row_count"] = (
+            record.engine_row_count
+            if record.engine_row_count is not None
+            else len(record.engine_rows)
+        )
     return {
         "item_id": item_id,
         "attempt_idx": 0,
-        "output": {
-            "sql": record.sql,
-            "answer": record.answer,
-            "reported_outcome": record.outcome,
-            # Ride-along evidence: which answers the runner already knows are
-            # unportable, so a cross-grader diff can separate dialect from wrongness.
-            "reported_portable": record.portable_to_gold_engine,
-        },
+        "output": output,
         "output_kind": "sql",
         # A run-level token total cannot be divided across items honestly.
         "tokens_input": 0,
@@ -234,6 +261,7 @@ def run_config(spec: ReportSpec, meta: Mapping[str, Any]) -> dict[str, Any]:
         "model_id": spec.model,
         "prompt_version": spec.prompt_version,
         "layers_enabled": dict(spec.layers),
+        "engine": spec.engine,
         "secret_refs": {},
         "extras": {
             "config_label": spec.config_label,
@@ -265,6 +293,7 @@ def load_manifest(path: Path) -> list[ReportSpec]:
                 config_label=str(entry["config_label"]),
                 layers={str(k): bool(v) for k, v in dict(raw_layers).items()},
                 prompt_version=str(entry.get("prompt_version", "v0")),
+                engine=str(entry.get("engine", "duckdb")),
             )
         )
     return specs
@@ -403,7 +432,8 @@ def load_one(
         if ref is None:
             comparison.skipped += 1
             continue
-        computed = client.push(run_id, ingest_payload(record, item_id=ref.item_id))
+        payload = ingest_payload(record, item_id=ref.item_id, engine=spec.engine)
+        computed = client.push(run_id, payload)
         comparison.record(record, computed)
     client.complete(run_id)
     return run_id, comparison
