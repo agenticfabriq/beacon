@@ -155,6 +155,9 @@
       <div class="field"><label for="l-key">API key</label>
         <input id="l-key" type="password" placeholder="bcn_..." autocomplete="off"></div>
       <button class="btn primary wide" id="login-key-btn">Sign in with a key</button>
+      <p class="sub" style="margin-top:6px">A key identifies one person. Yours comes from
+      Settings → Your API keys once signed in — or from a team admin, who can issue one for you
+      from the team roster.</p>
       <div class="or">or</div>
       <div class="field"><label for="l-email">Email</label>
         <input id="l-email" type="text" autocomplete="username"></div>
@@ -315,9 +318,10 @@
       <p class="sub">Configuration, not measurement — nothing here answers a question about how a
       system is doing, so none of it is in the navigation.</p>
       <section><div class="sechead"><h2>Team</h2>
-        <span class="sub" style="margin:0">The team is the access boundary — who can see this data.
-        Benchmarks belong to the team and runs hang off the benchmark; there is nothing in
-        between.</span></div>
+        <span class="sub" style="margin:0">Everything in beacon belongs to exactly one team —
+        benchmarks, runs, results, and the people allowed to see them. Members see their team's
+        data and nothing else; switching team switches the whole workspace. It is the access
+        boundary, not a folder.</span></div>
         <div class="inline">
           <select id="set-team"></select>
         </div>
@@ -333,17 +337,23 @@
         re-declaration is refused. This table lists — it does not author.</span></div>
         <div id="set-systems"></div></section>
       <section><div class="sechead"><h2>Access</h2>
-        <span class="sub" style="margin:0">Who can see this data. Team is the isolation boundary,
-        not a hierarchy level.</span></div>
+        <span class="sub" style="margin:0">Who can see this team's data, and what they may do:
+        a <b>team_member</b> registers runs and pushes results; a <b>team_admin</b> also manages
+        benchmarks, members and the reference pin. Adding an email that has no account yet creates
+        it — then <b>issue key</b> on their row and hand the key over; it is how an invited person
+        signs in for the first time.</span></div>
+        <div id="set-member-key-reveal"></div>
         <div id="set-members"></div>
         <div class="inline" style="margin-top:8px">
           <input type="text" id="set-invite-email" placeholder="teammate@example.com (created if new)">
           <select id="set-invite-role"><option>team_member</option><option>team_admin</option></select>
           <button class="btn" id="set-invite-btn">Add member</button>
         </div></section>
-      <section><div class="sechead"><h2>API keys</h2>
-        <span class="sub" style="margin:0">What a runner sends when it pushes results. Shown once;
-        stored as a hash.</span></div>
+      <section><div class="sechead"><h2>Your API keys</h2>
+        <span class="sub" style="margin:0">A key authenticates <b>you</b> — paste it at the sign-in
+        screen, or set <code>BEACON_API_KEY</code> for a runner pushing results as you. Shown once;
+        stored as a hash. To give a teammate their first key, use <b>issue key</b> on their row in
+        Access above.</span></div>
         <div id="set-key-reveal"></div>
         <div class="inline" style="margin-bottom:8px">
           <input type="text" id="set-key-label" placeholder="label, e.g. mnemiq-ci">
@@ -372,6 +382,7 @@ const ENDPOINTS = {
   members:      ["GET",    "/v1/teams/{team_id}/members"],
   addMember:    ["POST",   "/v1/teams/{team_id}/members"],
   removeMember: ["DELETE", "/v1/teams/{team_id}/members/{user_id}"],
+  issueKey:     ["POST",   "/v1/teams/{team_id}/members/{user_id}/api-keys"],
   teamSystems:  ["GET",    "/v1/teams/{team_id}/solutions"],
   createTeam:   ["POST",   "/v1/teams"],
   suites:       ["GET",    "/v1/teams/{team_id}/suites"],
@@ -858,7 +869,8 @@ const loadSettings = guard(async () => {
   document.getElementById("set-members").innerHTML = members.length
     ? `<div class="tw"><table><thead><tr><th>Member</th><th>Role</th><th></th></tr></thead><tbody>` +
       members.map((member) => `<tr><td>${esc(member.email)}</td><td class="dim">${esc(member.role)}</td>
-        <td><button class="btn danger" data-remove-member="${esc(member.user_id)}">remove</button></td></tr>`).join("") +
+        <td><button class="btn" data-issue-key="${esc(member.user_id)}" data-issue-email="${esc(member.email)}">issue key</button>
+        <button class="btn danger" data-remove-member="${esc(member.user_id)}">remove</button></td></tr>`).join("") +
       "</tbody></table></div>"
     : '<div class="empty">No members.</div>';
 
@@ -915,6 +927,24 @@ document.addEventListener("click", (event) => {
       await api("patchSuite", { suite_id: S.suiteId }, { body: { baseline_run_id: pinId } });
       S.baselineRunId = pinId;
       loadRuns();
+    })();
+    return;
+  }
+  const issueKeyId = withData("issue-key");
+  if (issueKeyId) {
+    const email = t.closest("[data-issue-email]")?.dataset.issueEmail || "member";
+    guard(async () => {
+      const created = await api("issueKey", { team_id: S.teamId, user_id: issueKeyId },
+        { body: { label: `issued-for-${email.split("@")[0]}` } });
+      document.getElementById("set-member-key-reveal").innerHTML =
+        `<div class="reveal"><div class="t"><b>Key for ${esc(email)} — copy it now.</b> It is shown
+         once and stored only as a hash. Hand it over out of band; they paste it at the sign-in
+         screen.</div>
+         <div class="k"><code>${esc(created.api_key)}</code>
+         <button class="btn" id="member-key-dismiss">Done</button></div></div>`;
+      document.getElementById("member-key-dismiss").addEventListener("click", () => {
+        document.getElementById("set-member-key-reveal").innerHTML = "";
+      });
     })();
     return;
   }
