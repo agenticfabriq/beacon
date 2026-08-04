@@ -158,16 +158,10 @@
       <p class="sub" style="margin-top:6px">A key identifies one person. Yours comes from
       Settings → Your API keys once signed in — or from a team admin, who can issue one for you
       from the team roster.</p>
-      <div class="or">or</div>
-      <div class="field"><label for="l-email">Email</label>
-        <input id="l-email" type="text" autocomplete="username"></div>
-      <div class="field"><label for="l-pw">Password</label>
-        <input id="l-pw" type="password" autocomplete="current-password"></div>
-      <button class="btn wide" id="login-pw-btn">Sign in with a password</button>
       <div class="errbar" id="login-err"></div>
     </div>
-    <div class="loginfoot">Signing in with a password issues a fresh API key for this browser.
-    Runners use their own named keys, created in Settings.</div>
+    <div class="loginfoot">Runners use their own named keys, created in Settings — one key per
+    person or process, revocable one at a time.</div>
   </div>
 </div>
 
@@ -376,7 +370,6 @@
  * any entry is not served -- the API-matches-UI audit, automated.
  * ------------------------------------------------------------------ */
 const ENDPOINTS = {
-  login:        ["POST",   "/v1/auth/password/login"],
   me:           ["GET",    "/v1/me"],
   teams:        ["GET",    "/v1/teams"],
   members:      ["GET",    "/v1/teams/{team_id}/members"],
@@ -484,19 +477,6 @@ async function signIn(key) {
 document.getElementById("login-key-btn").addEventListener("click", guard(async () => {
   const key = document.getElementById("l-key").value.trim();
   if (key) await signIn(key).catch((error) => { loginError(error); });
-}));
-document.getElementById("login-pw-btn").addEventListener("click", guard(async () => {
-  const email = document.getElementById("l-email").value.trim();
-  const password = document.getElementById("l-pw").value;
-  try {
-    S.key = "";
-    const response = await fetch(url("login"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, label: "web-ui" }),
-    });
-    if (!response.ok) throw new Error((await response.json()).detail || "login failed");
-    await signIn((await response.json()).api_key);
-  } catch (error) { loginError(error); }
 }));
 function loginError(error) {
   const bar = document.getElementById("login-err");
