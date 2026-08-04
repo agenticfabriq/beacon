@@ -510,8 +510,18 @@ function renderRail() {
 }
 
 /* --------------------------- matrix --------------------------- */
+const NO_BENCH =
+  '<div class="empty">This team has no benchmark yet — create one under Benchmarks.</div>';
+
 const loadMatrix = guard(async () => {
-  if (!S.suiteId) return;
+  if (!S.suiteId) {
+    S.matrixRows = [];
+    document.getElementById("matrix-diff-chips").innerHTML = "";
+    document.getElementById("matrix-count").textContent = "";
+    document.getElementById("matrix-rows").innerHTML = `<tr><td colspan="15">${NO_BENCH}</td></tr>`;
+    document.getElementById("matrix-rows").dataset.payload = "[]";
+    return;
+  }
   // Difficulty re-aggregates the rates, so it is server-side; everything else
   // below is a refinement over the returned rows and stays in the client.
   const body = await api("matrix", { suite_id: S.suiteId },
@@ -630,6 +640,13 @@ const openCell = guard(async (row) => {
 /* ---------------------------- runs ---------------------------- */
 const RUNS_PAGE = 50;
 const loadRuns = guard(async () => {
+  if (!S.suiteId) {
+    document.getElementById("runs-rows").innerHTML = `<tr><td colspan="11">${NO_BENCH}</td></tr>`;
+    document.getElementById("runs-page").textContent = "";
+    document.getElementById("runs-prev").disabled = true;
+    document.getElementById("runs-next").disabled = true;
+    return;
+  }
   const runs = await api("runs", { suite_id: S.suiteId }, { query: {
     limit: RUNS_PAGE, offset: S.runsOffset,
     include_invalidated: S.showInvalidated ? "true" : "" } });
@@ -782,7 +799,14 @@ const openItem = guard(async (runId, itemId) => {
 
 /* -------------------------- questions -------------------------- */
 const loadQuestions = guard(async () => {
-  if (!S.suiteId) return;
+  if (!S.suiteId) {
+    document.getElementById("questions-chips").innerHTML = "";
+    document.getElementById("questions-rows").innerHTML = `<tr><td colspan="7">${NO_BENCH}</td></tr>`;
+    document.getElementById("q-page").textContent = "";
+    document.getElementById("q-prev").disabled = true;
+    document.getElementById("q-next").disabled = true;
+    return;
+  }
   const body = await api("suiteItems", { suite_id: S.suiteId },
     { query: { difficulty: S.questionsDifficulty, source: S.questionsSource,
                limit: Q_PAGE, offset: S.qOffset } });
