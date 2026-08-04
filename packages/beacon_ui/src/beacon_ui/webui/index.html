@@ -429,7 +429,10 @@ async function api(name, params = {}, { query = {}, body } = {}) {
   if (response.status === 401) { signOut(); throw new Error("signed out"); }
   if (!response.ok) {
     let detail = response.statusText;
-    try { detail = (await response.json()).detail || detail; } catch { /* not json */ }
+    try {
+      const body = await response.json();
+      detail = body.detail || body.message || detail;
+    } catch { /* not json */ }
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
   return response.status === 204 ? null : response.json();
