@@ -39,6 +39,16 @@ Two levels, no more: a **team** is the access boundary, a **suite** is the
 benchmark. Runs hang off the benchmark, and each benchmark can pin one run as
 the reference everything else is read against.
 
+The results matrix — one row per system · version · model · config, exact match
+and got-the-facts side by side, with what each row costs:
+
+![The results matrix](docs/screenshots/results-matrix.png)
+
+And the run drill-down — every question graded twice, with your SQL and its
+rows beside gold's, and the mismatch named:
+
+![The run drill-down](docs/screenshots/run-drilldown.png)
+
 Four things that shape the whole design:
 
 - **A deferral is not a failure.** A system that declines to answer scores
