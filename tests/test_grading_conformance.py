@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from beacon_graders.graders.execution_grounded_sql import ExecutionGroundedSqlGrader
+from beacon_graders.comparison import compare_rows
 from beacon_graders.tolerance import Tolerance
 
 CONTRACT = Path(__file__).parent / "conformance" / "grading-conformance-v1.json"
@@ -58,7 +58,6 @@ def test_the_contract_has_not_drifted_from_the_other_repo() -> None:
 @pytest.mark.parametrize("case", _cases(), ids=lambda case: str(case["id"]))
 def test_beacon_agrees_with_the_shared_contract(case: dict[str, Any]) -> None:
     tolerance = _tolerance(case)
-    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type]
 
     if case["kind"] == "number":
         matched = tolerance.numbers_match(float(case["actual"]), float(case["expected"]))
@@ -67,7 +66,7 @@ def test_beacon_agrees_with_the_shared_contract(case: dict[str, Any]) -> None:
     else:
         actual = [tuple(row) for row in case["actual"]]
         expected = [tuple(row) for row in case["expected"]]
-        matched = grader._compare(  # noqa: SLF001
+        matched = compare_rows(
             actual,
             expected,
             not tolerance.row_order_insensitive,

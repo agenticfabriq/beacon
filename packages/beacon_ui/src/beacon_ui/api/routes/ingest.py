@@ -7,11 +7,12 @@ what arrives is `output`, and the verdicts are computed on this side.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from beacon_graders.graders import DabstepAnswerMatcher
+from beacon_graders.composer import VerdictComposer
+from beacon_graders.graders import DabstepAnswerMatcher, ResultSetMatchGrader
 from beacon_graders.types import VerdictOutcome
 from beacon_iam.permissions import Permission
 from beacon_runner.composer_factory import composer_for_suite, graders_for_suite
@@ -31,9 +32,6 @@ from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
 from beacon_ui.api.schemas.ingest import ResultIngestIn, ResultIngestOut, RunCompleteOut
 
-if TYPE_CHECKING:
-    from beacon_graders.composer import VerdictComposer
-
 router = APIRouter(prefix="/v1", tags=["ingest"])
 
 _INGESTABLE_STATUSES = frozenset({RunStatus.PENDING, RunStatus.RUNNING})
@@ -52,6 +50,27 @@ def _engine_for_suite(suite: str) -> sa.Engine | None:
     """Return the benchmark database this suite's graders execute against."""
     url = ApiConfig().benchmark_db_urls.get(suite)
     return sa.create_engine(url, pool_pre_ping=True) if url else None
+
+
+def _answer_authority_applies(item: EvalItem, body: ResultIngestIn) -> bool:
+    """Whether this push grades as rows-against-materialized-gold.
+
+    The answer-authority path needs both halves: the push carries the rows its
+    engine returned, and the item's gold was materialized at import. Either
+    half missing falls back to the execution path (until it is retired).
+    """
+    grader = ResultSetMatchGrader()
+    exec_result = ExecutionResult(
+        output=body.output,
+        output_kind=body.output_kind,
+        trace=_trace_step(body),
+        tokens_input=body.tokens_input,
+        tokens_output=body.tokens_output,
+        runtime_ms=body.runtime_ms,
+        error=body.error,
+        deferred=body.deferred,
+    )
+    return grader.applicable(item, exec_result)
 
 
 def _composer_for(suite: str) -> VerdictComposer:
@@ -206,7 +225,12 @@ def ingest_result(
         deferred=body.deferred,
     )
 
-    composer = _composer_for(run.suite)
+    if _answer_authority_applies(item, body):
+        # The push carries its engine's rows and the gold is materialized:
+        # grade by comparison, no benchmark database involved.
+        composer = VerdictComposer(graders=[ResultSetMatchGrader()])
+    else:
+        composer = _composer_for(run.suite)
     try:
         verdicts, outcome = composer.compose(item, exec_result)
     except Exception as exc:  # noqa: BLE001 - a grader fault is not the pusher's fault

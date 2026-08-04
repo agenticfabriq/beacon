@@ -1,0 +1,198 @@
+"""Answer-authority ingestion: pushed rows grade against materialized gold.
+
+No benchmark database is configured in these tests -- that is the point. The
+push carries the rows the runner's engine returned; the item's gold carries
+rows materialized at import; grading is pure comparison.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Protocol
+from uuid import UUID  # noqa: TC003
+
+import pytest
+from beacon_storage.models.eval_items import EvalItemTier
+from beacon_storage.models.runs import HarnessMode
+from beacon_storage.repository.eval_items import EvalItemRepo
+from beacon_storage.repository.runs import RunRepo
+from beacon_storage.repository.solutions import SolutionRepo
+from beacon_storage.repository.suites import SuiteRepo
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+pytestmark = pytest.mark.integration
+
+SUITE = "rows_authority_v1"
+
+
+class _World(Protocol):
+    acme_team_id: UUID
+    alice_id: UUID
+    alice_key: str
+
+
+def _seed(session: Session, world: _World) -> tuple[str, str]:
+    """A run awaiting results, plus one SQL item with materialized gold."""
+    solution = SolutionRepo(session).create(
+        team_id=world.acme_team_id,
+        solution_id="rows-sut",
+        version="0.1",
+        owner_team=world.acme_team_id,
+        summary="",
+        supported_modes=["EVAL"],
+        layers=[],
+        created_by=world.alice_id,
+    )
+    item = EvalItemRepo(session).create(
+        tier=EvalItemTier.HUMAN_VERIFIED,
+        suite=SUITE,
+        team_id=world.acme_team_id,
+        dataset_version="v1",
+        item_input={"question": "monthly totals?"},
+        gold_answer={
+            "sql": "SELECT month, total FROM sales",
+            "columns": ["month", "total"],
+            "rows": [["01", 10.0], ["02", 20.0]],
+            "row_count": 2,
+        },
+        item_metadata={},
+        created_by=world.alice_id,
+    )
+    suite = SuiteRepo(session).create(
+        team_id=world.acme_team_id,
+        name=SUITE,
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=world.alice_id,
+    )
+    run = RunRepo(session).create(
+        team_id=world.acme_team_id,
+        suite_id=suite.id,
+        solution_id=solution.id,
+        suite=SUITE,
+        dataset_version="v1",
+        mode=HarnessMode.EVAL,
+        pass_idx=0,
+        config={},
+        created_by=world.alice_id,
+    )
+    session.commit()
+    return str(run.id), str(item.item_id)
+
+
+def _push(
+    api_client: TestClient,
+    world: _World,
+    run_id: str,
+    item_id: str,
+    rows: list[list[Any]],
+    **over: Any,
+) -> Any:
+    output: dict[str, Any] = {
+        "sql": "SELECT month, SUM(v) AS total FROM sales GROUP BY month",
+        "columns": ["month", "total"],
+        "rows": rows,
+        "engine": "duckdb",
+    }
+    output.update(over.pop("output_over", {}))
+    body: dict[str, Any] = {
+        "item_id": item_id,
+        "attempt_idx": 0,
+        "output": output,
+        "output_kind": "sql",
+        "tokens_input": 10,
+        "tokens_output": 5,
+        "runtime_ms": 100,
+    }
+    body.update(over)
+    return api_client.post(
+        f"/v1/runs/{run_id}/results",
+        headers={"X-API-Key": world.alice_key},
+        json=body,
+    )
+
+
+def test_matching_rows_grade_pass_without_a_benchmark_db(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    run_id, item_id = _seed(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [["02", 20.0], ["01", 10.0]])
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "PASS"
+
+
+def test_wrong_rows_grade_fail_with_named_mismatch(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    run_id, item_id = _seed(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [["01", 10.0], ["02", 99.0]])
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "FAIL"
+
+    detail = api_client.get(
+        f"/v1/runs/{run_id}/results/{item_id}",
+        headers={"X-API-Key": world.alice_key},
+    ).json()
+    evidence = detail["verdicts"][0]["evidence"]
+    assert evidence["mismatch"]["kind"] == "values"
+    assert evidence["engine"] == "duckdb"
+
+
+def test_the_grader_is_result_set_match_and_emits_got_facts(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    run_id, item_id = _seed(session, world)
+    _push(
+        api_client,
+        world,
+        run_id,
+        item_id,
+        [["01", 10.0, "extra"], ["02", 20.0, "extra"]],
+        output_over={"columns": ["month", "total", "note"]},
+    )
+
+    detail = api_client.get(
+        f"/v1/runs/{run_id}/results/{item_id}",
+        headers={"X-API-Key": world.alice_key},
+    ).json()
+
+    graders = {v["grader"] for v in detail["verdicts"]}
+    assert graders == {"result_set_match"}
+    by_metric = {v.get("metric"): v for v in detail["verdicts"]}
+    assert by_metric["exact_match"]["passed"] is False
+    assert by_metric["got_facts"]["passed"] is True
+
+
+def test_a_push_without_rows_still_uses_the_legacy_path(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """Half-migrated pushes fall back rather than silently misgrading."""
+    run_id, item_id = _seed(session, world)
+
+    body = {
+        "item_id": item_id,
+        "attempt_idx": 0,
+        "output": {"sql": "SELECT 1"},
+        "output_kind": "sql",
+        "tokens_input": 10,
+        "tokens_output": 5,
+        "runtime_ms": 100,
+    }
+    response = api_client.post(
+        f"/v1/runs/{run_id}/results",
+        headers={"X-API-Key": world.alice_key},
+        json=body,
+    )
+
+    # No rows pushed and no execution engine configured for this suite: the
+    # legacy path has nothing to grade SQL with, and no adapter claims the
+    # suite, so the answer matcher fallback grades it FAIL rather than 422.
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] in ("FAIL", "ERROR")

@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import sqlalchemy as sa
-from beacon_graders.graders.execution_grounded_sql import SAMPLE_ROWS, ExecutionGroundedSqlGrader
+from beacon_graders.comparison import SAMPLE_ROWS
+from beacon_graders.graders.execution_grounded_sql import ExecutionGroundedSqlGrader
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 
 if TYPE_CHECKING:
@@ -178,7 +179,7 @@ def test_an_exact_match_passes_got_facts_trivially(grader: ExecutionGroundedSqlG
 def test_the_projection_search_is_bounded() -> None:
     """A pathological SELECT * must not stall the grader; past the cap the
     tolerant reading gives up and says no."""
-    from beacon_graders.graders.execution_grounded_sql import ResultSet
+    from beacon_graders.comparison import ResultSet
     from beacon_graders.tolerance import Tolerance
 
     grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type, return-value]
@@ -190,7 +191,10 @@ def test_the_projection_search_is_bounded() -> None:
     )
     gold = ResultSet(columns=["x", "y"], rows=[(7777, 8888)])
 
-    assert grader._got_facts(wide, gold, False, Tolerance()) is False  # noqa: SLF001
+    from beacon_graders.comparison import got_facts
+
+    _ = grader
+    assert got_facts(wide, gold, False, Tolerance()) is False
 
 
 def test_the_strict_verdict_still_decides_the_outcome() -> None:

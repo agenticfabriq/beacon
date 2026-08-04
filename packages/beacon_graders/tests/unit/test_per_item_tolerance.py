@@ -11,6 +11,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import sqlalchemy as sa
+from beacon_graders.comparison import compare_rows
 from beacon_graders.graders import ExecutionGroundedSqlGrader
 from beacon_graders.tolerance import DEFAULT_NUMERIC_ABS, Tolerance
 from beacon_runner.types import EvalItem
@@ -43,32 +44,29 @@ def test_a_curated_tolerance_is_honoured() -> None:
 
 def test_a_looser_curated_tolerance_admits_a_wider_difference() -> None:
     """Two cents apart passes at a curated 0.05 and fails at the default."""
-    grader = _grader()
     candidate, gold = [(10.02,)], [(10.00,)]
 
     loose = Tolerance(numeric_abs=0.05)
-    assert grader._compare(candidate, gold, False, loose) is True  # noqa: SLF001
-    assert grader._compare(candidate, gold, False, Tolerance()) is False  # noqa: SLF001
+    assert compare_rows(candidate, gold, False, loose) is True
+    assert compare_rows(candidate, gold, False, Tolerance()) is False
 
 
 def test_a_tighter_curated_tolerance_rejects_what_the_default_admits() -> None:
     """Curation can be stricter than beacon, not only looser."""
-    grader = _grader()
     candidate, gold = [(1.0000001,)], [(1.0,)]
 
-    assert grader._compare(candidate, gold, False, Tolerance()) is True  # noqa: SLF001
+    assert compare_rows(candidate, gold, False, Tolerance()) is True
     # Two bounds now, and either one satisfies a match, so exact means both zero.
     strict = Tolerance(numeric_abs=0.0, numeric_rel=0.0)
-    assert grader._compare(candidate, gold, False, strict) is False  # noqa: SLF001
+    assert compare_rows(candidate, gold, False, strict) is False
 
 
 def test_the_decimal_versus_real_case_still_passes() -> None:
     """B14's live failure, now expressed as an absolute difference."""
-    grader = _grader()
     candidate = [(Decimal("0.90490797546012269939"),)]
     gold = [(0.904908,)]
 
-    assert grader._compare(candidate, gold, False, Tolerance()) is True  # noqa: SLF001
+    assert compare_rows(candidate, gold, False, Tolerance()) is True
 
 
 def test_curated_row_order_insensitivity_overrides_the_order_by_heuristic() -> None:
@@ -90,12 +88,11 @@ def test_malformed_tolerance_metadata_falls_back_rather_than_raising() -> None:
 
 def test_tolerance_never_loosens_non_numeric_comparison() -> None:
     """Strings, arity and row counts stay exact however loose the numbers are."""
-    grader = _grader()
     loose = Tolerance(numeric_abs=1e9)
 
-    assert grader._compare([("a",)], [("b",)], False, loose) is False  # noqa: SLF001
-    assert grader._compare([(1, 2)], [(1,)], False, loose) is False  # noqa: SLF001
-    assert grader._compare([(1.0,), (2.0,)], [(1.0,)], False, loose) is False  # noqa: SLF001
+    assert compare_rows([("a",)], [("b",)], False, loose) is False
+    assert compare_rows([(1, 2)], [(1,)], False, loose) is False
+    assert compare_rows([(1.0,), (2.0,)], [(1.0,)], False, loose) is False
 
 
 def test_a_large_answer_cannot_satisfy_an_absolute_bound_alone() -> None:

@@ -32,7 +32,10 @@ def _compare(
     *,
     order_sensitive: bool = False,
 ) -> bool:
-    return grader._compare(list(candidate), list(gold), order_sensitive)  # noqa: SLF001
+    from beacon_graders.comparison import compare_rows
+
+    _ = grader
+    return compare_rows(list(candidate), list(gold), order_sensitive)
 
 
 def test_decimal_and_float_of_the_same_value_match(
@@ -85,7 +88,7 @@ def test_booleans_are_left_out_of_the_numeric_path(
     column comes back. What this pins is that a bool is never treated as a
     number to be compared within a tolerance.
     """
-    from beacon_graders.graders.execution_grounded_sql import _is_number
+    from beacon_graders.comparison import is_number as _is_number
 
     assert _is_number(True) is False
     assert _is_number(False) is False

@@ -1,14 +1,22 @@
-"""Execution-grounded SQL grader."""
+"""Execution-grounded SQL grader.
+
+Executes candidate and gold SQL in one engine and compares the result sets.
+The comparison itself lives in :mod:`beacon_graders.comparison`, shared with
+the result-set grader that grades pushed rows without executing anything.
+"""
 
 from __future__ import annotations
 
 import re
-from collections import Counter
-from dataclasses import dataclass
-from decimal import Decimal
-from itertools import combinations
 from typing import TYPE_CHECKING, Any
 
+from beacon_graders.comparison import (
+    Mismatch,
+    ResultSet,
+    compare_rows,
+    diagnose,
+    got_facts,
+)
 from beacon_graders.tolerance import Tolerance
 from beacon_graders.types import GraderKind, Verdict
 
@@ -20,66 +28,8 @@ if TYPE_CHECKING:
 
 _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 
-
-def _is_number(value: Any) -> bool:
-    """Return whether a cell is a real number. Bools are not: True is not 1."""
-    return isinstance(value, Decimal | float | int) and not isinstance(value, bool)
-
-
-def _sort_key(row: tuple[Any, ...]) -> tuple[str, ...]:
-    """Order rows for order-insensitive comparison without comparing mixed types."""
-    return tuple(repr(v) for v in row)
-
-
 # Dialects exposing a server-side per-statement timeout via SET LOCAL.
 _STATEMENT_TIMEOUT_DIALECTS = frozenset({"postgresql"})
-
-# How many rows of each side to keep on the verdict. Enough to show a reader
-# what the two answers looked like, bounded so a 7,806-row gold cannot bloat
-# every verdict row that references it.
-SAMPLE_ROWS = 5
-
-
-def _jsonable(value: Any) -> Any:
-    """Coerce a database cell to something JSONB can hold, losing nothing visible."""
-    if value is None or isinstance(value, bool | float | int | str):
-        return value
-    return str(value)
-
-
-@dataclass(frozen=True)
-class ResultSet:
-    """The rows a query returned, and the names of their columns."""
-
-    columns: list[str]
-    rows: list[tuple[Any, ...]]
-
-    def sample(self, limit: int = SAMPLE_ROWS) -> list[list[Any]]:
-        """Return the first ``limit`` rows, JSON-safe."""
-        return [[_jsonable(cell) for cell in row] for row in self.rows[:limit]]
-
-
-@dataclass(frozen=True)
-class Mismatch:
-    """Which dimension of a comparison actually differed.
-
-    The old justification named row counts even when the counts were equal,
-    which described the one thing that was not wrong and left every value
-    mismatch to be diagnosed by re-executing both queries by hand.
-    """
-
-    kind: str
-    detail: str
-
-    def as_dict(self) -> dict[str, str]:
-        """Render for storage on the verdict."""
-        return {"kind": self.kind, "detail": self.detail}
-
-
-# Trying every way to project a wide candidate onto the gold's arity is
-# combinatorial; past this many projections the tolerant reading gives up and
-# says so, rather than stalling the grader on a pathological SELECT *.
-MAX_PROJECTIONS = 100
 
 
 class ExecutionGroundedSqlGrader:
@@ -165,9 +115,11 @@ class ExecutionGroundedSqlGrader:
         if tolerance.row_order_insensitive is not None:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
-        passed = self._compare(candidate.rows, gold.rows, order_sensitive, tolerance)
-        got_facts = passed or self._got_facts(candidate, gold, order_sensitive, tolerance)
-        mismatch = None if passed else self._diagnose(candidate, gold, order_sensitive, tolerance)
+        passed = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
+        facts = passed or got_facts(candidate, gold, order_sensitive, tolerance)
+        mismatch: Mismatch | None = (
+            None if passed else diagnose(candidate, gold, order_sensitive, tolerance)
+        )
         raw: dict[str, Any] = {
             "candidate_sql": candidate_sql,
             "gold_sql": gold_sql,
@@ -203,90 +155,16 @@ class ExecutionGroundedSqlGrader:
                 grader_version=self.version,
                 metric="got_facts",
                 criterion="correctness",
-                bool_value=got_facts,
-                value=1.0 if got_facts else 0.0,
+                bool_value=facts,
+                value=1.0 if facts else 0.0,
                 justification=(
                     "Gold's data is present in the candidate (shape-tolerant)."
-                    if got_facts
+                    if facts
                     else "Gold's data is not present in the candidate, in any column projection."
                 ),
                 raw_output={"exact_match": passed},
             ),
         ]
-
-    def _got_facts(
-        self,
-        candidate: ResultSet,
-        gold: ResultSet,
-        order_sensitive: bool,
-        tolerance: Tolerance,
-    ) -> bool:
-        """Whether the gold's data is present, allowing extra candidate columns.
-
-        mnemiq's CORRECT_FACTS, computed here so the second metric is beacon's
-        own claim rather than the runner grading itself. The candidate may add
-        context columns but never omit a gold column, extra columns cannot
-        rescue wrong rows, and column order is not meaning -- each projection is
-        also retried with every row's cells in a canonical order.
-        """
-        if len(candidate.rows) != len(gold.rows):
-            return False
-        gold_arity = len(gold.rows[0]) if gold.rows else len(gold.columns)
-        candidate_arity = len(candidate.rows[0]) if candidate.rows else len(candidate.columns)
-        if gold_arity > candidate_arity:
-            return False
-
-        def sort_cells(rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
-            return [tuple(sorted(row, key=repr)) for row in rows]
-
-        gold_sorted = sort_cells(gold.rows)
-        for index, keep in enumerate(combinations(range(candidate_arity), gold_arity)):
-            if index >= MAX_PROJECTIONS:
-                return False
-            projected = [tuple(row[i] for i in keep) for row in candidate.rows]
-            if self._compare(projected, gold.rows, order_sensitive, tolerance):
-                return True
-            if self._compare(sort_cells(projected), gold_sorted, order_sensitive, tolerance):
-                return True
-        return False
-
-    def _diagnose(
-        self,
-        candidate: ResultSet,
-        gold: ResultSet,
-        order_sensitive: bool,
-        tolerance: Tolerance,
-    ) -> Mismatch:
-        """Name the dimension that differed, and the first place it differed."""
-        if len(candidate.rows) != len(gold.rows):
-            return Mismatch(
-                "row_count",
-                f"candidate returned {len(candidate.rows)} rows, gold returned {len(gold.rows)}",
-            )
-        left, right = candidate.rows, gold.rows
-        if not order_sensitive:
-            try:
-                left, right = sorted(left, key=_sort_key), sorted(right, key=_sort_key)
-            except TypeError:
-                return Mismatch("values", "rows differ; mixed types prevent an ordered comparison")
-        for index, (row, gold_row) in enumerate(zip(left, right, strict=True)):
-            if len(row) != len(gold_row):
-                return Mismatch(
-                    "column_arity",
-                    f"row {index} has {len(row)} columns "
-                    f"({', '.join(candidate.columns) or 'unnamed'}), "
-                    f"gold has {len(gold_row)} ({', '.join(gold.columns) or 'unnamed'})",
-                )
-            for column, (cell, gold_cell) in enumerate(zip(row, gold_row, strict=True)):
-                if not self._values_match(cell, gold_cell, tolerance):
-                    name = candidate.columns[column] if column < len(candidate.columns) else column
-                    return Mismatch(
-                        "values",
-                        f"row {index}, column {name!r}: candidate {cell!r} != gold {gold_cell!r}",
-                    )
-        return Mismatch(
-            "values", "rows differ under the comparison but no differing cell was found"
-        )
 
     def _exec(self, engine: sa.Engine, sql: str) -> ResultSet:
         # Drivers with %-based paramstyles (e.g. psycopg) parse "%" in the
@@ -324,51 +202,6 @@ class ExecutionGroundedSqlGrader:
     def supports_statement_timeout(dialect_name: str) -> bool:
         """Return whether ``dialect_name`` honours a server-side statement timeout."""
         return dialect_name in _STATEMENT_TIMEOUT_DIALECTS
-
-    def _compare(
-        self,
-        candidate: list[tuple[Any, ...]],
-        gold: list[tuple[Any, ...]],
-        order_sensitive: bool,
-        tolerance: Tolerance | None = None,
-    ) -> bool:
-        tol = tolerance or Tolerance()
-        if len(candidate) != len(gold):
-            return False
-        if order_sensitive:
-            return self._rows_match(candidate, gold, tol)
-        try:
-            ordered_candidate = sorted(candidate, key=_sort_key)
-            ordered_gold = sorted(gold, key=_sort_key)
-        except TypeError:
-            return Counter(map(repr, candidate)) == Counter(map(repr, gold))
-        return self._rows_match(ordered_candidate, ordered_gold, tol)
-
-    def _rows_match(
-        self,
-        candidate: list[tuple[Any, ...]],
-        gold: list[tuple[Any, ...]],
-        tolerance: Tolerance,
-    ) -> bool:
-        return all(self._row_matches(c, g, tolerance) for c, g in zip(candidate, gold, strict=True))
-
-    def _row_matches(
-        self,
-        candidate: tuple[Any, ...],
-        gold: tuple[Any, ...],
-        tolerance: Tolerance,
-    ) -> bool:
-        if len(candidate) != len(gold):
-            return False
-        return all(
-            self._values_match(c, g, tolerance) for c, g in zip(candidate, gold, strict=True)
-        )
-
-    def _values_match(self, candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
-        """Compare one cell, numbers within tolerance and everything else exactly."""
-        if _is_number(candidate) and _is_number(gold):
-            return tolerance.numbers_match(float(candidate), float(gold))
-        return bool(candidate == gold)
 
     def _verdict(self, *, passed: bool, justification: str, raw: dict[str, Any]) -> Verdict:
         return Verdict(
