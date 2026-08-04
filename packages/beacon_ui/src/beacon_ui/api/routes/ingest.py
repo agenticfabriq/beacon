@@ -15,7 +15,6 @@ from beacon_graders.composer import VerdictComposer
 from beacon_graders.graders import DabstepAnswerMatcher, ResultSetMatchGrader
 from beacon_graders.types import VerdictOutcome
 from beacon_iam.permissions import Permission
-from beacon_runner.composer_factory import composer_for_suite, graders_for_suite
 from beacon_runner.persistence import persist_result
 from beacon_runner.trace_conformance import layer_contradictions
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
@@ -27,7 +26,6 @@ from beacon_storage.repository.runs import RunRepo
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session  # noqa: TC002
 
-from beacon_ui.api.config import ApiConfig
 from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
 from beacon_ui.api.schemas.ingest import ResultIngestIn, ResultIngestOut, RunCompleteOut
@@ -46,53 +44,35 @@ def _status_value(status_like: object) -> str:
     return str(getattr(status_like, "value", status_like))
 
 
-def _engine_for_suite(suite: str) -> sa.Engine | None:
-    """Return the benchmark database this suite's graders execute against."""
-    url = ApiConfig().benchmark_db_urls.get(suite)
-    return sa.create_engine(url, pool_pre_ping=True) if url else None
+def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
+    """Build the composer for one push, refusing to grade blind.
 
-
-def _answer_authority_applies(item: EvalItem, body: ResultIngestIn) -> bool:
-    """Whether this push grades as rows-against-materialized-gold.
-
-    The answer-authority path needs both halves: the push carries the rows its
-    engine returned, and the item's gold was materialized at import. Either
-    half missing falls back to the execution path (until it is retired).
+    SQL grades by result-set comparison: the push carries the rows its engine
+    returned and the item's gold carries rows materialized at import. Beacon
+    executes nothing to grade. A SQL push missing either half is refused
+    loudly -- composing anyway would mark the item ERROR and store it as
+    though the solution had failed.
     """
-    grader = ResultSetMatchGrader()
-    exec_result = ExecutionResult(
-        output=body.output,
-        output_kind=body.output_kind,
-        trace=_trace_step(body),
-        tokens_input=body.tokens_input,
-        tokens_output=body.tokens_output,
-        runtime_ms=body.runtime_ms,
-        error=body.error,
-        deferred=body.deferred,
-    )
-    return grader.applicable(item, exec_result)
+    if body.output_kind != "sql" or body.deferred:
+        # Answer-and-friends grade by the matcher; a deferral never needs
+        # rows -- the composer scores it DEFER before any grader runs.
+        return VerdictComposer(graders=[DabstepAnswerMatcher()])
 
-
-def _composer_for(suite: str) -> VerdictComposer:
-    """Build the suite's composer, refusing to grade blind.
-
-    A suite whose graders execute SQL cannot be graded without the database to
-    execute against. Composing anyway would mark every item ERROR and store it
-    as though the solution had failed, so this fails loudly instead.
-    """
-    if _engine_for_suite(suite) is None and graders_for_suite(suite, engine=None):
+    gold = item.ground_truth or {}
+    if gold.get("rows") is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"suite {suite!r} is graded by execution graders but no benchmark database is "
-            "configured for it; set BEACON_BENCHMARK_DB_URLS",
+            f"item {item.item_id} has no materialized gold answer; run "
+            "scripts/materialize_gold.py for this suite before grading SQL pushes",
         )
-    return composer_for_suite(
-        suite,
-        engine=_engine_for_suite(suite),
-        # A suite no benchmark adapter claims still needs something to grade
-        # with, or every item composes ERROR and reads as a failed solution.
-        fallback=[DabstepAnswerMatcher()],
-    )
+    if not isinstance(body.output.get("rows"), list):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "a SQL push must carry the rows its engine returned in output.rows "
+            "(with output.row_count when they are a bounded preview); beacon "
+            "grades by comparison and does not execute SQL",
+        )
+    return VerdictComposer(graders=[ResultSetMatchGrader()])
 
 
 def _eval_item(session: Session, *, item_id: str, suite: str) -> EvalItem:
@@ -225,12 +205,7 @@ def ingest_result(
         deferred=body.deferred,
     )
 
-    if _answer_authority_applies(item, body):
-        # The push carries its engine's rows and the gold is materialized:
-        # grade by comparison, no benchmark database involved.
-        composer = VerdictComposer(graders=[ResultSetMatchGrader()])
-    else:
-        composer = _composer_for(run.suite)
+    composer = _composer_for(item, body)
     try:
         verdicts, outcome = composer.compose(item, exec_result)
     except Exception as exc:  # noqa: BLE001 - a grader fault is not the pusher's fault

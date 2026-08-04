@@ -100,12 +100,9 @@ Open <http://localhost:8000/ui> and sign in with an API key (one is printed by
 kiosk, append `?api_key=bcn_...` — the key moves to local storage and leaves
 the URL.
 
-Suites graded by SQL execution need the database that SQL runs against. Without
-it, ingestion refuses to grade rather than marking every item `ERROR`:
-
-```bash
-BEACON_BENCHMARK_DB_URLS='{"bird_minidev_v2":"postgresql+psycopg://user:pw@localhost:5432/bird_dev"}'
-```
+Beacon executes nothing to grade: a SQL push carries the rows the runner's
+engine returned, and gold answers are materialized once at import
+(`scripts/materialize_gold.py`). No benchmark database is needed at runtime.
 
 Same origin on purpose: the page's every request goes to the API that served
 it, and the UI declares its endpoints in one manifest that a test holds against

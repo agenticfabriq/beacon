@@ -6,6 +6,7 @@ import click
 
 from beacon_ui.cli import demo as demo_cmd
 from beacon_ui.cli.commands import attribution as attribution_cmd
+from beacon_ui.cli.commands import audit as audit_cmd
 from beacon_ui.cli.commands import benchmarks as benchmarks_cmd
 from beacon_ui.cli.commands import ctx_cmd, eval_cmd
 from beacon_ui.cli.commands import login as login_cmd
@@ -26,6 +27,7 @@ app.add_command(teams_cmd.cli, name="teams")
 app.add_command(suts_cmd.cli, name="suts")
 app.add_command(eval_cmd.cli, name="eval")
 app.add_command(attribution_cmd.cli, name="attribution")
+app.add_command(audit_cmd.cli, name="audit")
 app.add_command(suites_group)
 app.add_command(gold_group)
 app.add_command(benchmarks_cmd.cli, name="benchmarks")

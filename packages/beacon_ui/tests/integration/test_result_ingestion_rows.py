@@ -170,10 +170,10 @@ def test_the_grader_is_result_set_match_and_emits_got_facts(
     assert by_metric["got_facts"]["passed"] is True
 
 
-def test_a_push_without_rows_still_uses_the_legacy_path(
+def test_a_sql_push_without_rows_is_refused(
     api_client: TestClient, world: _World, session: Session
 ) -> None:
-    """Half-migrated pushes fall back rather than silently misgrading."""
+    """A SQL push must carry its rows; grading blind would store a false FAIL."""
     run_id, item_id = _seed(session, world)
 
     body = {
@@ -191,8 +191,5 @@ def test_a_push_without_rows_still_uses_the_legacy_path(
         json=body,
     )
 
-    # No rows pushed and no execution engine configured for this suite: the
-    # legacy path has nothing to grade SQL with, and no adapter claims the
-    # suite, so the answer matcher fallback grades it FAIL rather than 422.
-    assert response.status_code == 200, response.text
-    assert response.json()["outcome"] in ("FAIL", "ERROR")
+    assert response.status_code == 422, response.text
+    assert "output.rows" in response.json()["detail"]
