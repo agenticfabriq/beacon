@@ -1,5 +1,7 @@
 # Beacon
 
+*By [Agentic Fabriq](https://www.ycombinator.com/companies/agentic-fabriq) (YC W26) — made with love, from MIT.*
+
 Beacon tracks how well database-grounded data agents answer questions, and why
 one configuration answers better than another.
 
