@@ -26,7 +26,7 @@
 
   .app{display:grid;grid-template-columns:196px 1fr;min-height:100vh}
   .app.hidden,.screen.hidden{display:none}
-  tr.hidden{display:none}
+  .hidden{display:none}
   .rail{border-right:1px solid var(--line);background:var(--surface);padding:14px 10px;display:flex;flex-direction:column;gap:14px}
   .brand{display:flex;align-items:baseline;gap:6px;padding:0 6px 2px}
   .brand b{font-size:14px;font-weight:700;letter-spacing:-.01em}
@@ -319,18 +319,22 @@
         <div class="inline">
           <select id="set-team"></select>
         </div>
-        <div class="inline" style="margin-top:8px">
-          <input type="text" id="set-new-team" placeholder="new team name">
-          <button class="btn" id="set-create-team">Create team</button>
-        </div>
-        <p class="sub">Creating a team needs the beacon_admin role. Teams have no delete endpoint
-        at all — removal means removing the members.</p></section>
+        <div id="set-create-team-block">
+          <div class="inline" style="margin-top:8px">
+            <input type="text" id="set-new-team" placeholder="new team name">
+            <button class="btn" id="set-create-team">Create team</button>
+          </div>
+          <p class="sub">A new team is a new sealed world — for a second organization whose data
+          yours must not see. A new system under test is <b>not</b> a team: it declares itself when
+          its runner registers a run, and lands in this team's Results. Teams have no delete
+          endpoint at all — removal means removing the members.</p>
+        </div></section>
       <section><div class="sechead"><h2>This benchmark</h2></div><div id="set-bench"></div></section>
       <section><div class="sechead"><h2>Systems under test</h2>
         <span class="sub" style="margin:0">Registered by the runner on first push; a divergent
         re-declaration is refused. This table lists — it does not author.</span></div>
         <div id="set-systems"></div></section>
-      <section><div class="sechead"><h2>Access</h2>
+      <section id="set-access"><div class="sechead"><h2>Access</h2>
         <span class="sub" style="margin:0">Who can see this team's data, and what they may do:
         a <b>team_member</b> registers runs and pushes results; a <b>team_admin</b> also manages
         benchmarks, members and the reference pin. Adding an email that has no account yet creates
@@ -396,7 +400,7 @@ const ENDPOINTS = {
 };
 
 const S = {  // client state; everything else lives on the server
-  key: null, user: null,
+  key: null, user: null, memberships: [],
   teamId: null, suiteId: null,
   suites: [], baselineRunId: null,
   matrixDifficulty: "", matrixRows: [],
@@ -470,6 +474,7 @@ async function signIn(key) {
   S.key = key;
   const me = await api("me");
   S.user = me.user;
+  S.memberships = me.memberships || [];
   localStorage.setItem("beacon_api_key", key);
   document.getElementById("rail-user").textContent = me.user.email;
   document.getElementById("screen-login").classList.add("hidden");
@@ -829,10 +834,18 @@ const loadBenchmarks = guard(async () => {
 });
 
 /* --------------------------- settings --------------------------- */
+const _isBeaconAdmin = () =>
+  S.memberships.some((m) => m.scope_kind === "global" && m.role === "beacon_admin");
+const _isTeamAdmin = () => _isBeaconAdmin() ||
+  S.memberships.some((m) => m.scope_kind === "team"
+    && String(m.scope_id) === String(S.teamId) && m.role === "team_admin");
+
 const loadSettings = guard(async () => {
   const teams = asList(await api("teams"), "teams");
   document.getElementById("set-team").innerHTML = teams.map((team) =>
     `<option value="${esc(team.id)}" ${String(team.id) === S.teamId ? "selected" : ""}>${esc(team.name)}</option>`).join("");
+  document.getElementById("set-create-team-block").classList.toggle("hidden", !_isBeaconAdmin());
+  document.getElementById("set-access").classList.toggle("hidden", !_isTeamAdmin());
 
   const suite = S.suites.find((s) => String(s.id) === S.suiteId);
   document.getElementById("set-bench").innerHTML =
@@ -848,7 +861,9 @@ const loadSettings = guard(async () => {
       "</tbody></table></div>"
     : '<div class="empty">Nothing registered yet — a runner registers itself on first push.</div>';
 
-  const members = asList(await api("members", { team_id: S.teamId }), "members");
+  const members = _isTeamAdmin()
+    ? asList(await api("members", { team_id: S.teamId }), "members")
+    : [];
   document.getElementById("set-members").innerHTML = members.length
     ? `<div class="tw"><table><thead><tr><th>Member</th><th>Role</th><th></th></tr></thead><tbody>` +
       members.map((member) => `<tr><td>${esc(member.email)}</td><td class="dim">${esc(member.role)}</td>
