@@ -6,7 +6,6 @@ from beacon_graders.graders.dabstep_answer_matcher import DabstepAnswerMatcher
 from beacon_graders.graders.execution_grounded_sql import ExecutionGroundedSqlGrader
 from beacon_graders.graders.free_text_reference import FreeTextReferenceGrader
 from beacon_graders.graders.hierarchical_rubric import HierarchicalRubricGrader
-from beacon_graders.graders.text2vis_data_grounded import Text2VisDataGroundedGrader
 from beacon_graders.llm.provider import JudgeCache, JudgeRequest, JudgeResponse
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 
@@ -88,7 +87,6 @@ def test_shipped_graders_satisfy_protocol() -> None:
         ExecutionGroundedSqlGrader(engine_factory=lambda _item: engine),
         HierarchicalRubricGrader(judge_cache=cache),
         FreeTextReferenceGrader(judge_cache=cache),
-        Text2VisDataGroundedGrader(),
     ]
 
     assert all(isinstance(grader, Grader) for grader in graders)

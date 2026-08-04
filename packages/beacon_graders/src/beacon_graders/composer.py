@@ -18,7 +18,6 @@ _DEFAULT_EXECUTION_GRADERS = frozenset(
     {
         "execution_grounded_sql",
         "dabstep_answer_matcher",
-        "text2vis_data_grounded",
     }
 )
 _DEFAULT_LLM_GRADERS = frozenset(

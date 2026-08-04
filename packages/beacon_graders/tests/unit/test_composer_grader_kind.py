@@ -11,7 +11,6 @@ from beacon_graders.graders import (
     ExecutionGroundedSqlGrader,
     FreeTextReferenceGrader,
     HierarchicalRubricGrader,
-    Text2VisDataGroundedGrader,
 )
 from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
@@ -19,7 +18,6 @@ from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 _BUILT_IN_GRADER_TYPES = (
     (ExecutionGroundedSqlGrader, GraderKind.EXECUTION),
     (DabstepAnswerMatcher, GraderKind.EXECUTION),
-    (Text2VisDataGroundedGrader, GraderKind.EXECUTION),
     (HierarchicalRubricGrader, GraderKind.LLM_JUDGE),
     (FreeTextReferenceGrader, GraderKind.LLM_JUDGE),
 )
@@ -82,7 +80,6 @@ def test_built_in_graders_declare_their_kind(
     [
         "bird_minidev_v2.exec_sql",
         "spider2_lite.exec_sql",
-        "text2vis.data_grounded",
         "dabstep.factoid",
         "dsbench_da.factoid",
     ],

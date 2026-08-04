@@ -10,23 +10,15 @@ pytestmark = pytest.mark.integration
 
 EXPECTED_ADAPTERS = {
     "bird_minidev": "bird_minidev_v2",
-    "spider2_lite": "spider2_lite_v1",
-    "dabstep": "dabstep_v1",
-    "drbench": "drbench_v1",
-    "dsbench_da": "dsbench_da_v1",
-    "dsbench_dm": "dsbench_dm_v1",
-    "fdabench": "fdabench_lite_v1",
-    "insightbench": "insightbench_v1",
-    "text2vis": "text2vis_v1",
 }
 
 
-def test_all_nine_adapters_register() -> None:
+def test_all_adapters_register() -> None:
     from beacon_benchmarks import ADAPTERS, list_adapters
 
     names = list_adapters()
 
-    assert len(names) == 9, f"expected 9 adapters; got {len(names)}: {names}"
+    assert len(names) == len(EXPECTED_ADAPTERS), f"adapter count mismatch: {names}"
     assert set(names) == set(EXPECTED_ADAPTERS), (
         f"adapter set mismatch: missing={set(EXPECTED_ADAPTERS) - set(names)}, "
         f"extra={set(names) - set(EXPECTED_ADAPTERS)}"

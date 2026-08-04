@@ -14,27 +14,11 @@ from typing import Any
 import pytest
 import sqlalchemy as sa
 from beacon_benchmarks.bird_minidev.adapter import BirdMinidevAdapter
-from beacon_benchmarks.dabstep.adapter import DabstepAdapter
-from beacon_benchmarks.drbench.adapter import DRBenchAdapter
-from beacon_benchmarks.dsbench_da.adapter import DSBenchDAAdapter
-from beacon_benchmarks.dsbench_dm.adapter import DSBenchDMAdapter
-from beacon_benchmarks.fdabench.adapter import FDABenchAdapter
-from beacon_benchmarks.insightbench.adapter import InsightBenchAdapter
-from beacon_benchmarks.spider2_lite.adapter import Spider2LiteAdapter
-from beacon_benchmarks.text2vis.adapter import Text2VisAdapter
 from beacon_graders.llm.provider import JudgeCache, JudgeRequest, JudgeResponse
 from beacon_graders.types import GraderKind
 
 _ADAPTERS = [
     BirdMinidevAdapter,
-    Spider2LiteAdapter,
-    Text2VisAdapter,
-    DabstepAdapter,
-    DSBenchDAAdapter,
-    DSBenchDMAdapter,
-    FDABenchAdapter,
-    DRBenchAdapter,
-    InsightBenchAdapter,
 ]
 
 
