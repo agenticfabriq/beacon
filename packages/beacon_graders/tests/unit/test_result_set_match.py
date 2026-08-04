@@ -213,3 +213,21 @@ def test_whole_numbers_still_compare_exactly() -> None:
     assert exact.bool_value is False
     assert facts.bool_value is False
 
+
+def test_zero_place_rounding_does_not_collapse_small_quantities() -> None:
+    """0.0 for 0.196 did not get the fact; 53 for 52.63 is presentation."""
+    _, facts_small = _grade(_gold([[0.19569471624266144]]), _push([[0.0]]))
+    _, facts_large = _grade(_gold([[52.63]]), _push([[53.0]]))
+
+    assert facts_small.bool_value is False
+    assert facts_large.bool_value is True
+
+
+def test_tie_order_variance_fails_exact_but_passes_got_facts() -> None:
+    """Same rows, order differing at tied sort keys: the facts were got."""
+    gold = _gold([[1], [2], [3]], sql="SELECT a FROM t ORDER BY score")
+    exact, facts = _grade(gold, _push([[1], [3], [2]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+

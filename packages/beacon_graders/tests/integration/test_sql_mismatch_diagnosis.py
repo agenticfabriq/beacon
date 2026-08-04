@@ -194,7 +194,7 @@ def test_the_projection_search_is_bounded() -> None:
     from beacon_graders.comparison import got_facts
 
     _ = grader
-    assert got_facts(wide, gold, False, Tolerance()) is False
+    assert got_facts(wide, gold, Tolerance()) is False
 
 
 def test_the_strict_verdict_still_decides_the_outcome() -> None:

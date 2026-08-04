@@ -106,8 +106,15 @@ def values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
 
 
 def is_rounding_of(value: float, other: float) -> bool:
-    """Whether ``value`` is ``other`` rounded to some number of decimal places."""
-    return any(abs(round(other, places) - value) <= 1e-9 for places in range(7))
+    """Whether ``value`` is ``other`` rounded to some number of decimal places.
+
+    Rounding to zero places is presentation only for magnitudes of at least
+    one: 53 for 52.63 is a rounding, but 0.0 for 0.196 collapses a small
+    quantity to nothing -- that answer did not get the fact. (Found by the k12
+    disagreement study, where the zero-place case credited exactly that.)
+    """
+    start = 0 if abs(other) >= 1.0 else 1
+    return any(abs(round(other, places) - value) <= 1e-9 for places in range(start, 7))
 
 
 def facts_values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
@@ -207,7 +214,6 @@ def _sort_cells(rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
 def got_facts(
     candidate: ResultSet,
     gold: ResultSet,
-    order_sensitive: bool,
     tolerance: Tolerance,
 ) -> bool:
     """Whether the gold's data is present, allowing extra candidate columns.
@@ -215,8 +221,10 @@ def got_facts(
     mnemiq's CORRECT_FACTS, computed here so the second metric is beacon's
     own claim rather than the runner grading itself. The candidate may add
     context columns but never omit a gold column, extra columns cannot
-    rescue wrong rows, and column order is not meaning -- each projection is
-    also retried with every row's cells in a canonical order.
+    rescue wrong rows, and neither column order nor row order is meaning --
+    got-facts asks whether the data is there, and ordering is shape. (Row
+    order also varies at tied ORDER BY keys across engines, which is
+    tie-breaking, not a different answer.) Exact match stays order-aware.
     """
     if len(candidate.rows) != len(gold.rows):
         return False
@@ -230,11 +238,9 @@ def got_facts(
         if index >= MAX_PROJECTIONS:
             return False
         projected = [tuple(row[i] for i in keep) for row in candidate.rows]
-        if compare_rows(projected, gold.rows, order_sensitive, tolerance, facts_values_match):
+        if compare_rows(projected, gold.rows, False, tolerance, facts_values_match):
             return True
-        if compare_rows(
-            _sort_cells(projected), gold_sorted, order_sensitive, tolerance, facts_values_match
-        ):
+        if compare_rows(_sort_cells(projected), gold_sorted, False, tolerance, facts_values_match):
             return True
     return False
 

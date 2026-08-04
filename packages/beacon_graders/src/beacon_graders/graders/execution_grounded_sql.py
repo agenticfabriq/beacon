@@ -116,7 +116,7 @@ class ExecutionGroundedSqlGrader:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
         passed = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
-        facts = passed or got_facts(candidate, gold, order_sensitive, tolerance)
+        facts = passed or got_facts(candidate, gold, tolerance)
         mismatch: Mismatch | None = (
             None if passed else diagnose(candidate, gold, order_sensitive, tolerance)
         )

@@ -71,7 +71,7 @@ def _columns_from(payload: Any, rows_payload: Any) -> list[str]:
 
 class ResultSetMatchGrader:
     name = "result_set_match"
-    version = "v2"
+    version = "v3"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"
@@ -127,7 +127,7 @@ class ResultSetMatchGrader:
             )
         elif evidence_complete:
             passed = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
-            facts = passed or got_facts(candidate, gold, order_sensitive, tolerance)
+            facts = passed or got_facts(candidate, gold, tolerance)
             if not passed:
                 mismatch = diagnose(candidate, gold, order_sensitive, tolerance)
         else:
