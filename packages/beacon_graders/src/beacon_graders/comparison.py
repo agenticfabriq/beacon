@@ -99,7 +99,15 @@ class Mismatch:
 
 
 def values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
-    """Compare one cell, numbers within tolerance and everything else exactly."""
+    """Compare one cell, numbers within tolerance and everything else exactly.
+
+    A truth value never matches a number: Python would say True == 1, which
+    scores a boolean column against a count. Found by conformance-contract v2
+    on the day the case was added -- the same way v1 caught the relative
+    bound's off-by-one.
+    """
+    if isinstance(candidate, bool) != isinstance(gold, bool):
+        return False
     if is_number(candidate) and is_number(gold):
         return tolerance.numbers_match(float(candidate), float(gold))
     return bool(candidate == gold)

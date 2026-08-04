@@ -21,11 +21,11 @@ import pytest
 from beacon_graders.comparison import compare_rows
 from beacon_graders.tolerance import Tolerance
 
-CONTRACT = Path(__file__).parent / "conformance" / "grading-conformance-v1.json"
+CONTRACT = Path(__file__).parent / "conformance" / "grading-conformance-v2.json"
 
 # Bump only by editing BOTH copies of the file and BOTH pinned digests. A shared
 # contract that can drift silently is not shared.
-CONTRACT_SHA256 = "3ecadb322438db5d8075d58f705634449f6435601c88afc7a21ebe5294ff96ed"
+CONTRACT_SHA256 = "e259b1e5764c999291be6740ab3172e0d910798dea04cfd59f29f63caba84314"
 
 
 def _contract() -> dict[str, Any]:
@@ -49,7 +49,7 @@ def test_the_contract_has_not_drifted_from_the_other_repo() -> None:
     digest = hashlib.sha256(CONTRACT.read_bytes()).hexdigest()
 
     assert digest == CONTRACT_SHA256, (
-        "grading-conformance-v1.json changed. Update BOTH repos' copies and BOTH "
+        "grading-conformance-v2.json changed. Update BOTH repos' copies and BOTH "
         f"pinned digests, or the two graders are no longer testing the same contract. "
         f"New digest: {digest}"
     )

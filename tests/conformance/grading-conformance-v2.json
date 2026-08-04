@@ -1,0 +1,358 @@
+{
+  "schema_version": "grading-conformance-v2",
+  "purpose": "Cases both graders must agree on. Beacon decides who is more often correct; verity decides what correct means. If the two disagree on the same answer, neither number can be cited. Every case below was drawn from a real disagreement or from a bound one of the two got wrong. v2 (2026-08-04): the default relative bound widens to 1e-5 -- measured on beacon's answer-authority corpus, engine float-representation noise sits below it and every genuinely different number sits above 1e-4 -- and the type-discipline cases pin that NULL, booleans and numeric strings never coerce. Cross-engine canonicalization (dates to ISO, stripping) is beacon's ingestion pipeline, pinned in beacon's own suite: verity grades same-engine values and must not inherit it.",
+  "default_tolerance": {
+    "numeric_abs": 5e-07,
+    "numeric_rel": 1e-05,
+    "row_order_insensitive": false
+  },
+  "cases": [
+    {
+      "id": "num-exact",
+      "kind": "number",
+      "expected": 161.0,
+      "actual": 161.0,
+      "match": true,
+      "why": "identical values match under any tolerance"
+    },
+    {
+      "id": "num-representation-noise",
+      "kind": "number",
+      "expected": 199.6415625,
+      "actual": 199.6415615081787,
+      "match": true,
+      "why": "float32 representation of a float64 gold; relative difference 5e-9. Beacon called 45 of these wrong before it had a relative bound"
+    },
+    {
+      "id": "num-accumulated-float32",
+      "kind": "number",
+      "expected": 402524570.0228404,
+      "actual": 402531650.0,
+      "match": false,
+      "why": "REAL accumulated over a large aggregate; relative difference 1.8e-5. Real precision loss, not representation noise, so it fails unless a reviewer widens the tolerance for this question"
+    },
+    {
+      "id": "num-different-answer",
+      "kind": "number",
+      "expected": 75.39393939393939,
+      "actual": 75.28125,
+      "match": false,
+      "why": "relative difference 1.5e-3; a different answer"
+    },
+    {
+      "id": "num-whole-off-by-one",
+      "kind": "number",
+      "expected": 1234567890.0,
+      "actual": 1234567891.0,
+      "match": false,
+      "why": "a relative bound on a large integer admits being off by one, and a count, a year or an id is either right or wrong. Whole numbers compare exactly. This case caught the defect in beacon's relative bound the day it was added"
+    },
+    {
+      "id": "num-whole-equal",
+      "kind": "number",
+      "expected": 161.0,
+      "actual": 161.0,
+      "match": true,
+      "why": "exact whole numbers still match"
+    },
+    {
+      "id": "num-near-zero",
+      "kind": "number",
+      "expected": 0.0,
+      "actual": 4e-07,
+      "match": true,
+      "why": "near zero the relative bound is vanishingly tight, so the absolute one has to carry"
+    },
+    {
+      "id": "text-identical",
+      "kind": "text",
+      "expected": "Lionel Messi",
+      "actual": "Lionel Messi",
+      "match": true,
+      "why": "identical text"
+    },
+    {
+      "id": "text-different",
+      "kind": "text",
+      "expected": "Lionel Messi",
+      "actual": "Kris Boyd",
+      "match": false,
+      "why": "84 of beacon's value mismatches were this: not a tolerance question at all"
+    },
+    {
+      "id": "table-identical",
+      "kind": "table",
+      "expected": [
+        [
+          1,
+          "x"
+        ],
+        [
+          2,
+          "y"
+        ]
+      ],
+      "actual": [
+        [
+          1,
+          "x"
+        ],
+        [
+          2,
+          "y"
+        ]
+      ],
+      "match": true,
+      "why": "identical tables"
+    },
+    {
+      "id": "table-numeric-cell-within-tolerance",
+      "kind": "table",
+      "expected": [
+        [
+          199.6415625
+        ]
+      ],
+      "actual": [
+        [
+          199.6415615081787
+        ]
+      ],
+      "match": true,
+      "why": "a number does not stop being a number because it sits in a table. Verity compared table cells byte-exactly, so one curated tolerance meant two different things"
+    },
+    {
+      "id": "table-extra-column",
+      "kind": "table",
+      "expected": [
+        [
+          1
+        ],
+        [
+          2
+        ]
+      ],
+      "actual": [
+        [
+          1,
+          "x"
+        ],
+        [
+          2,
+          "y"
+        ]
+      ],
+      "match": false,
+      "why": "right rows, wrong shape. Exact-match semantics reject it; the tolerant metric is reported separately, not by loosening this"
+    },
+    {
+      "id": "table-row-count",
+      "kind": "table",
+      "expected": [
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "actual": [
+        [
+          1
+        ],
+        [
+          2
+        ]
+      ],
+      "match": false,
+      "why": "a truncated result is not the answer"
+    },
+    {
+      "id": "table-row-order",
+      "kind": "table",
+      "expected": [
+        [
+          1
+        ],
+        [
+          2
+        ]
+      ],
+      "actual": [
+        [
+          2
+        ],
+        [
+          1
+        ]
+      ],
+      "match": false,
+      "why": "row order carries meaning unless the question says otherwise"
+    },
+    {
+      "id": "table-row-order-insensitive",
+      "kind": "table",
+      "tolerance": {
+        "row_order_insensitive": true
+      },
+      "expected": [
+        [
+          1
+        ],
+        [
+          2
+        ]
+      ],
+      "actual": [
+        [
+          2
+        ],
+        [
+          1
+        ]
+      ],
+      "match": true,
+      "why": "with the curated opinion, order stops carrying meaning"
+    },
+    {
+      "id": "table-row-order-insensitive-within-tolerance",
+      "kind": "table",
+      "tolerance": {
+        "row_order_insensitive": true
+      },
+      "expected": [
+        [
+          1.0
+        ],
+        [
+          199.6415625
+        ]
+      ],
+      "actual": [
+        [
+          199.6415615081787
+        ],
+        [
+          1.0
+        ]
+      ],
+      "match": true,
+      "why": "unordered matching has to pair rows, not sort their text: two rows equal within tolerance never sort adjacently"
+    },
+    {
+      "id": "num-within-widened-rel",
+      "kind": "number",
+      "expected": 1.0,
+      "actual": 1.000009,
+      "match": true,
+      "why": "relative difference 9e-6, inside the v2 default of 1e-5: engine float-path noise (0.8 spelled 0.8000030517578125 by another engine), not a different answer"
+    },
+    {
+      "id": "num-beyond-widened-rel",
+      "kind": "number",
+      "expected": 1.0,
+      "actual": 1.0002,
+      "match": false,
+      "why": "relative difference 2e-4, an order of magnitude above the widened bound; every genuinely different number in the measured corpus sits above 1e-4"
+    },
+    {
+      "id": "table-whole-off-by-one",
+      "kind": "table",
+      "expected": [
+        [
+          132236
+        ]
+      ],
+      "actual": [
+        [
+          132235
+        ]
+      ],
+      "match": false,
+      "why": "the whole-number rule holds inside tables too: a count off by one is wrong at any tolerance"
+    },
+    {
+      "id": "table-null-is-not-zero",
+      "kind": "table",
+      "expected": [
+        [
+          0
+        ]
+      ],
+      "actual": [
+        [
+          null
+        ]
+      ],
+      "match": false,
+      "why": "NULL is the absence of an answer, not the number zero"
+    },
+    {
+      "id": "table-null-is-not-empty-text",
+      "kind": "table",
+      "expected": [
+        [
+          ""
+        ]
+      ],
+      "actual": [
+        [
+          null
+        ]
+      ],
+      "match": false,
+      "why": "NULL is not the empty string either"
+    },
+    {
+      "id": "table-null-matches-null",
+      "kind": "table",
+      "expected": [
+        [
+          null
+        ]
+      ],
+      "actual": [
+        [
+          null
+        ]
+      ],
+      "match": true,
+      "why": "both graders agree the answer is empty"
+    },
+    {
+      "id": "table-bool-is-not-one",
+      "kind": "table",
+      "expected": [
+        [
+          1
+        ]
+      ],
+      "actual": [
+        [
+          true
+        ]
+      ],
+      "match": false,
+      "why": "true is a truth value, not the integer 1; a grader that coerces would score a boolean column against a count"
+    },
+    {
+      "id": "table-number-is-not-its-spelling",
+      "kind": "table",
+      "expected": [
+        [
+          52.6
+        ]
+      ],
+      "actual": [
+        [
+          "52.6"
+        ]
+      ],
+      "match": false,
+      "why": "a number rendered as text is a type error in the answer, not a tolerance question"
+    }
+  ]
+}

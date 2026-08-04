@@ -224,7 +224,7 @@ Stop Postgres with `make db-down`.
 
 ### Grading conformance
 
-`tests/conformance/grading-conformance-v1.json` is a contract shared with the
+`tests/conformance/grading-conformance-v2.json` is a contract shared with the
 semantic layer: cases both graders must agree on. It is byte-identical in both
 repos with its SHA-256 pinned in both suites, so editing one copy and not the
 other fails both. If you change how answers are compared, that file is where the
