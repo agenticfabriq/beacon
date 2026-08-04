@@ -30,13 +30,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # to absorb a DECIMAL-vs-REAL cast, tight enough that two genuinely different
 # answers stay different.
 DEFAULT_NUMERIC_ABS = 5e-7
-# About eight times float32 epsilon: wide enough for representation noise in a
-# single cast, narrow enough that accumulated error is still a failure. On the
-# corpus this admits the 45 representation cases and none of the 122 genuinely
-# different numbers. Values between the two -- float32 error accumulated over a
-# large aggregate -- stay failures under the default; a suite that wants to
-# accept them says so per item, which is what curated tolerance is for.
-DEFAULT_NUMERIC_REL = 1e-6
+# Wide enough for engine float-representation noise (a value that crossed a
+# float32 column or a different accumulation order), narrow enough that two
+# genuinely different answers stay different. Measured on the re-graded
+# answer-authority corpus: at 1e-6 a handful of right-quantity cells (0.8
+# spelled 0.8000030517578125 by another engine) graded wrong, and every
+# genuinely different number in the corpus sits above 1e-4 -- 1e-5 splits the
+# two populations with an order of magnitude to spare on each side. Whole
+# numbers still compare exactly, so counts never inherit this slack.
+DEFAULT_NUMERIC_REL = 1e-5
 
 _METADATA_KEY = "tolerance"
 

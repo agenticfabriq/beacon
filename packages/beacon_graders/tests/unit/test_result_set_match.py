@@ -174,3 +174,42 @@ def test_engine_and_portability_ride_into_the_evidence() -> None:
 
     assert exact.raw_output["engine"] == "duckdb"
     assert exact.raw_output["portable_to_gold_engine"] is False
+
+
+def test_a_rounded_presentation_passes_got_facts_but_not_exact() -> None:
+    """66.62 where gold computes 66.6230: right quantity, different spelling."""
+    exact, facts = _grade(_gold([[66.6230080768]]), _push([[66.62]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+
+
+def test_gold_that_rounds_forgives_the_unrounded_candidate_in_got_facts() -> None:
+    """Gold applies ROUND(x, 2); the candidate returned the unrounded value."""
+    exact, facts = _grade(_gold([[8.77]]), _push([[8.773399659641314]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+
+
+def test_a_genuinely_different_number_fails_both_metrics() -> None:
+    """52.128 is not a rounding of 52.632 at any precision; ~1%% apart is wrong."""
+    exact, facts = _grade(_gold([[52.63157894736842]]), _push([[52.12765884399414]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is False
+
+
+def test_engine_float_noise_now_passes_exact() -> None:
+    """0.8 spelled by another engine's float path is the same number."""
+    exact, _ = _grade(_gold([[0.7999999999999972]]), _push([[0.8000030517578125]]))
+
+    assert exact.bool_value is True
+
+
+def test_whole_numbers_still_compare_exactly() -> None:
+    exact, facts = _grade(_gold([[132236.0]]), _push([[132235.0]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is False
+

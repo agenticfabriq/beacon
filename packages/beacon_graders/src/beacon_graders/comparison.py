@@ -105,24 +105,54 @@ def values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
     return bool(candidate == gold)
 
 
+def is_rounding_of(value: float, other: float) -> bool:
+    """Whether ``value`` is ``other`` rounded to some number of decimal places."""
+    return any(abs(round(other, places) - value) <= 1e-9 for places in range(7))
+
+
+def facts_values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
+    """The got-facts cell reading: tolerance, or a decimal rounding either way.
+
+    A candidate that returns 66.62 where gold computes 66.6230, or the
+    unrounded value where gold applies ROUND(x, 3), got the fact -- the
+    quantity is the same, the presentation differs. Exact match stays strict
+    (BIRD compares values exactly); this leniency belongs to the second
+    metric, which exists to say "right data, different shape".
+    """
+    if values_match(candidate, gold, tolerance):
+        return True
+    if is_number(candidate) and is_number(gold):
+        cand, ref = float(candidate), float(gold)
+        return is_rounding_of(cand, ref) or is_rounding_of(ref, cand)
+    return False
+
+
+
+CellMatch = Any  # Callable[[Any, Any, Tolerance], bool]; kept loose for mypy simplicity
+
+
 def row_matches(
     candidate: tuple[Any, ...],
     gold: tuple[Any, ...],
     tolerance: Tolerance,
+    cell_match: CellMatch = values_match,
 ) -> bool:
     """Compare one row position-wise."""
     if len(candidate) != len(gold):
         return False
-    return all(values_match(c, g, tolerance) for c, g in zip(candidate, gold, strict=True))
+    return all(cell_match(c, g, tolerance) for c, g in zip(candidate, gold, strict=True))
 
 
 def rows_match(
     candidate: list[tuple[Any, ...]],
     gold: list[tuple[Any, ...]],
     tolerance: Tolerance,
+    cell_match: CellMatch = values_match,
 ) -> bool:
     """Compare two equally long row lists position-wise."""
-    return all(row_matches(c, g, tolerance) for c, g in zip(candidate, gold, strict=True))
+    return all(
+        row_matches(c, g, tolerance, cell_match) for c, g in zip(candidate, gold, strict=True)
+    )
 
 
 def compare_rows(
@@ -130,25 +160,27 @@ def compare_rows(
     gold: list[tuple[Any, ...]],
     order_sensitive: bool,
     tolerance: Tolerance | None = None,
+    cell_match: CellMatch = values_match,
 ) -> bool:
     """Whether two result sets state the same rows, order-aware on request."""
     tol = tolerance or Tolerance()
     if len(candidate) != len(gold):
         return False
     if order_sensitive:
-        return rows_match(candidate, gold, tol)
+        return rows_match(candidate, gold, tol, cell_match)
     try:
         ordered_candidate = sorted(candidate, key=sort_key)
         ordered_gold = sorted(gold, key=sort_key)
     except TypeError:
         return Counter(map(repr, candidate)) == Counter(map(repr, gold))
-    return rows_match(ordered_candidate, ordered_gold, tol)
+    return rows_match(ordered_candidate, ordered_gold, tol, cell_match)
 
 
 def contains_rows(
     candidate: list[tuple[Any, ...]],
     gold: list[tuple[Any, ...]],
     tolerance: Tolerance | None = None,
+    cell_match: CellMatch = values_match,
 ) -> bool:
     """Whether every candidate row matches a distinct gold row (multiset).
 
@@ -160,7 +192,7 @@ def contains_rows(
     remaining = list(gold)
     for row in candidate:
         for index, gold_row in enumerate(remaining):
-            if row_matches(row, gold_row, tol):
+            if row_matches(row, gold_row, tol, cell_match):
                 del remaining[index]
                 break
         else:
@@ -198,9 +230,11 @@ def got_facts(
         if index >= MAX_PROJECTIONS:
             return False
         projected = [tuple(row[i] for i in keep) for row in candidate.rows]
-        if compare_rows(projected, gold.rows, order_sensitive, tolerance):
+        if compare_rows(projected, gold.rows, order_sensitive, tolerance, facts_values_match):
             return True
-        if compare_rows(_sort_cells(projected), gold_sorted, order_sensitive, tolerance):
+        if compare_rows(
+            _sort_cells(projected), gold_sorted, order_sensitive, tolerance, facts_values_match
+        ):
             return True
     return False
 
@@ -225,9 +259,11 @@ def got_facts_contained(
         if index >= MAX_PROJECTIONS:
             return False
         projected = [tuple(row[i] for i in keep) for row in candidate.rows]
-        if contains_rows(projected, gold.rows, tolerance):
+        if contains_rows(projected, gold.rows, tolerance, facts_values_match):
             return True
-        if contains_rows(_sort_cells(projected), gold_cells_sorted, tolerance):
+        if contains_rows(
+            _sort_cells(projected), gold_cells_sorted, tolerance, facts_values_match
+        ):
             return True
     return False
 

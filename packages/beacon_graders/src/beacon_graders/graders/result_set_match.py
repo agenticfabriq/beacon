@@ -71,7 +71,7 @@ def _columns_from(payload: Any, rows_payload: Any) -> list[str]:
 
 class ResultSetMatchGrader:
     name = "result_set_match"
-    version = "v1"
+    version = "v2"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"
