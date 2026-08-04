@@ -30,6 +30,7 @@ EXEMPT_PATHS: set[tuple[str, str]] = {
     ("/v1/me/api-keys/{api_key_id}", "delete"),
     ("/v1/teams", "get"),
     ("/v1/teams", "post"),
+    ("/v1/teams/{team_id}", "delete"),
 }
 
 

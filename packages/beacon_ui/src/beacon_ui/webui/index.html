@@ -323,6 +323,8 @@
           <div class="inline" style="margin-top:8px">
             <input type="text" id="set-new-team" placeholder="new team name">
             <button class="btn" id="set-create-team">Create team</button>
+            <span class="chipsep"></span>
+            <button class="btn danger" id="set-delete-team">Delete this team</button>
           </div>
           <p class="sub">A new team is a new sealed world — for a second organization whose data
           yours must not see. A new system under test is <b>not</b> a team: it declares itself when
@@ -382,6 +384,7 @@ const ENDPOINTS = {
   issueKey:     ["POST",   "/v1/teams/{team_id}/members/{user_id}/api-keys"],
   teamSystems:  ["GET",    "/v1/teams/{team_id}/solutions"],
   createTeam:   ["POST",   "/v1/teams"],
+  deleteTeam:   ["DELETE", "/v1/teams/{team_id}"],
   suites:       ["GET",    "/v1/teams/{team_id}/suites"],
   createSuite:  ["POST",   "/v1/teams/{team_id}/suites"],
   patchSuite:   ["PATCH",  "/v1/suites/{suite_id}"],
@@ -494,7 +497,14 @@ function loginError(error) {
 /* ------------------------- workspace ------------------------- */
 async function bootstrapWorkspace() {
   const teams = asList(await api("teams"), "teams");
-  if (!S.teamId && teams.length) S.teamId = String(teams[0].id);
+  if (!S.teamId && teams.length) {
+    // Default to a team the user belongs to; an admin browsing everything
+    // still starts in their own workspace.
+    const mine = new Set(S.memberships
+      .filter((m) => m.scope_kind === "team").map((m) => String(m.scope_id)));
+    const preferred = teams.find((team) => mine.has(String(team.id)));
+    S.teamId = String((preferred || teams[0]).id);
+  }
   if (!S.teamId) return;
   S.suites = asList(await api("suites", { team_id: S.teamId }), "suites");
   if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
@@ -1098,6 +1108,12 @@ document.getElementById("set-team").addEventListener("change", guard(async (even
   S.teamId = event.target.value; S.suiteId = null; S.suites = [];
   await bootstrapWorkspace(); loadSettings();
 }));
+document.getElementById("set-delete-team").addEventListener("click", guard(async () => {
+  if (!window.confirm("Delete this team? Only an empty team can be deleted — anything it holds refuses.")) return;
+  await api("deleteTeam", { team_id: S.teamId });
+  S.teamId = null; S.suiteId = null; S.suites = []; S.memberships = S.memberships;
+  await bootstrapWorkspace(); loadSettings();
+}));
 document.getElementById("set-create-team").addEventListener("click", guard(async () => {
   const name = document.getElementById("set-new-team").value.trim();
   if (!name) return;
@@ -1139,7 +1155,13 @@ document.getElementById("signout").addEventListener("click", signOut);
   const stored = fromQuery || localStorage.getItem("beacon_api_key");
   if (fromQuery) window.history.replaceState(null, "", window.location.pathname);
   if (stored) {
-    try { await signIn(stored); return; } catch { signOut(); }
+    try { await signIn(stored); return; } catch (error) {
+      // Only an invalid key signs out (api() already did, and says so).
+      // Anything else -- a failed workspace call -- keeps the session and
+      // surfaces the error, so a refresh never eats a valid credential.
+      if (error && error.message === "signed out") return;
+      errbar(error && error.message ? error.message : String(error));
+    }
   }
 })();
 </script>

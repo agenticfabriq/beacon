@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from beacon_storage.models.tenancy import Team  # noqa: TC002
+from beacon_storage.models.tenancy import (
+    Role,
+    ScopeKind,
+    Team,  # noqa: TC002
+)
 from beacon_storage.repository.memberships import MembershipRepo
 from beacon_storage.repository.teams import TeamRepo
 from sqlalchemy.exc import IntegrityError
@@ -32,7 +36,18 @@ class TeamService:
             raise AuthorizationError("create team requires beacon_admin")
 
         try:
-            return self.teams.create(name=name, description=description)
+            team = self.teams.create(name=name, description=description)
         except IntegrityError as exc:
             self.session.rollback()
             raise ConflictError(f"team name '{name}' already exists") from exc
+
+        # The creator owns what they created: without this the team is born
+        # ownerless -- an empty roster only global admins can even see.
+        self.memberships.grant(
+            user_id=actor_id,
+            scope_kind=ScopeKind.TEAM,
+            scope_id=team.id,
+            role=Role.TEAM_ADMIN,
+            granted_by=actor_id,
+        )
+        return team
