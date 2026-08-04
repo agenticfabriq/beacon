@@ -107,6 +107,12 @@
   .addr .row-group{border:1px dashed var(--line);border-radius:var(--r);padding:4px 8px;display:flex;gap:6px;align-items:center}
   .addr .row-group .cap{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
   .pager{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--ink-3)}
+  .cheat{margin-top:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+  .cheat summary{padding:9px 12px;cursor:pointer;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:650}
+  .cheatbody{padding:4px 12px 12px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:960px){.cheatbody{grid-template-columns:1fr}}
+  .cheatbody h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:10px 0 4px}
+  .cheatbody pre{border:1px solid var(--line-soft);border-radius:var(--r);background:var(--ground);font-size:10.5px}
   tr.golddetail td{white-space:normal}
   tr.rundetail td{white-space:normal;padding:14px;background:var(--ground)}
   .kw{color:var(--accent);font-weight:650} .lit{color:var(--pass)}
@@ -218,6 +224,10 @@
           <th class="num sort" data-sort="median_tokens">tokens</th>
           <th class="num sort" data-sort="median_runtime_ms">latency</th><th></th></tr></thead>
         <tbody id="matrix-rows"></tbody></table></div>
+      <details class="cheat" id="cheatsheet">
+        <summary>API / CLI cheatsheet</summary>
+        <div class="cheatbody" id="cheat-body"></div>
+      </details>
     </div>
 
     <div class="view" id="v-cell">
@@ -253,6 +263,7 @@
       <div class="chips" id="run-chips"></div>
       <div class="tw"><table>
         <thead><tr><th>Item</th><th>Question</th><th>Difficulty</th><th>Outcome</th>
+        <th title="right data, tolerant shape">got-facts</th>
         <th class="num">rows ours</th><th class="num">rows gold</th><th>mismatch</th><th class="sort" id="run-items-date-sort">Pushed</th><th></th></tr></thead>
         <tbody id="run-items"></tbody></table></div>
       <div class="pager"><button class="btn" id="ritems-prev">‹ prev</button>
@@ -736,12 +747,14 @@ const loadRunItems = guard(async (runId) => {
       <td>${short(row.item_id)}</td><td class="qcell">${esc(row.question)}</td>
       <td>${row.difficulty ? `<span class="tag">${esc(row.difficulty)}</span>` : ""}</td>
       <td><span class="pill ${pillFor(row.outcome)}">${esc(row.outcome || row.status)}</span></td>
+      <td>${row.got_facts === null || row.got_facts === undefined ? '<span class="dim">–</span>'
+        : row.got_facts ? '<span class="pill p-pass">yes</span>' : '<span class="pill p-wr">no</span>'}</td>
       <td class="num ${row.candidate_row_count === null ? "dim" : ""}">${row.candidate_row_count ?? "–"}</td>
       <td class="num dim">${row.gold_row_count ?? "–"}</td>
       <td class="dim">${esc(row.mismatch_kind || "")}</td>
       <td class="dim">${esc((row.created_at || "").slice(5, 16).replace("T", " "))}</td>
       <td class="dim" style="font-size:11px">compare →</td></tr>`).join("")
-    : '<tr><td colspan="9"><div class="empty">No results match these filters.</div></td></tr>';
+    : '<tr><td colspan="10"><div class="empty">No results match these filters.</div></td></tr>';
 });
 
 const openItem = guard(async (runId, itemId) => {
@@ -802,7 +815,7 @@ const openItem = guard(async (runId, itemId) => {
   if (!anchor) return;
   const detailRow = document.createElement("tr");
   detailRow.className = "rundetail";
-  detailRow.innerHTML = `<td colspan="9">${html}</td>`;
+  detailRow.innerHTML = `<td colspan="10">${html}</td>`;
   anchor.after(detailRow);
   detailRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
 });
@@ -1145,6 +1158,65 @@ document.getElementById("set-key-create").addEventListener("click", guard(async 
   document.getElementById("set-key-label").value = "";
   loadSettings();
 }));
+document.getElementById("cheatsheet").addEventListener("toggle", () => {
+  if (!document.getElementById("cheatsheet").open) return;
+  const suite = S.suiteId || "<suite_id>";
+  const team = S.teamId || "<team_id>";
+  const b = window.location.origin;
+  document.getElementById("cheat-body").innerHTML = `
+    <div>
+      <h3>A runner's whole life (curl)</h3>
+      <pre># register a run (declares your system; reuses it if identical)
+curl -X POST ${esc(b)}/v1/suites/${esc(suite)}/runs \\
+  -H "X-API-Key: $BEACON_API_KEY" -H "Content-Type: application/json" \\
+  -d '{"solution": {"solution_id": "my-agent", "version": "0.1",
+       "supported_modes": ["EVAL"], "layers": []},
+      "mode": "EVAL",
+      "config": {"model_id": "qwen-14b", "engine": "duckdb",
+                 "layers_enabled": {}}}'
+
+# push one result: the rows YOUR engine returned; beacon compares
+curl -X POST ${esc(b)}/v1/runs/&lt;run_id&gt;/results \\
+  -H "X-API-Key: $BEACON_API_KEY" -H "Content-Type: application/json" \\
+  -d '{"item_id": "&lt;item_uuid&gt;", "attempt_idx": 0,
+      "output_kind": "sql",
+      "output": {"sql": "SELECT ...", "columns": ["a"],
+                 "rows": [[1]], "row_count": 1, "engine": "duckdb"},
+      "tokens_input": 0, "tokens_output": 0, "runtime_ms": 100}'
+
+# close the run when every item is pushed
+curl -X POST ${esc(b)}/v1/runs/&lt;run_id&gt;/complete -H "X-API-Key: $BEACON_API_KEY"</pre>
+      <h3>Read it back</h3>
+      <pre>GET /v1/suites/${esc(suite)}/results-matrix     one row per configuration
+GET /v1/suites/${esc(suite)}/runs               this benchmark's runs
+GET /v1/runs/&lt;run_id&gt;/results             per-question outcomes
+GET /v1/runs/&lt;run_id&gt;/results/&lt;item&gt;      yours beside gold
+GET /v1/suites/${esc(suite)}/attribution?sut=&lt;solution_uuid&gt;</pre>
+    </div>
+    <div>
+      <h3>CLI</h3>
+      <pre>beacon login --api-base ${esc(b)} --api-key $BEACON_API_KEY
+beacon ctx set --team ${esc(team)}
+beacon suites create ...        # a benchmark: the questions runs score over
+beacon eval run --sut &lt;uuid&gt; --suite ${esc(suite)}
+beacon gold import ...          # approved gold from the semantic layer
+beacon audit spot-check --run &lt;run_id&gt; --db-url &lt;engine_url&gt;
+beacon demo seed</pre>
+      <h3>Bulk loaders (repo scripts)</h3>
+      <pre># JSONL reports -> runs (model/config/engine come from the manifest)
+uv run python scripts/load_eval_reports.py \\
+  --solution &lt;uuid&gt; --suite ${esc(suite)} \\
+  --manifest reports.json --reports-dir path/to/reports
+
+# one-time: execute gold SQL once, store the answer rows
+uv run python scripts/materialize_gold.py \\
+  --suite &lt;suite_name&gt; --engine-url &lt;reference_engine_url&gt;</pre>
+      <h3>Rules the numbers live by</h3>
+      <pre>DEFER is not FAIL &middot; ERROR leaves the denominator
+exact_match decides; got-facts is the tolerant second reading
+SQL is evidence, never scored &middot; invalidate, never delete</pre>
+    </div>`;
+});
 document.getElementById("signout").addEventListener("click", signOut);
 
 /* ---------------------------- boot ---------------------------- */

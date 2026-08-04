@@ -24,6 +24,8 @@ class ResultRowOut(BaseModel):
     difficulty: str | None = None
     outcome: str | None = None
     status: str
+    # The tolerant reading beside the outcome; None when no verdict carries it.
+    got_facts: bool | None = None
     # Row counts come from the execution grader's verdict, so they are absent
     # for suites graded another way rather than defaulted to zero.
     candidate_row_count: int | None = None
@@ -76,6 +78,8 @@ class ResultDetailOut(BaseModel):
     database: str | None = None
     outcome: str | None = None
     status: str
+    # The tolerant reading beside the outcome; None when no verdict carries it.
+    got_facts: bool | None = None
     deferred: bool
     error: str | None = None
     output: dict[str, Any]

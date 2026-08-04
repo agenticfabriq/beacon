@@ -147,6 +147,9 @@ def list_results(
     for result, item in page:
         evidence = _execution_evidence(verdicts.get(result.id, []))
         mismatch = evidence.get("mismatch")
+        facts = next(
+            (v for v in verdicts.get(result.id, []) if v.metric == "got_facts"), None
+        )
         rows.append(
             ResultRowOut(
                 item_id=UUID(result.item_id),
@@ -154,6 +157,7 @@ def list_results(
                 difficulty=_metadata(item, "difficulty"),
                 outcome=str(result.outcome) if result.outcome is not None else None,
                 status=str(result.status),
+                got_facts=facts.bool_value if facts is not None else None,
                 candidate_row_count=evidence.get("candidate_row_count"),
                 gold_row_count=evidence.get("gold_row_count"),
                 mismatch_kind=(mismatch or {}).get("kind") if isinstance(mismatch, dict) else None,
