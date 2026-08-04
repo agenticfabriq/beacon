@@ -63,6 +63,7 @@ class SuiteItemRowOut(BaseModel):
     source: str | None = None
     tolerance: dict[str, object] | None = None
     has_gold_sql: bool
+    gold_sql: str | None = None
 
 
 class SuiteItemListOut(BaseModel):

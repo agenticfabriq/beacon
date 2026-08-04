@@ -133,6 +133,7 @@ def _run_out(run: Run, session: Session) -> RunOut:
         config_label=run.config_label,
         config_digest=run.config_digest,
         invalidated_at=run.invalidated_at,
+        created_at=run.created_at,
         invalidation_reason=run.invalidation_reason,
         summary=_summary(run, session),
     )

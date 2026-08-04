@@ -7,6 +7,7 @@ on a score.
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003
 from typing import Any
 from uuid import UUID  # noqa: TC003
 
@@ -31,6 +32,7 @@ class ResultRowOut(BaseModel):
     tokens_input: int
     tokens_output: int
     runtime_ms: int
+    created_at: datetime | None = None
 
 
 class ResultListOut(BaseModel):
@@ -81,4 +83,5 @@ class ResultDetailOut(BaseModel):
     tokens_input: int
     tokens_output: int
     runtime_ms: int
+    created_at: datetime | None = None
     verdicts: list[VerdictOut]

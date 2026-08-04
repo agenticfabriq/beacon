@@ -26,6 +26,7 @@
 
   .app{display:grid;grid-template-columns:196px 1fr;min-height:100vh}
   .app.hidden,.screen.hidden{display:none}
+  tr.hidden{display:none}
   .rail{border-right:1px solid var(--line);background:var(--surface);padding:14px 10px;display:flex;flex-direction:column;gap:14px}
   .brand{display:flex;align-items:baseline;gap:6px;padding:0 6px 2px}
   .brand b{font-size:14px;font-weight:700;letter-spacing:-.01em}
@@ -97,7 +98,16 @@
   .pane.gold{border-top:2px solid var(--ink-3)}
   .pane-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--line-soft);background:var(--surface-2)}
   .pane-t{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;font-weight:650}
-  pre{margin:0;padding:11px;font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;color:var(--ink-2)}
+  pre{margin:0;padding:11px;font-family:var(--mono);font-size:11.5px;line-height:1.6;color:var(--ink-2);white-space:pre-wrap;word-break:break-word}
+  .rs td{white-space:normal;word-break:break-word}
+  .addr{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:14px 0 4px;font-size:11.5px}
+  .addr .box{border:1px solid var(--line);border-radius:var(--r);padding:5px 10px;background:var(--surface)}
+  .addr .box b{display:block;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+  .addr .arrow2{color:var(--ink-3)}
+  .addr .row-group{border:1px dashed var(--line);border-radius:var(--r);padding:4px 8px;display:flex;gap:6px;align-items:center}
+  .addr .row-group .cap{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+  .pager{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--ink-3)}
+  tr.golddetail td{white-space:normal}
   .kw{color:var(--accent);font-weight:650} .lit{color:var(--pass)}
   .rs{border-top:1px solid var(--line-soft)} .rs table{font-size:11.5px} .rs th{font-size:8.5px;padding:5px 9px} .rs td{padding:4px 9px}
   .why{border:1px solid var(--line);border-left:3px solid var(--wrong);border-radius:var(--r);background:var(--surface);padding:11px 13px;margin-bottom:11px}
@@ -231,9 +241,11 @@
         <button class="chip" id="runs-show-invalidated" aria-pressed="false">Show invalidated</button>
       </div>
       <div class="tw"><table>
-        <thead><tr><th>Run</th><th>System</th><th>Model</th><th>Config</th><th>Arm</th><th>State</th>
+        <thead><tr><th>Run</th><th class="sort" id="runs-date-sort">Date</th><th>System</th><th>Model</th><th>Config</th><th>Arm</th><th>State</th>
         <th class="num">pass@1</th><th class="num">items</th><th class="num">errors</th><th></th></tr></thead>
         <tbody id="runs-rows"></tbody></table></div>
+      <div class="pager"><button class="btn" id="runs-prev">‹ newer</button>
+        <span id="runs-page"></span><button class="btn" id="runs-next">older ›</button></div>
     </div>
 
     <div class="view" id="v-run">
@@ -241,11 +253,13 @@
       <h1 id="run-title"></h1>
       <p class="sub" id="run-sub"></p>
       <div class="chips" id="run-chips"></div>
+      <section id="run-detail"><div class="empty">Select a question below to compare it against gold.</div></section>
       <div class="tw"><table>
         <thead><tr><th>Item</th><th>Question</th><th>Difficulty</th><th>Outcome</th>
-        <th class="num">rows ours</th><th class="num">rows gold</th><th>mismatch</th><th></th></tr></thead>
+        <th class="num">rows ours</th><th class="num">rows gold</th><th>mismatch</th><th class="sort" id="run-items-date-sort">Pushed</th><th></th></tr></thead>
         <tbody id="run-items"></tbody></table></div>
-      <section id="run-detail"><div class="empty">Select a question to compare it against gold.</div></section>
+      <div class="pager"><button class="btn" id="ritems-prev">‹ prev</button>
+        <span id="ritems-page"></span><button class="btn" id="ritems-next">next ›</button></div>
     </div>
 
     <div class="view" id="v-questions">
@@ -259,14 +273,32 @@
         <thead><tr><th>Item</th><th>Question</th><th>Difficulty</th><th>Database</th>
         <th>Tolerance</th><th>Source</th><th>Gold</th></tr></thead>
         <tbody id="questions-rows"></tbody></table></div>
+      <div class="pager"><button class="btn" id="q-prev">‹ prev</button>
+        <span id="q-page"></span><button class="btn" id="q-next">next ›</button></div>
     </div>
 
     <div class="view" id="v-benchmarks">
       <h1>Benchmarks</h1>
       <p class="sub">The container runs are compared within. Picking one is the only navigation step
-      before a result. <b>How a result is addressed:</b> Benchmark → System → Version → Model →
-      Config → Run → Result; the middle four together are one row in Results. Team is the access
-      boundary, not a level.</p>
+      before a result.</p>
+      <div class="addr" aria-label="How a result is addressed">
+        <span class="box"><b>Team</b>access boundary</span>
+        <span class="arrow2">⇢</span>
+        <span class="box"><b>Benchmark</b>questions + reference run</span>
+        <span class="arrow2">→</span>
+        <span class="row-group"><span class="cap">one Results row</span>
+          <span class="box"><b>System</b>e.g. mnemiq</span>
+          <span class="box"><b>Version</b>0.1.0</span>
+          <span class="box"><b>Model</b>qwen-14b</span>
+          <span class="box"><b>Config</b>+guided</span></span>
+        <span class="arrow2">→</span>
+        <span class="box"><b>Run</b>one execution, pushed</span>
+        <span class="arrow2">→</span>
+        <span class="box"><b>Result</b>per question · EX + got-facts</span>
+      </div>
+      <p class="sub">A run is registered here, executed on your hardware, and its rows pushed back;
+      each result is graded twice — exact match decides, got-the-facts reads tolerantly. One run per
+      benchmark is pinned as the reference; a bad run is invalidated, never deleted.</p>
       <div class="tw" style="margin-top:14px"><table>
         <thead><tr><th>Benchmark</th><th class="num">Questions</th><th class="num">Runs</th><th></th></tr></thead>
         <tbody id="benchmarks-rows"></tbody></table></div>
@@ -305,7 +337,7 @@
         not a hierarchy level.</span></div>
         <div id="set-members"></div>
         <div class="inline" style="margin-top:8px">
-          <input type="text" id="set-invite-email" placeholder="teammate@example.com">
+          <input type="text" id="set-invite-email" placeholder="teammate@example.com (created if new)">
           <select id="set-invite-role"><option>team_member</option><option>team_admin</option></select>
           <button class="btn" id="set-invite-btn">Add member</button>
         </div></section>
@@ -369,6 +401,9 @@ const S = {  // client state; everything else lives on the server
   showInvalidated: false,
   runOutcome: "", runDifficulty: "", selectedItem: null,
   questionsDifficulty: "", questionsSource: "",
+  runsOffset: 0, runsPageFull: false, runsDateAsc: false,
+  qOffset: 0, qTotal: 0,
+  ritemsOffset: 0, ritemsTotal: 0, ritemsDateAsc: false,
 };
 
 function url(name, params = {}, query = {}) {
@@ -594,10 +629,17 @@ const openCell = guard(async (row) => {
 });
 
 /* ---------------------------- runs ---------------------------- */
+const RUNS_PAGE = 50;
 const loadRuns = guard(async () => {
   const runs = await api("runs", { suite_id: S.suiteId }, { query: {
-    limit: 200,
+    limit: RUNS_PAGE, offset: S.runsOffset,
     include_invalidated: S.showInvalidated ? "true" : "" } });
+  S.runsPageFull = runs.length === RUNS_PAGE;
+  if (S.runsDateAsc) runs.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  document.getElementById("runs-page").textContent =
+    `page ${Math.floor(S.runsOffset / RUNS_PAGE) + 1}`;
+  document.getElementById("runs-prev").disabled = S.runsOffset === 0;
+  document.getElementById("runs-next").disabled = !S.runsPageFull;
   document.getElementById("runs-show-invalidated")
     .setAttribute("aria-pressed", String(S.showInvalidated));
   document.getElementById("runs-rows").innerHTML = runs.length ? runs.map((run) => {
@@ -605,7 +647,8 @@ const loadRuns = guard(async () => {
     const gone = Boolean(run.invalidated_at);
     return `<tr class="click ${isRef ? "ref" : ""} ${gone ? "gone" : ""}" data-run="${esc(run.run_id)}">
       <td>${short(run.run_id)}</td>
-      <td class="dim">${esc(run.model_id ? "" : "")}${esc(run.suite_id ? "" : "")}${""}</td>
+      <td class="dim">${esc((run.created_at || "").slice(0, 16).replace("T", " "))}</td>
+      <td class="dim">${""}</td>
       <td class="dim">${esc(run.model_id || "")}</td>
       <td class="cfgcell">${esc(run.config_label || "")}${isRef ? ' <span class="pill p-ref">reference</span>' : ""}</td>
       <td class="dim">${esc(run.sweep_arm || "")}</td>
@@ -618,14 +661,15 @@ const loadRuns = guard(async () => {
         : `${isRef ? "" : `<button class="btn" data-pin="${esc(run.run_id)}">pin as reference</button> `}` +
           `<button class="btn danger" data-invalidate="${esc(run.run_id)}">invalidate</button>`}
       </td></tr>` + (gone && run.invalidation_reason
-        ? `<tr class="gone"><td></td><td colspan="9" class="dim qcell">${esc(run.invalidation_reason)}</td></tr>` : "");
-  }).join("") : '<tr><td colspan="10"><div class="empty">No runs in this benchmark.</div></td></tr>';
+        ? `<tr class="gone"><td></td><td colspan="10" class="dim qcell">${esc(run.invalidation_reason)}</td></tr>` : "");
+  }).join("") : '<tr><td colspan="11"><div class="empty">No runs in this benchmark.</div></td></tr>';
 });
 
 /* ------------------------- run drilldown ------------------------- */
 const openRun = guard(async (runId) => {
   go("run");
   S.selectedItem = null;
+  S.ritemsOffset = 0;
   const run = await api("run", { run_id: runId });
   document.getElementById("run-crumb").textContent = short(runId);
   document.getElementById("run-title").textContent = `Run ${short(runId)}`;
@@ -636,9 +680,18 @@ const openRun = guard(async (runId) => {
   await loadRunItems(runId);
 });
 
+const RITEMS_PAGE = 100;
 const loadRunItems = guard(async (runId) => {
   const body = await api("results", { run_id: runId },
-    { query: { outcome: S.runOutcome, difficulty: S.runDifficulty, limit: 500 } });
+    { query: { outcome: S.runOutcome, difficulty: S.runDifficulty,
+               limit: RITEMS_PAGE, offset: S.ritemsOffset } });
+  S.ritemsTotal = body.total;
+  document.getElementById("ritems-page").textContent =
+    `${S.ritemsOffset + 1}–${Math.min(S.ritemsOffset + RITEMS_PAGE, body.total)} of ${body.total}`;
+  document.getElementById("ritems-prev").disabled = S.ritemsOffset === 0;
+  document.getElementById("ritems-next").disabled = S.ritemsOffset + RITEMS_PAGE >= body.total;
+  if (S.ritemsDateAsc) body.results.sort(
+    (a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const oc = body.outcome_counts || {}, dc = body.difficulty_counts || {};
   const chip = (group, value, label, pressed) =>
     `<button class="chip" data-${group}="${esc(value)}" aria-pressed="${String(pressed)}">${label}</button>`;
@@ -660,14 +713,16 @@ const loadRunItems = guard(async (runId) => {
       <td class="num ${row.candidate_row_count === null ? "dim" : ""}">${row.candidate_row_count ?? "–"}</td>
       <td class="num dim">${row.gold_row_count ?? "–"}</td>
       <td class="dim">${esc(row.mismatch_kind || "")}</td>
+      <td class="dim">${esc((row.created_at || "").slice(5, 16).replace("T", " "))}</td>
       <td class="dim" style="font-size:11px">compare →</td></tr>`).join("")
-    : '<tr><td colspan="8"><div class="empty">No results match these filters.</div></td></tr>';
+    : '<tr><td colspan="9"><div class="empty">No results match these filters.</div></td></tr>';
 });
 
 const openItem = guard(async (runId, itemId) => {
   S.selectedItem = itemId;
   await loadRunItems(runId);
   const detail = await api("result", { run_id: runId, item_id: itemId });
+  document.getElementById("run-detail").scrollIntoView({ behavior: "smooth", block: "start" });
   const verdicts = detail.verdicts || [];
   const evidence = (verdicts.find((v) => v.evidence && v.evidence.candidate_sql) || {}).evidence || {};
   const sampleTable = (columns, rows) => (!columns || !rows) ? "" :
@@ -716,7 +771,13 @@ const openItem = guard(async (runId, itemId) => {
 const loadQuestions = guard(async () => {
   if (!S.suiteId) return;
   const body = await api("suiteItems", { suite_id: S.suiteId },
-    { query: { difficulty: S.questionsDifficulty, source: S.questionsSource, limit: 200 } });
+    { query: { difficulty: S.questionsDifficulty, source: S.questionsSource,
+               limit: Q_PAGE, offset: S.qOffset } });
+  S.qTotal = body.total;
+  document.getElementById("q-page").textContent =
+    `${S.qOffset + 1}–${Math.min(S.qOffset + Q_PAGE, body.total)} of ${body.total}`;
+  document.getElementById("q-prev").disabled = S.qOffset === 0;
+  document.getElementById("q-next").disabled = S.qOffset + Q_PAGE >= body.total;
   const dc = body.difficulty_counts || {}, sc = body.source_counts || {};
   const chip = (group, value, label, pressed) =>
     `<button class="chip" data-${group}="${esc(value)}" aria-pressed="${String(pressed)}">${label}</button>`;
@@ -730,14 +791,18 @@ const loadQuestions = guard(async () => {
     Object.keys(sc).sort().map((k) =>
       chip("qs", k, `${esc(k)} <span class="c">${sc[k]}</span>`, S.questionsSource === k)).join("");
   document.getElementById("questions-rows").innerHTML = body.items.length ? body.items.map((item) =>
-    `<tr><td>${short(item.item_id)}</td><td class="qcell">${esc(item.question)}</td>
+    `<tr class="click" data-qitem="${esc(item.item_id)}"><td>${short(item.item_id)}</td>
+      <td class="qcell">${esc(item.question)}</td>
       <td>${item.difficulty ? `<span class="tag">${esc(item.difficulty)}</span>` : ""}</td>
       <td class="dim">${esc(item.database || "")}</td>
       <td class="dim">${item.tolerance ? esc(JSON.stringify(item.tolerance)) : "default"}</td>
       <td class="dim">${esc(item.source || "")}</td>
-      <td class="dim">${item.has_gold_sql ? "sql" : "answer"}</td></tr>`).join("")
+      <td class="dim">${item.has_gold_sql ? "sql ▾" : "answer"}</td></tr>` +
+    (item.gold_sql ? `<tr class="golddetail hidden" data-qdetail="${esc(item.item_id)}">
+      <td></td><td colspan="6"><pre>${sqlfmt(item.gold_sql)}</pre></td></tr>` : "")).join("")
     : '<tr><td colspan="7"><div class="empty">No questions match.</div></td></tr>';
 });
+const Q_PAGE = 50;
 
 /* -------------------------- benchmarks -------------------------- */
 const loadBenchmarks = guard(async () => {
@@ -876,6 +941,13 @@ document.addEventListener("click", (event) => {
     openCell(rows[Number(cellRow.dataset.cell)]);
     return;
   }
+  const qRow = t.closest("[data-qitem]");
+  if (qRow) {
+    const detail = document.querySelector(`[data-qdetail="${qRow.dataset.qitem}"]`);
+    if (detail) detail.classList.toggle("hidden");
+    return;
+  }
+  if (t.closest("[data-qdetail]")) return;
   const runRow = t.closest("[data-run]");
   if (runRow) { openRun(runRow.dataset.run); return; }
   const itemRow = t.closest("[data-item]");
@@ -886,6 +958,7 @@ document.addEventListener("click", (event) => {
     const suite = S.suites.find((entry) => String(entry.id) === S.suiteId);
     S.baselineRunId = suite ? suite.baseline_run_id : null;
     S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
+    S.runsOffset = 0; S.qOffset = 0; S.ritemsOffset = 0;
     renderRail(); go("matrix");
     return;
   }
@@ -916,7 +989,36 @@ document.addEventListener("click", (event) => {
   renderMatrixRows();
 });
 document.getElementById("runs-show-invalidated").addEventListener("click", () => {
-  S.showInvalidated = !S.showInvalidated; loadRuns();
+  S.showInvalidated = !S.showInvalidated; S.runsOffset = 0; loadRuns();
+});
+document.getElementById("runs-prev").addEventListener("click", () => {
+  S.runsOffset = Math.max(0, S.runsOffset - RUNS_PAGE); loadRuns();
+});
+document.getElementById("runs-next").addEventListener("click", () => {
+  if (S.runsPageFull) { S.runsOffset += RUNS_PAGE; loadRuns(); }
+});
+document.getElementById("runs-date-sort").addEventListener("click", () => {
+  S.runsDateAsc = !S.runsDateAsc; loadRuns();
+});
+document.getElementById("q-prev").addEventListener("click", () => {
+  S.qOffset = Math.max(0, S.qOffset - Q_PAGE); loadQuestions();
+});
+document.getElementById("q-next").addEventListener("click", () => {
+  if (S.qOffset + Q_PAGE < S.qTotal) { S.qOffset += Q_PAGE; loadQuestions(); }
+});
+document.getElementById("ritems-prev").addEventListener("click", () => {
+  S.ritemsOffset = Math.max(0, S.ritemsOffset - RITEMS_PAGE);
+  loadRunItems(document.getElementById("v-run").dataset.runId);
+});
+document.getElementById("ritems-next").addEventListener("click", () => {
+  if (S.ritemsOffset + RITEMS_PAGE < S.ritemsTotal) {
+    S.ritemsOffset += RITEMS_PAGE;
+    loadRunItems(document.getElementById("v-run").dataset.runId);
+  }
+});
+document.getElementById("run-items-date-sort").addEventListener("click", () => {
+  S.ritemsDateAsc = !S.ritemsDateAsc;
+  loadRunItems(document.getElementById("v-run").dataset.runId);
 });
 document.getElementById("bench-create-btn").addEventListener("click", guard(async () => {
   const name = document.getElementById("bench-new-name").value.trim();

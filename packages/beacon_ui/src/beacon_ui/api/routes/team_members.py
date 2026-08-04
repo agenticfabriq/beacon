@@ -38,10 +38,20 @@ def add_team_member(
     ],
     session: Annotated[Session, Depends(get_session)],
 ) -> TeamMemberOut:
-    """Add a user to the team in the requested role."""
-    target_user = UserRepo(session).get_by_email(str(body.user_email))
-    if target_user is None or not target_user.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+    """Add a user to the team in the requested role, creating them if needed.
+
+    An email no account exists for yet is an invite, not an error: the user
+    record is created now, and when that person first signs in via OIDC with
+    this email the account links to their identity (UserService matches by
+    email when the subject is new).
+    """
+    repo = UserRepo(session)
+    target_user = repo.get_by_email(str(body.user_email))
+    if target_user is not None and not target_user.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT, "user exists but is deactivated")
+    if target_user is None:
+        email = str(body.user_email)
+        target_user = repo.create(email=email, name=email.split("@")[0])
 
     membership = MembershipRepo(session).grant(
         user_id=target_user.id,

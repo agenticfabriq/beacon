@@ -160,6 +160,7 @@ def list_results(
                 tokens_input=result.tokens_input,
                 tokens_output=result.tokens_output,
                 runtime_ms=result.runtime_ms,
+                created_at=result.created_at,
             )
         )
     return ResultListOut(

@@ -36,14 +36,24 @@ def test_non_admin_forbidden(api_client: TestClient, world: _World) -> None:
     assert response.status_code == 403
 
 
-def test_unknown_user_email_returns_404(api_client: TestClient, world: _World) -> None:
+def test_unknown_user_email_is_an_invite_not_an_error(
+    api_client: TestClient, world: _World
+) -> None:
+    """The account is created now and links to their identity at first login."""
     response = api_client.post(
         f"/v1/teams/{world.acme_team_id}/members",
         headers={"X-API-Key": world.alice_key},
-        json={"user_email": "ghost@example.com", "role": "team_member"},
+        json={"user_email": "paulina@example.com", "role": "team_member"},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 201, response.text
+
+    roster = api_client.get(
+        f"/v1/teams/{world.acme_team_id}/members",
+        headers={"X-API-Key": world.alice_key},
+    ).json()
+    emails = [m["email"] for m in (roster if isinstance(roster, list) else roster["members"])]
+    assert "paulina@example.com" in emails
 
 
 def test_unknown_team_returns_404(api_client: TestClient, world: _World) -> None:

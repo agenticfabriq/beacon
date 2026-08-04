@@ -267,6 +267,11 @@ def suite_items(
                     else None
                 ),
                 has_gold_sql=bool((item.gold_answer or {}).get("sql")),
+                gold_sql=(
+                    str((item.gold_answer or {}).get("sql"))
+                    if (item.gold_answer or {}).get("sql")
+                    else None
+                ),
             )
             for item in page
         ],

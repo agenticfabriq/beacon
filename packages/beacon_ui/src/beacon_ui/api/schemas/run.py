@@ -96,5 +96,6 @@ class RunOut(BaseModel):
     # Set when the run has been retired. The row stays and keeps its results;
     # it just stops counting. A reader has to be able to see that and why.
     invalidated_at: datetime | None = None
+    created_at: datetime | None = None
     invalidation_reason: str | None = None
     summary: RunSummaryOut
