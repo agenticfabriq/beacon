@@ -79,6 +79,25 @@ of a fractional gold under got-facts: 53 for 52.63 is presentation.)
 `5e-7` absolute / `1e-5` relative, either bound satisfying. Whole numbers
 exact, as above. The rounding rule belongs to got-facts only.
 
+## Duplicate rows
+
+Undeclared, multiplicity means something: the same rows with different
+multiplicity is not obviously the same answer, and beacon compares multisets.
+BIRD's published EX compares `set(rows)` — duplicates collapse, in either
+direction — so BIRD items declare `duplicate_rows_insignificant` in their
+tolerance and the one grader honours it in both metrics. This matches a
+published rule we do not endorse, adopted with eyes open so that exact on
+BIRD is the number the leaderboard publishes (the gap was 24 cases in 2,899,
+0.83 points understated).
+
+## Numeric bounds vs BIRD's exactness
+
+BIRD's own evaluator applies no numeric tolerance — it executes both sides in
+one SQLite, so bit-identical floats are guaranteed. Beacon's runners cross
+engines, where the same quantity arrives with different float noise, so the
+bounds above apply everywhere. This is a deliberate, recorded divergence from
+BIRD's letter; measured cost, 1 case in 2,899.
+
 ## String case
 
 `"West"` and `"west"` are different values, deliberately: case distinguishes

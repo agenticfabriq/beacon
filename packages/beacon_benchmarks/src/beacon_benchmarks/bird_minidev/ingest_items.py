@@ -101,6 +101,10 @@ def ingest_bird_tasks(
                 "source": "bird-minidev-v2",
                 "difficulty": task.difficulty,
                 "question_id": task.question_id,
+                # BIRD's published EX compares set(rows): duplicates collapse.
+                # Declared here so the one grader matches the leaderboard's own
+                # rule -- matched with eyes open, not endorsed (docs/grading.md).
+                "tolerance": {"duplicate_rows_insignificant": True},
             },
             created_by=created_by,
         )

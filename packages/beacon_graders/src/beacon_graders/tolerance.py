@@ -53,6 +53,11 @@ class Tolerance(BaseModel):
     # None means "no curated opinion" -- fall back to inferring from the gold
     # query, which is what beacon has always done.
     row_order_insensitive: bool | None = None
+    # BIRD's published EX compares set(rows): duplicate rows collapse, in
+    # either direction. Declared per item (set for BIRD, unset for Spider) so
+    # the one grader matches each leaderboard's own rule -- a published rule
+    # we match with eyes open, not one we endorse; see docs/grading.md.
+    duplicate_rows_insignificant: bool | None = None
 
     @field_validator("numeric_abs", "numeric_rel", mode="before")
     @classmethod

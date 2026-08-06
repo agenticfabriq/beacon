@@ -147,11 +147,25 @@ def _project_gold(gold: ResultSet, condition_cols: tuple[int, ...]) -> ResultSet
     )
 
 
+def _distinct_rows(rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """Collapse duplicate rows, keeping first occurrence order."""
+    seen: set[str] = set()
+    out: list[tuple[Any, ...]] = []
+    for row in rows:
+        key = repr(row)
+        if key not in seen:
+            seen.add(key)
+            out.append(row)
+    return out
+
+
 class ResultSetMatchGrader:
     name = "result_set_match"
     # v4: gold may be a set of accepted results (pass against any), with
     # per-accepted-result condition_cols honoured on the got-facts reading.
-    version = "v4"
+    # v5: duplicate_rows_insignificant honoured -- BIRD's published set()
+    # comparison, declared per item, collapsing duplicates in both metrics.
+    version = "v5"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"
@@ -187,6 +201,19 @@ class ResultSetMatchGrader:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
 
+        # BIRD's published set() rule, declared per item: duplicates collapse
+        # before counts and comparison, in both metrics. The declared true
+        # count survives the collapse only when the push was complete -- a
+        # preview's distinct count is unknowable and stays as declared.
+        dedupe = tolerance.duplicate_rows_insignificant is True
+        if dedupe:
+            candidate_was_complete = len(candidate.rows) == candidate_row_count
+            candidate = ResultSet(
+                columns=candidate.columns, rows=_distinct_rows(candidate.rows)
+            )
+            if candidate_was_complete:
+                candidate_row_count = len(candidate.rows)
+
         # The candidate passes against ANY accepted gold. Each variant gets the
         # same reading a single gold would; the first variant's diagnosis is
         # the reported one when nothing matches.
@@ -197,18 +224,25 @@ class ResultSetMatchGrader:
         mismatches: list[Mismatch | None] = []
         for index, variant in enumerate(variants):
             gold = variant.result_set
+            gold_count = variant.row_count
+            if dedupe:
+                gold_was_complete = len(gold.rows) == gold_count
+                gold = ResultSet(columns=gold.columns, rows=_distinct_rows(gold.rows))
+                if gold_was_complete:
+                    gold_count = len(gold.rows)
             evidence_complete_v = (
                 len(candidate.rows) == candidate_row_count
-                and len(gold.rows) == variant.row_count
+                and len(gold.rows) == gold_count
             )
             mismatch_v: Mismatch | None = None
-            if candidate_row_count != variant.row_count:
+            if candidate_row_count != gold_count:
                 passed_v = False
                 facts_v = False
                 mismatch_v = Mismatch(
                     "row_count",
                     f"candidate returned {candidate_row_count} rows, "
-                    f"gold returned {variant.row_count}",
+                    f"gold returned {gold_count}"
+                    + (" (distinct, duplicates insignificant)" if dedupe else ""),
                 )
             elif evidence_complete_v:
                 passed_v = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
@@ -274,6 +308,8 @@ class ResultSetMatchGrader:
             raw["evidence_truncated"] = True
         if truncated_at_cap:
             raw["pushed_rows_capped_at"] = MAX_PUSHED_ROWS
+        if dedupe:
+            raw["duplicate_rows_insignificant"] = True
         if len(variants) > 1:
             raw["accepted_result_count"] = len(variants)
         if matched_index is not None:

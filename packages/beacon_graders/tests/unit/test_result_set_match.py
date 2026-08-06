@@ -346,3 +346,50 @@ def test_column_order_fails_exact_names_the_reason_and_the_closest_gold() -> Non
     assert facts.bool_value is True
     assert exact.raw_output["mismatch"]["kind"] == "column_order"
     assert exact.raw_output["gold_sample"] == [[1, 588.36, 785.15]]
+
+
+# ---- duplicate_rows_insignificant: BIRD's published set() rule (v5) ----
+
+
+def _flagged(gold: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    return gold, {"tolerance": {"duplicate_rows_insignificant": True}}
+
+
+def _grade_with_meta(
+    gold: dict[str, Any], metadata: dict[str, Any], output: dict[str, Any]
+) -> tuple[Any, Any]:
+    item = EvalItem(item_id="i-1", suite="s", query={"question": "q?"},
+                    ground_truth=gold, metadata=metadata)
+    verdicts = ResultSetMatchGrader().grade(item, _result(output))
+    exact = next(v for v in verdicts if v.metric != "got_facts")
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+    return exact, facts
+
+
+def test_duplicates_collapse_when_the_item_declares_them_insignificant() -> None:
+    """bird-1411's shape: gold repeats rows (12 -> 7 distinct), the candidate
+    returns the 7 distinct. BIRD's published EX compares set(); an item that
+    declares duplicate_rows_insignificant grades the way its leaderboard does."""
+    gold, meta = _flagged(_gold([[1], [1], [2], [2], [3]], row_count=5))
+    exact, facts = _grade_with_meta(gold, meta, _push([[1], [2], [3]]))
+
+    assert exact.bool_value is True
+    assert facts.bool_value is True
+    assert exact.raw_output["duplicate_rows_insignificant"] is True
+
+
+def test_duplicates_collapse_in_the_candidate_direction_too() -> None:
+    """bird-1435's shape: candidate repeats a row (3 -> 2 distinct)."""
+    gold, meta = _flagged(_gold([[1], [2]], row_count=2))
+    exact, _ = _grade_with_meta(gold, meta, _push([[1], [2], [2]]))
+
+    assert exact.bool_value is True
+
+
+def test_without_the_flag_multiplicity_still_means_something() -> None:
+    """Undeclared, beacon's multiset claim stands: the same rows with
+    different multiplicity is not obviously the same answer."""
+    exact, facts = _grade(_gold([[1], [1], [2], [2], [3]], row_count=5), _push([[1], [2], [3]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is False
