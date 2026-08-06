@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from itertools import combinations
 from typing import Any
 
@@ -116,13 +116,26 @@ def values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
 def is_rounding_of(value: float, other: float) -> bool:
     """Whether ``value`` is ``other`` rounded to some number of decimal places.
 
+    Under either rounding convention: engines disagree on halves (Python's
+    ``round`` is banker's, most SQL engines round half up), and 38.13 for
+    38.125 is the same quantity as 38.12 -- which convention an engine uses
+    is presentation, and presentation must not decide correctness. ``Decimal``
+    from ``str`` so binary float noise does not reintroduce itself.
+
     Rounding to zero places is presentation only for magnitudes of at least
     one: 53 for 52.63 is a rounding, but 0.0 for 0.196 collapses a small
     quantity to nothing -- that answer did not get the fact. (Found by the k12
     disagreement study, where the zero-place case credited exactly that.)
     """
     start = 0 if abs(other) >= 1.0 else 1
-    return any(abs(round(other, places) - value) <= 1e-9 for places in range(start, 7))
+    exact = Decimal(str(other))
+    for places in range(start, 7):
+        step = Decimal(1).scaleb(-places)
+        if abs(float(exact.quantize(step, rounding=ROUND_HALF_EVEN)) - value) <= 1e-9:
+            return True
+        if abs(float(exact.quantize(step, rounding=ROUND_HALF_UP)) - value) <= 1e-9:
+            return True
+    return False
 
 
 def facts_values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:

@@ -307,3 +307,25 @@ def test_condition_cols_do_not_rescue_wrong_scored_columns() -> None:
 
     assert exact.bool_value is False
     assert facts.bool_value is False
+
+
+def test_half_up_rounding_is_a_rounding_too() -> None:
+    """38.13 for 38.125 is half-up; Python's round() is banker's. Which
+    convention an engine rounds with is presentation, not a different answer.
+    (Spider local023 is exactly this pair.)"""
+    _, facts_half_up = _grade(_gold([[38.125]]), _push([[38.13]]))
+    _, facts_half_even = _grade(_gold([[38.125]]), _push([[38.12]]))
+    exact, _ = _grade(_gold([[38.125]]), _push([[38.13]]))
+
+    assert facts_half_up.bool_value is True
+    assert facts_half_even.bool_value is True
+    assert exact.bool_value is False
+
+
+def test_a_near_miss_is_not_a_rounding() -> None:
+    """6.47 for 6.48 rounds from nothing: a genuinely different average.
+    (Spider local152.)"""
+    exact, facts = _grade(_gold([[6.48]]), _push([[6.47]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is False
