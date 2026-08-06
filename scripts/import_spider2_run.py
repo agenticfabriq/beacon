@@ -50,6 +50,7 @@ from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
+from beacon_storage.repository.verdicts import VerdictRepo
 from uuid_extensions import uuid7
 
 if TYPE_CHECKING:
@@ -57,6 +58,12 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.orm import Session
+
+# Names the thing that actually graded: mnemiq's result_set_match against the
+# benchmark's published CSVs, not beacon's execution grader (which needs gold SQL
+# Spider 2.0-lite mostly does not publish).
+GRADER = "result_set_match"
+GRADER_VERSION = "v1"
 
 # mnemiq CaseResult.outcome -> beacon verdict. correct_facts is decided at call time.
 _OUTCOME = {
@@ -88,6 +95,38 @@ def _verdict(outcome: str, *, strict: bool) -> VerdictOutcome:
     if outcome == "correct_facts":
         return VerdictOutcome.FAIL if strict else VerdictOutcome.PASS
     return _OUTCOME.get(outcome, VerdictOutcome.ERROR)
+
+
+# mnemiq previews rows as a list of dicts; beacon's execution evidence wants the
+# columns and a list-of-lists sample, which is what renders the two result tables
+# side by side in the compare view.
+def _columns_and_sample(
+    preview: list[dict[str, Any]] | None, limit: int = 20
+) -> tuple[list[str], list[list[Any]]]:
+    if not preview:
+        return [], []
+    columns = list(preview[0].keys())
+    return columns, [[row.get(c) for c in columns] for row in preview[:limit]]
+
+
+def _mismatch(row: dict[str, Any]) -> dict[str, str] | None:
+    """Why a WRONG answer differed, in beacon's vocabulary.
+
+    Derived rather than recorded: mnemiq grades against several accepted results and
+    keeps the outcome, not the losing comparison. Row count and column arity are exact
+    from the preview; anything else is a value difference.
+    """
+    ours, gold = row.get("engine_row_count"), row.get("gold_row_count")
+    if isinstance(ours, int) and isinstance(gold, int) and ours != gold:
+        return {"kind": "row_count", "detail": f"candidate returned {ours} rows, gold {gold}"}
+    our_cols, _ = _columns_and_sample(row.get("engine_rows"))
+    gold_cols, _ = _columns_and_sample(row.get("gold_rows"))
+    if our_cols and gold_cols and len(our_cols) != len(gold_cols):
+        return {
+            "kind": "column_arity",
+            "detail": f"candidate has {len(our_cols)} columns, gold {len(gold_cols)}",
+        }
+    return {"kind": "values", "detail": "same shape, different values"}
 
 
 def main() -> int:
@@ -152,6 +191,19 @@ def main() -> int:
             item_rows = EvalItemRepo(session).list_active(suite=SUITE, team_id=team.id)
             suite_repo.add_items(suite_id=suite_row.id, item_ids=[r.item_id for r in item_rows])
 
+            # results.item_id carries the eval_item UUID (what grading and the
+            # matrix join on), never the benchmark's native case id.
+            item_by_case = {
+                str((r.item_metadata or {}).get("instance_id")): str(r.item_id)
+                for r in item_rows
+            }
+            accepted_counts = {
+                str((r.item_metadata or {}).get("instance_id")): (
+                    r.item_metadata or {}
+                ).get("accepted_result_count")
+                for r in item_rows
+            }
+
             from beacon_runner.sut.mnemiq import register_mnemiq_solution  # noqa: PLC0415
 
             solution = _solution_id(session, team.id, user_id, register_mnemiq_solution)
@@ -183,14 +235,22 @@ def main() -> int:
             RunRepo(session).mark_running(run.id)
 
             result_repo = ResultRepo(session)
+            verdict_repo = VerdictRepo(session)
             for row in rows:
+                case_id = str(row.get("case_id", ""))
+                item_uuid = item_by_case.get(case_id)
+                if item_uuid is None:
+                    raise SystemExit(
+                        f"case_id {case_id!r} is not among the suite's items; "
+                        "load the benchmark before importing a run against it"
+                    )
                 outcome = str(row.get("outcome", "error"))
                 counts[outcome] = counts.get(outcome, 0) + 1
                 verdict = _verdict(outcome, strict=args.strict)
-                result_repo.create(
+                result_row = result_repo.create(
                     team_id=team.id,
                     run_id=run.id,
-                    item_id=str(row.get("case_id", "")),
+                    item_id=item_uuid,
                     attempt_idx=0,
                     output={
                         "sql": row.get("sql", ""),
@@ -209,6 +269,64 @@ def main() -> int:
                     ),
                     outcome=verdict,
                     error=row.get("answer") if outcome == "error" else None,
+                )
+
+                # Only executed cases get verdicts. A deferral or an outage produced no
+                # result set to compare, and a got_facts verdict of "false" would report
+                # a wrong answer where there was no answer at all.
+                if outcome not in {"correct", "correct_facts", "wrong"}:
+                    continue
+                exact = outcome == "correct"
+                facts = outcome in {"correct", "correct_facts"}
+                our_cols, our_sample = _columns_and_sample(row.get("engine_rows"))
+                gold_cols, gold_sample = _columns_and_sample(row.get("gold_rows"))
+                raw: dict[str, object] = {
+                    "candidate_sql": row.get("sql", ""),
+                    "gold_sql": row.get("gold_sql", ""),
+                    "candidate_row_count": row.get("engine_row_count"),
+                    "gold_row_count": row.get("gold_row_count"),
+                    "candidate_columns": our_cols,
+                    "gold_columns": gold_cols,
+                    "candidate_sample": our_sample,
+                    "gold_sample": gold_sample,
+                    # Gold is a set of accepted results here, and the case passes against
+                    # any of them; the preview shows the first.
+                    "accepted_result_count": accepted_counts.get(case_id),
+                }
+                mismatch = None if exact else _mismatch(row)
+                if mismatch is not None:
+                    raw["mismatch"] = mismatch
+                verdict_repo.create(
+                    team_id=team.id,
+                    result_id=result_row.id,
+                    grader=GRADER,
+                    grader_version=GRADER_VERSION,
+                    metric="exact_match",
+                    criterion="correctness",
+                    bool_value=exact,
+                    value=1.0 if exact else 0.0,
+                    justification=(
+                        "Candidate result set matches an accepted gold result."
+                        if exact
+                        else f"Mismatch ({(mismatch or {}).get('kind')})."
+                    ),
+                    raw_output=raw,
+                )
+                verdict_repo.create(
+                    team_id=team.id,
+                    result_id=result_row.id,
+                    grader=GRADER,
+                    grader_version=GRADER_VERSION,
+                    metric="got_facts",
+                    criterion="correctness",
+                    bool_value=facts,
+                    value=1.0 if facts else 0.0,
+                    justification=(
+                        "Gold's data is present in the candidate (shape-tolerant)."
+                        if facts
+                        else "Gold's data is not present in the candidate, in any projection."
+                    ),
+                    raw_output={"exact_match": exact},
                 )
             RunRepo(session).mark_completed(run.id)
 
