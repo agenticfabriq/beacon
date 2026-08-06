@@ -8,17 +8,13 @@ by beacon's own ResultSetMatchGrader over those rows, the same grader every benc
 gets. mnemiq's grading survives as provenance (``Result.outcome``, the benchmark's own
 headline rule, and ``output.mnemiq_outcome``), never as beacon's claim.
 
-The outcome mapping decides ``Result.outcome`` (the EX column), so it is explicit:
-
-    correct, correct_facts  -> PASS    (both got the facts; see --strict)
-    wrong                   -> FAIL
-    deferred_wrongly        -> DEFER   (asked, declined; stays in the denominator)
-    error                   -> ERROR   (an outage or a crash, NOT an abstention)
-
-``correct_facts`` counts as PASS by default because Spider 2.0-lite's own grader passes
-when every gold column appears among the predicted columns by value -- extra context
-columns do not fail there, and calling them failures here would report a stricter number
-than the benchmark's own. ``--strict`` restricts PASS to exact matches.
+``Result.outcome`` (the EX column) derives from beacon's verdicts under the suite's
+declared headline metric -- got_facts for Spider 2.0-lite, whose own evaluator is the
+tolerant one (decision "(a)"). ``--strict`` derives from exact_match instead. The
+derivation applies ONLY where beacon has a verdict: DEFER and ERROR keep the runner's
+statement (deferred_wrongly -> DEFER, error -> ERROR), because they say whether a
+query was produced at all, not whether it was right -- a refusal is not a wrong
+answer, and the import asserts the counts survive unchanged.
 
 Usage::
 
@@ -65,7 +61,15 @@ if TYPE_CHECKING:
 
     from sqlalchemy.orm import Session
 
-# mnemiq CaseResult.outcome -> beacon verdict. correct_facts is decided at call time.
+# The suite's headline rule: Spider 2.0-lite's own evaluator is the tolerant
+# one (each gold column found among the candidate's, by value), so its EX is
+# got_facts. Declared on the suite so the matrix needs no lookup in code.
+HEADLINE_METRIC = "got_facts"
+
+# mnemiq CaseResult.outcome -> beacon verdict, used ONLY where beacon has no
+# verdict: DEFER and ERROR are statements about whether a query was produced
+# at all, not about whether it was right, and they stay the runner's. PASS and
+# FAIL derive from beacon's headline verdict (decision "(a)", 2026-08-07).
 _OUTCOME = {
     "wrong": VerdictOutcome.FAIL,
     "deferred_wrongly": VerdictOutcome.DEFER,
@@ -158,9 +162,18 @@ def main() -> int:
                     name=SUITE,
                     description="Spider 2.0-lite, local SQLite slice (135 cases).",
                     method="manual",
-                    suite_metadata={"source": "spider2-lite-local"},
+                    suite_metadata={
+                        "source": "spider2-lite-local",
+                        "headline_metric": HEADLINE_METRIC,
+                    },
                     created_by=user_id,
                 )
+            if suite_row.suite_metadata.get("headline_metric") != HEADLINE_METRIC:
+                suite_row.suite_metadata = {
+                    **suite_row.suite_metadata,
+                    "headline_metric": HEADLINE_METRIC,
+                }
+                session.flush()
             item_rows = EvalItemRepo(session).list_active(suite=SUITE, team_id=team.id)
             suite_repo.add_items(suite_id=suite_row.id, item_ids=[r.item_id for r in item_rows])
 
@@ -190,6 +203,8 @@ def main() -> int:
                     "candidates": 1,
                     "external_knowledge": True,
                     "graded_by": f"{grader.name} {grader.version}",
+                    "headline_metric": "exact_match" if args.strict else HEADLINE_METRIC,
+                    # DEFER and ERROR only; PASS/FAIL derive from beacon's verdicts.
                     "outcome_mapping": "mnemiq scripts/run_spider2.py",
                     # Whose grading the outcome mapping reflects, pinned the way
                     # imported_sha256 pins the file: mnemiq's grader has changed
@@ -200,7 +215,9 @@ def main() -> int:
                         if (rev := args.source_rev or meta.get("source_rev"))
                         else {}
                     ),
-                    "pass_semantics": "strict" if args.strict else "facts",
+                    "pass_semantics": (
+                        f"derived from beacon {'exact_match' if args.strict else HEADLINE_METRIC}"
+                    ),
                     # Basename only: a full path leaks the machine home directory,
                     # and this repo is public-track (repo-guard's rule). The hash
                     # says WHICH file was read -- two checkouts can carry the
@@ -217,6 +234,8 @@ def main() -> int:
 
             result_repo = ResultRepo(session)
             verdict_repo = VerdictRepo(session)
+            headline = "exact_match" if args.strict else HEADLINE_METRIC
+            derived_counts: dict[str, int] = {}
             beacon_exact = beacon_facts = beacon_graded = disagreements = 0
             for row in rows:
                 case_id = str(row.get("case_id", ""))
@@ -228,7 +247,6 @@ def main() -> int:
                     )
                 outcome = str(row.get("outcome", "error"))
                 counts[outcome] = counts.get(outcome, 0) + 1
-                verdict = _verdict(outcome, strict=args.strict)
                 output: dict[str, Any] = {
                     "sql": row.get("sql", ""),
                     "answer": row.get("answer", ""),
@@ -246,6 +264,53 @@ def main() -> int:
                 # matrix's EX* reads it from output; absent means "never claimed".
                 if (portable := row.get("portable_to_gold_engine")) is not None:
                     output["portable_to_gold_engine"] = portable
+
+                # Only executed cases get verdicts. A deferral or an outage produced no
+                # result set to compare, and a got_facts verdict of "false" would report
+                # a wrong answer where there was no answer at all. Corollary: never
+                # compute a rate from the verdicts table alone -- the denominator
+                # (all graded results, deferrals included) lives in results, which
+                # is how the matrix query reads it.
+                graded_verdicts = []
+                if outcome in {"correct", "correct_facts", "wrong"}:
+                    # Beacon grades the pushed rows itself: same grader as BIRD, so
+                    # exact_match and got_facts are beacon's claims, not mnemiq's
+                    # outcome string wearing beacon's label.
+                    shim_item = RunnerItem(
+                        item_id=str(item_row.item_id),
+                        suite=SUITE,
+                        query=dict(item_row.item_input or {}),
+                        ground_truth=dict(item_row.gold_answer or {}),
+                        metadata=dict(item_row.item_metadata or {}),
+                    )
+                    shim_result = ExecutionResult(
+                        output=output,
+                        output_kind="sql",
+                        trace=ExecutionStep(uuid="import", name="import", level="workflow"),
+                        tokens_input=0,
+                        tokens_output=0,
+                        runtime_ms=int(row.get("ms") or 0),
+                    )
+                    if grader.applicable(shim_item, shim_result):
+                        graded_verdicts = grader.grade(shim_item, shim_result)
+
+                # Result.outcome, decision "(a)": PASS/FAIL derive from beacon's
+                # headline verdict -- but ONLY where beacon has a verdict at all.
+                # A deferral or an outage keeps the runner's statement: it says
+                # whether a query was produced, not whether it was right, and
+                # deriving it from "no PASS verdict" would turn every refusal
+                # into a wrong answer.
+                by_metric = {
+                    (v.metric or grader.metric): bool(v.bool_value) for v in graded_verdicts
+                }
+                if graded_verdicts:
+                    verdict = (
+                        VerdictOutcome.PASS if by_metric.get(headline) else VerdictOutcome.FAIL
+                    )
+                else:
+                    verdict = _verdict(outcome, strict=args.strict)
+                derived_counts[verdict.value] = derived_counts.get(verdict.value, 0) + 1
+
                 result_row = result_repo.create(
                     team_id=team.id,
                     run_id=run.id,
@@ -262,37 +327,6 @@ def main() -> int:
                     outcome=verdict,
                     error=row.get("answer") if outcome == "error" else None,
                 )
-
-                # Only executed cases get verdicts. A deferral or an outage produced no
-                # result set to compare, and a got_facts verdict of "false" would report
-                # a wrong answer where there was no answer at all. Corollary: never
-                # compute a rate from the verdicts table alone -- the denominator
-                # (all graded results, deferrals included) lives in results, which
-                # is how the matrix query reads it.
-                if outcome not in {"correct", "correct_facts", "wrong"}:
-                    continue
-
-                # Beacon grades the pushed rows itself: same grader as BIRD, so
-                # exact_match and got_facts are beacon's claims, not mnemiq's
-                # outcome string wearing beacon's label.
-                shim_item = RunnerItem(
-                    item_id=str(item_row.item_id),
-                    suite=SUITE,
-                    query=dict(item_row.item_input or {}),
-                    ground_truth=dict(item_row.gold_answer or {}),
-                    metadata=dict(item_row.item_metadata or {}),
-                )
-                shim_result = ExecutionResult(
-                    output=output,
-                    output_kind="sql",
-                    trace=ExecutionStep(uuid="import", name="import", level="workflow"),
-                    tokens_input=0,
-                    tokens_output=0,
-                    runtime_ms=int(row.get("ms") or 0),
-                )
-                if not grader.applicable(shim_item, shim_result):
-                    continue  # nothing pushed to compare, or gold not materialized
-                graded_verdicts = grader.grade(shim_item, shim_result)
                 for graded in graded_verdicts:
                     verdict_repo.create(
                         team_id=team.id,
@@ -306,23 +340,33 @@ def main() -> int:
                         justification=graded.justification,
                         raw_output=graded.raw_output,
                     )
-                beacon_graded += 1
-                by_metric = {
-                    (v.metric or grader.metric): bool(v.bool_value) for v in graded_verdicts
-                }
-                beacon_exact += int(by_metric.get("exact_match", False))
-                beacon_facts += int(by_metric.get("got_facts", False))
-                if by_metric.get("got_facts", False) != (
-                    outcome in {"correct", "correct_facts"}
-                ):
-                    disagreements += 1
+                if graded_verdicts:
+                    beacon_graded += 1
+                    beacon_exact += int(by_metric.get("exact_match", False))
+                    beacon_facts += int(by_metric.get("got_facts", False))
+                    if by_metric.get("got_facts", False) != (
+                        outcome in {"correct", "correct_facts"}
+                    ):
+                        disagreements += 1
             RunRepo(session).mark_completed(run.id)
 
+            # The guard, asserted rather than eyeballed: derivation must not
+            # touch the refusal/outage classes. 11 deferrals in, 11 DEFER out.
+            if derived_counts.get("DEFER", 0) != counts.get("deferred_wrongly", 0):
+                raise SystemExit(
+                    f"derivation changed the DEFER count: "
+                    f"{counts.get('deferred_wrongly', 0)} deferrals in the report, "
+                    f"{derived_counts.get('DEFER', 0)} DEFER results out"
+                )
+            if derived_counts.get("ERROR", 0) != counts.get("error", 0):
+                raise SystemExit(
+                    f"derivation changed the ERROR count: "
+                    f"{counts.get('error', 0)} errors in the report, "
+                    f"{derived_counts.get('ERROR', 0)} ERROR results out"
+                )
+
             total = len(rows)
-            passed = sum(
-                1 for r in rows if _verdict(str(r.get("outcome")), strict=args.strict)
-                == VerdictOutcome.PASS
-            )
+            passed = derived_counts.get("PASS", 0)
             print(f"suite     {SUITE} ({DATASET_VERSION})")
             print(
                 f"items     {ingested.inserted} inserted, {ingested.refreshed} re-versioned, "

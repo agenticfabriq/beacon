@@ -20,7 +20,21 @@ matrix shows three columns:
 
 EX is leaderboard-comparable and suite-defined; the other two mean the same
 thing on every row. When EX equals one of them, that coincidence is
-information about how the benchmark grades, not a bug.
+information about how the benchmark grades, not a bug: a strict benchmark's
+EX sits on exact, a tolerant one's on got-facts.
+
+Suites DECLARE their headline metric (`headline_metric` in suite metadata:
+`exact_match` for BIRD, `got_facts` for Spider 2.0-lite), and every scored
+outcome derives from beacon's verdicts under that declaration — imported runs
+included. The derivation applies only where a verdict exists: DEFER and ERROR
+remain the runner's statement about whether a query was produced at all,
+never inferred from the absence of a passing verdict.
+
+**Re-basing note:** Spider EX quoted before 2026-08-07 (53.4% on the local
+slice) was the runner's own pre-convergence grading; from the derivation
+change onward EX is beacon's (55.7% on the same run). The run config
+(`graded_by`, `headline_metric`, `imported_sha256`) and `dataset_version`
+distinguish the two eras; comparisons across them must re-base.
 
 ## got-facts
 
