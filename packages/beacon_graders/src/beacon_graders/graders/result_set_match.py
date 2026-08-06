@@ -12,11 +12,19 @@ the visible rows are complete the comparison is the full one, and when they
 are a preview the reading falls back to multiset containment -- every visible
 row must be accounted for in gold -- with ``evidence_truncated`` recorded on
 the verdict so the drill-down shows the epistemic status.
+
+Gold may be a SET of accepted results (Spider 2.0-lite publishes several per
+question); the candidate passes against any of them, and the single-gold shape
+is the one-element case. A per-accepted-result ``condition_cols`` restriction
+-- the columns the benchmark's own evaluator scores -- loosens only the
+got-facts reading; exact match stays a full-table claim so the strict number
+means the same thing on every benchmark.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from beacon_graders.comparison import (
@@ -69,9 +77,81 @@ def _columns_from(payload: Any, rows_payload: Any) -> list[str]:
     return []
 
 
+@dataclass(frozen=True)
+class _GoldVariant:
+    """One acceptable gold table, with the benchmark's column restriction."""
+
+    result_set: ResultSet
+    row_count: int
+    condition_cols: tuple[int, ...]
+
+
+def _gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
+    """Every acceptable gold for the item, in one canonical shape.
+
+    A set of ``accepted_results`` -- any of which passes -- is the general
+    form of gold; the single ``rows``/``columns`` shape (BIRD's) reads as a
+    one-element set. ``condition_cols`` aligns positionally: for each accepted
+    result, which of its columns the benchmark's own evaluator scores.
+    """
+    accepted = gold_answer.get("accepted_results")
+    if isinstance(accepted, list) and accepted:
+        restrictions = gold_answer.get("condition_cols") or []
+        variants: list[_GoldVariant] = []
+        for index, entry in enumerate(accepted):
+            if not isinstance(entry, dict):
+                continue
+            rows = _rows_from(entry.get("rows"))
+            if rows is None:
+                continue
+            restriction = restrictions[index] if index < len(restrictions) else []
+            variants.append(
+                _GoldVariant(
+                    result_set=ResultSet(
+                        columns=_columns_from(entry.get("columns"), entry.get("rows")),
+                        rows=rows,
+                    ),
+                    row_count=int(entry.get("row_count") or len(rows)),
+                    condition_cols=tuple(int(c) for c in (restriction or [])),
+                )
+            )
+        return variants
+    rows = _rows_from(gold_answer.get("rows"))
+    if rows is None:
+        return []
+    return [
+        _GoldVariant(
+            result_set=ResultSet(
+                columns=_columns_from(gold_answer.get("columns"), gold_answer.get("rows")),
+                rows=rows,
+            ),
+            row_count=int(gold_answer.get("row_count") or len(rows)),
+            condition_cols=(),
+        )
+    ]
+
+
+def _project_gold(gold: ResultSet, condition_cols: tuple[int, ...]) -> ResultSet:
+    """The benchmark-scored columns of a gold table; empty means all of it.
+
+    Applied to the got-facts reading only: exact match stays a full-table
+    claim, so the strict number means the same thing on every benchmark.
+    """
+    if not condition_cols:
+        return gold
+    arity = len(gold.rows[0]) if gold.rows else len(gold.columns)
+    keep = [i for i in condition_cols if 0 <= i < arity]
+    return ResultSet(
+        columns=[gold.columns[i] for i in keep if i < len(gold.columns)],
+        rows=[tuple(row[i] for i in keep) for row in gold.rows],
+    )
+
+
 class ResultSetMatchGrader:
     name = "result_set_match"
-    version = "v3"
+    # v4: gold may be a set of accepted results (pass against any), with
+    # per-accepted-result condition_cols honoured on the got-facts reading.
+    version = "v4"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"
@@ -82,18 +162,12 @@ class ResultSetMatchGrader:
             return False
         if _rows_from(result.output.get("rows")) is None:
             return False
-        gold = item.ground_truth or {}
-        return _rows_from(gold.get("rows")) is not None
+        return bool(_gold_variants(item.ground_truth or {}))
 
     def grade(self, item: EvalItem, result: ExecutionResult) -> list[Verdict]:
-        """Compare pushed rows against materialized gold rows."""
+        """Compare pushed rows against materialized gold rows, any accepted gold."""
         gold_answer = item.ground_truth or {}
-        gold_rows = _rows_from(gold_answer.get("rows")) or []
-        gold = ResultSet(
-            columns=_columns_from(gold_answer.get("columns"), gold_answer.get("rows")),
-            rows=gold_rows,
-        )
-        gold_row_count = int(gold_answer.get("row_count") or len(gold.rows))
+        variants = _gold_variants(gold_answer)  # applicable() guarantees at least one
 
         pushed_rows_payload = result.output.get("rows")
         candidate_rows = _rows_from(pushed_rows_payload) or []
@@ -113,34 +187,65 @@ class ResultSetMatchGrader:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
 
+        # The candidate passes against ANY accepted gold. Each variant gets the
+        # same reading a single gold would; the first variant's diagnosis is
+        # the reported one when nothing matches.
+        passed = False
+        facts = False
+        matched_index: int | None = None
+        first_mismatch: Mismatch | None = None
+        for index, variant in enumerate(variants):
+            gold = variant.result_set
+            evidence_complete_v = (
+                len(candidate.rows) == candidate_row_count
+                and len(gold.rows) == variant.row_count
+            )
+            mismatch_v: Mismatch | None = None
+            if candidate_row_count != variant.row_count:
+                passed_v = False
+                facts_v = False
+                mismatch_v = Mismatch(
+                    "row_count",
+                    f"candidate returned {candidate_row_count} rows, "
+                    f"gold returned {variant.row_count}",
+                )
+            elif evidence_complete_v:
+                passed_v = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
+                facts_v = passed_v or got_facts(
+                    candidate, _project_gold(gold, variant.condition_cols), tolerance
+                )
+                if not passed_v:
+                    mismatch_v = diagnose(candidate, gold, order_sensitive, tolerance)
+            else:
+                # A preview: the true counts agree; every visible row must be
+                # accounted for in gold. Weaker evidence, and labelled as such.
+                passed_v = contains_rows(candidate.rows, gold.rows, tolerance)
+                facts_v = passed_v or got_facts_contained(
+                    candidate, _project_gold(gold, variant.condition_cols), tolerance
+                )
+                if not passed_v:
+                    mismatch_v = Mismatch(
+                        "values",
+                        "a pushed row matches no gold row (compared as a preview: "
+                        "the push carries fewer rows than it counted)",
+                    )
+            if index == 0:
+                first_mismatch = mismatch_v
+            if passed_v and matched_index is None:
+                matched_index = index
+            passed = passed or passed_v
+            facts = facts or facts_v
+            if passed and facts:
+                break
+
+        # Evidence in raw reads from the gold that matched, or the first one.
+        shown = variants[matched_index if matched_index is not None else 0]
+        gold = shown.result_set
+        gold_row_count = shown.row_count
         evidence_complete = (
             len(candidate.rows) == candidate_row_count and len(gold.rows) == gold_row_count
         )
-
-        mismatch: Mismatch | None = None
-        if candidate_row_count != gold_row_count:
-            passed = False
-            facts = False
-            mismatch = Mismatch(
-                "row_count",
-                f"candidate returned {candidate_row_count} rows, gold returned {gold_row_count}",
-            )
-        elif evidence_complete:
-            passed = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
-            facts = passed or got_facts(candidate, gold, tolerance)
-            if not passed:
-                mismatch = diagnose(candidate, gold, order_sensitive, tolerance)
-        else:
-            # A preview: the true counts agree; every visible row must be
-            # accounted for in gold. Weaker evidence, and labelled as such.
-            passed = contains_rows(candidate.rows, gold.rows, tolerance)
-            facts = passed or got_facts_contained(candidate, gold, tolerance)
-            if not passed:
-                mismatch = Mismatch(
-                    "values",
-                    "a pushed row matches no gold row (compared as a preview: "
-                    "the push carries fewer rows than it counted)",
-                )
+        mismatch = None if passed else first_mismatch
 
         raw: dict[str, Any] = {
             "candidate_sql": result.output.get("sql"),
@@ -158,6 +263,12 @@ class ResultSetMatchGrader:
             raw["evidence_truncated"] = True
         if truncated_at_cap:
             raw["pushed_rows_capped_at"] = MAX_PUSHED_ROWS
+        if len(variants) > 1:
+            raw["accepted_result_count"] = len(variants)
+        if matched_index is not None:
+            raw["matched_accepted_index"] = matched_index
+        if any(v.condition_cols for v in variants):
+            raw["condition_cols"] = [list(v.condition_cols) for v in variants]
         if (engine := result.output.get("engine")) is not None:
             raw["engine"] = engine
         if (portable := result.output.get("portable_to_gold_engine")) is not None:

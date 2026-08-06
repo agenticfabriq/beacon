@@ -231,3 +231,79 @@ def test_tie_order_variance_fails_exact_but_passes_got_facts() -> None:
     assert exact.bool_value is False
     assert facts.bool_value is True
 
+
+
+# ---- multi-gold: a set of accepted results, any of which passes (v4) ----
+
+
+def _accepted(*tables: dict[str, Any], **over: Any) -> dict[str, Any]:
+    gold: dict[str, Any] = {"accepted_results": list(tables), "sql": ""}
+    gold.update(over)
+    return gold
+
+
+def _table(columns: list[str], rows: list[list[Any]]) -> dict[str, Any]:
+    return {"columns": columns, "rows": rows}
+
+
+def test_applicable_with_accepted_results_and_no_top_level_rows() -> None:
+    grader = ResultSetMatchGrader()
+    gold = _accepted(_table(["a"], [[1]]))
+
+    assert grader.applicable(_item(gold), _result(_push([[1]])))
+
+
+def test_any_accepted_result_passes_and_names_which() -> None:
+    # Spider 2.0-lite publishes several acceptable answers; matching any one
+    # of them is a pass, and the drill-down should say which one it was.
+    gold = _accepted(_table(["a"], [[1], [2]]), _table(["total"], [[3], [4]]))
+    exact, facts = _grade(gold, _push([[3], [4]]))
+
+    assert exact.bool_value is True
+    assert facts.bool_value is True
+    assert exact.raw_output["matched_accepted_index"] == 1
+    assert exact.raw_output["accepted_result_count"] == 2
+
+
+def test_no_accepted_result_matching_fails_with_the_first_golds_diagnosis() -> None:
+    gold = _accepted(_table(["a"], [[1]]), _table(["a"], [[2]]))
+    exact, facts = _grade(gold, _push([[9]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is False
+    assert exact.raw_output["mismatch"]["kind"] == "values"
+
+
+def test_row_count_gates_each_accepted_result_separately() -> None:
+    # One accepted answer has two rows, the other three; a two-row candidate
+    # is compared against the two-row gold, not refused outright.
+    gold = _accepted(_table(["a"], [[1], [2]]), _table(["a"], [[1], [2], [3]]))
+    exact, _ = _grade(gold, _push([[1], [2]]))
+
+    assert exact.bool_value is True
+
+
+def test_condition_cols_loosen_got_facts_but_never_exact() -> None:
+    # The benchmark scores only column 0 of this gold (condition_cols). The
+    # strict reading still demands the full table, so exact stays comparable
+    # across benchmarks; the tolerant reading honours the curation.
+    gold = _accepted(
+        _table(["id", "note"], [[1, "x"], [2, "y"]]),
+        condition_cols=[[0]],
+    )
+    exact, facts = _grade(gold, _push([[1, "different"], [2, "other"]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+    assert exact.raw_output["condition_cols"] == [[0]]
+
+
+def test_condition_cols_do_not_rescue_wrong_scored_columns() -> None:
+    gold = _accepted(
+        _table(["id", "note"], [[1, "x"], [2, "y"]]),
+        condition_cols=[[0]],
+    )
+    exact, facts = _grade(gold, _push([[7, "x"], [8, "y"]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is False
