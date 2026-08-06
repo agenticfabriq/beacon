@@ -393,3 +393,39 @@ def test_without_the_flag_multiplicity_still_means_something() -> None:
 
     assert exact.bool_value is False
     assert facts.bool_value is False
+
+
+# ---- stored evidence: JSONB scrambles dict keys; columns arrays do not ----
+
+
+def test_stored_dict_rows_grade_by_the_stamped_column_order() -> None:
+    """JSONB canonicalizes object keys at rest, so dict rows read back from
+    storage have lost their wire order. An ordered columns array restores it,
+    and must win over insertion order. (Found when a regrade over scrambled
+    rows flipped 699 outcomes before being reverted.)"""
+    gold = _gold([["Ann", "Smith"]], columns=["first", "last"])
+    scrambled = _push(
+        [{"last": "Smith", "first": "Ann"}], columns=["first", "last"], row_count=1
+    )
+    exact, _ = _grade(gold, scrambled)
+
+    assert exact.bool_value is True
+
+
+def test_dict_rows_without_a_columns_array_trust_insertion_order() -> None:
+    """An in-flight dict (never stored) still carries the wire order."""
+    gold = _gold([["Ann", "Smith"]], columns=["first", "last"])
+    exact, _ = _grade(gold, _push([{"first": "Ann", "last": "Smith"}], row_count=1))
+
+    assert exact.bool_value is True
+
+
+def test_a_preview_with_insignificant_duplicates_grades_by_containment() -> None:
+    """The declared raw count and the distinct gold count are not comparable
+    when the push is a preview -- the count gate stands down and the visible
+    rows decide by containment."""
+    gold, meta = _flagged(_gold([[1], [1], [2]], row_count=3))
+    exact, facts = _grade_with_meta(gold, meta, _push([[1], [2]], row_count=3))
+
+    assert exact.bool_value is True
+    assert facts.bool_value is True

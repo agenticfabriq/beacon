@@ -196,7 +196,7 @@ def ingest_result(
     item = _eval_item(session, item_id=body.item_id, suite=run.suite)
     _assert_trace_matches_declared_config(body, run_config=run.config)
     exec_result = ExecutionResult(
-        output=body.output,
+        output=_stamped_output(body.output),
         output_kind=body.output_kind,
         trace=_trace_step(body),
         tokens_input=body.tokens_input,
@@ -236,11 +236,30 @@ def ingest_result(
     )
 
 
+def _stamped_output(output: dict[str, Any]) -> dict[str, Any]:
+    """The push's output with the wire column order made durable.
+
+    Dict-shaped rows carry their SELECT order only while in flight: JSONB
+    canonicalizes object keys at rest, and column order is part of exact
+    match. Stamp an ordered ``columns`` array now, while the order is still
+    the wire's, so the stored evidence can be regraded faithfully later.
+    """
+    rows = output.get("rows")
+    if (
+        isinstance(rows, list)
+        and rows
+        and isinstance(rows[0], dict)
+        and not output.get("columns")
+    ):
+        return {**output, "columns": list(rows[0].keys())}
+    return output
+
+
 def _payload_matches(existing: Result, body: ResultIngestIn) -> bool:
     """Return whether a re-push is byte-identical to what is already stored."""
     stored: dict[str, Any] = dict(existing.output)
     return (
-        stored == body.output
+        stored == _stamped_output(body.output)
         and existing.output_kind == body.output_kind
         and existing.tokens_input == body.tokens_input
         and existing.tokens_output == body.tokens_output

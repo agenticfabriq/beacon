@@ -50,23 +50,38 @@ _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 MAX_PUSHED_ROWS = 1000
 
 
-def _rows_from(payload: Any) -> list[tuple[Any, ...]] | None:
+def _rows_from(payload: Any, columns: list[str] | None = None) -> list[tuple[Any, ...]] | None:
     """Parse a pushed or materialized ``rows`` value into canonical row tuples.
 
     Accepts a list of lists (the wire shape) or a list of dicts (mnemiq's
-    report shape, column name -> value; dict order is insertion order).
+    report shape, column name -> value). Dict rows are ordered by ``columns``
+    when given: JSONB canonicalizes object keys, so a dict read back from
+    storage has LOST its wire order, and only an ordered columns array can
+    restore it. Insertion order is trusted only when no columns are supplied
+    (an in-flight dict, never stored). This is load-bearing for exact match,
+    where column order is part of the claim.
     """
     if not isinstance(payload, list):
         return None
     rows: list[tuple[Any, ...]] = []
     for entry in payload:
         if isinstance(entry, dict):
-            rows.append(tuple(entry.values()))
+            if columns:
+                rows.append(tuple(entry.get(c) for c in columns))
+            else:
+                rows.append(tuple(entry.values()))
         elif isinstance(entry, (list, tuple)):
             rows.append(tuple(entry))
         else:
             return None
     return canonicalize_rows(rows)
+
+
+def _explicit_columns(payload: Any) -> list[str] | None:
+    """An ordered columns declaration, if the record carries one."""
+    if isinstance(payload, list) and payload and all(isinstance(c, str) for c in payload):
+        return list(payload)
+    return None
 
 
 def _columns_from(payload: Any, rows_payload: Any) -> list[str]:
@@ -101,7 +116,7 @@ def _gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
         for index, entry in enumerate(accepted):
             if not isinstance(entry, dict):
                 continue
-            rows = _rows_from(entry.get("rows"))
+            rows = _rows_from(entry.get("rows"), _explicit_columns(entry.get("columns")))
             if rows is None:
                 continue
             restriction = restrictions[index] if index < len(restrictions) else []
@@ -116,7 +131,7 @@ def _gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
                 )
             )
         return variants
-    rows = _rows_from(gold_answer.get("rows"))
+    rows = _rows_from(gold_answer.get("rows"), _explicit_columns(gold_answer.get("columns")))
     if rows is None:
         return []
     return [
@@ -184,7 +199,8 @@ class ResultSetMatchGrader:
         variants = _gold_variants(gold_answer)  # applicable() guarantees at least one
 
         pushed_rows_payload = result.output.get("rows")
-        candidate_rows = _rows_from(pushed_rows_payload) or []
+        pushed_columns = _explicit_columns(result.output.get("columns"))
+        candidate_rows = _rows_from(pushed_rows_payload, pushed_columns) or []
         truncated_at_cap = len(candidate_rows) > MAX_PUSHED_ROWS
         if truncated_at_cap:
             candidate_rows = candidate_rows[:MAX_PUSHED_ROWS]
@@ -206,13 +222,16 @@ class ResultSetMatchGrader:
         # count survives the collapse only when the push was complete -- a
         # preview's distinct count is unknowable and stays as declared.
         dedupe = tolerance.duplicate_rows_insignificant is True
+        candidate_was_complete = len(candidate.rows) == candidate_row_count
         if dedupe:
-            candidate_was_complete = len(candidate.rows) == candidate_row_count
             candidate = ResultSet(
                 columns=candidate.columns, rows=_distinct_rows(candidate.rows)
             )
             if candidate_was_complete:
                 candidate_row_count = len(candidate.rows)
+            # else: the declared count is a raw count and the distinct count is
+            # unknowable from a preview -- the count gate below must not compare
+            # raw against distinct, so it stands down and containment decides.
 
         # The candidate passes against ANY accepted gold. Each variant gets the
         # same reading a single gold would; the first variant's diagnosis is
@@ -235,7 +254,7 @@ class ResultSetMatchGrader:
                 and len(gold.rows) == gold_count
             )
             mismatch_v: Mismatch | None = None
-            if candidate_row_count != gold_count:
+            if candidate_row_count != gold_count and not (dedupe and not candidate_was_complete):
                 passed_v = False
                 facts_v = False
                 mismatch_v = Mismatch(

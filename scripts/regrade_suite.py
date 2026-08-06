@@ -74,7 +74,7 @@ def main() -> int:
             )
 
             verdict_repo = VerdictRepo(session)
-            graded = skipped = flipped = 0
+            graded = skipped = flipped = orderless = 0
             true_counts: dict[str, int] = {}
             for run in runs:
                 for result in session.scalars(
@@ -83,6 +83,22 @@ def main() -> int:
                     item_row = items.get(str(result.item_id))
                     if item_row is None:
                         skipped += 1
+                        continue
+                    # Dict-shaped rows read back from JSONB have LOST their wire
+                    # column order unless an ordered columns array was stored
+                    # beside them. Column order is part of exact match, so such
+                    # evidence cannot be regraded -- refusing beats mangling.
+                    # (Found the hard way: a regrade over orderless rows flipped
+                    # 699 outcomes on scrambled columns before being reverted.)
+                    stored_rows = (result.output or {}).get("rows")
+                    stored_columns = (result.output or {}).get("columns")
+                    if (
+                        isinstance(stored_rows, list)
+                        and stored_rows
+                        and isinstance(stored_rows[0], dict)
+                        and not stored_columns
+                    ):
+                        orderless += 1
                         continue
                     shim_item = RunnerItem(
                         item_id=str(item_row.item_id),
@@ -134,7 +150,7 @@ def main() -> int:
             print(f"runs      {len(runs)} valid")
             print(
                 f"graded    {graded} results at {grader.name} {grader.version}, "
-                f"{skipped} skipped"
+                f"{skipped} skipped, {orderless} refused (no ordered columns in evidence)"
             )
             for metric in sorted(true_counts):
                 print(f"  {metric:12s} {true_counts[metric]} true")

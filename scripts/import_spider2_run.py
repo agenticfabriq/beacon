@@ -249,13 +249,25 @@ def main() -> int:
                     )
                 outcome = str(row.get("outcome", "error"))
                 counts[outcome] = counts.get(outcome, 0) + 1
+                engine_rows = row.get("engine_rows")
                 output: dict[str, Any] = {
                     "sql": row.get("sql", ""),
                     "answer": row.get("answer", ""),
                     "db_id": row.get("db_id"),
                     # The pushed evidence beacon grades: mnemiq's row preview
-                    # (dicts, first N rows) plus the true count.
-                    "rows": row.get("engine_rows"),
+                    # (dicts, first N rows) plus the true count. The ordered
+                    # columns array is stamped HERE, while dict order is still
+                    # the wire order -- JSONB scrambles object keys at rest, and
+                    # without this the SELECT order (part of exact match) is
+                    # unrecoverable from storage.
+                    "rows": engine_rows,
+                    "columns": (
+                        list(engine_rows[0].keys())
+                        if isinstance(engine_rows, list)
+                        and engine_rows
+                        and isinstance(engine_rows[0], dict)
+                        else None
+                    ),
                     "row_count": row.get("engine_row_count"),
                     "engine_row_count": row.get("engine_row_count"),
                     "gold_row_count": row.get("gold_row_count"),
