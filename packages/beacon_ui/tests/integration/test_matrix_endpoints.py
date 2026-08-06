@@ -281,3 +281,47 @@ def test_rows_graded_before_the_second_metric_read_none_not_zero(
     row = _matrix(api_client, world, seeded)["rows"][0]
 
     assert row["got_facts_rate"] is None
+
+
+def test_only_the_latest_verdict_version_is_read(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """Grader versions accumulate on a result as history; the matrix must
+    read the CURRENT one, not "any version true". An old true reading
+    superseded by a false one stays retired -- and the reverse counts."""
+    from beacon_storage.models.runs import Result
+    from beacon_storage.repository.verdicts import VerdictRepo
+    from sqlalchemy import select
+
+    results = [
+        r
+        for r in session.scalars(
+            select(Result).where(Result.team_id == world.acme_team_id)
+        )
+        if str(r.outcome) in ("PASS", "FAIL")
+    ]
+    old_true_now_false, old_false_now_true = results[0], results[1]
+    for result, readings in (
+        (old_true_now_false, (True, False)),
+        (old_false_now_true, (False, True)),
+    ):
+        for version, value in zip(("v1", "v2"), readings, strict=True):
+            VerdictRepo(session).create(
+                team_id=world.acme_team_id,
+                result_id=result.id,
+                grader="execution_grounded_sql",
+                grader_version=version,
+                metric="got_facts",
+                criterion="correctness",
+                bool_value=value,
+                value=1.0 if value else 0.0,
+                justification="seeded",
+                raw_output=None,
+            )
+    session.commit()
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    # Exactly one of the two results is true at its latest reading. Under
+    # "any version true" both would count and the rate would be 2/3.
+    assert row["got_facts_rate"] == pytest.approx(1 / 3)

@@ -49,6 +49,25 @@ def _rate(part: int, whole: int) -> float | None:
     return part / whole if whole else None
 
 
+def _latest_reading(metric: str) -> sa.Subquery:
+    """The CURRENT verdict per result for one metric, one row each.
+
+    Grader versions accumulate on a result (history, not garbage), so a bare
+    join sees every era -- and an aggregate over it silently means "any
+    version true". One row per result: the most recently written reading.
+    Newest by id, not by version string -- ids are UUIDv7 (write-ordered),
+    while "v10" sorts before "v2" as text.
+    """
+    verdict = sa.orm.aliased(Verdict)
+    return (
+        sa.select(verdict.result_id, verdict.bool_value)
+        .where(verdict.metric == metric)
+        .distinct(verdict.result_id)
+        .order_by(verdict.result_id, verdict.id.desc())
+        .subquery(f"latest_{metric}")
+    )
+
+
 @router.get(
     "/suites/{suite_id}/results-matrix",
     response_model=MatrixOut,
@@ -70,11 +89,12 @@ def results_matrix(
         Run.invalidated_at.is_(None),
     ]
     engine_expr = sa.func.coalesce(Run.config["engine"].astext, "")
-    # Second verdict reading, aliased: the strict exact_match beside the
-    # tolerant got_facts. EX stays the benchmark-headline number (each
-    # benchmark defines its own); these two are beacon's suite-independent
-    # claims, one grader across benchmarks.
-    exact_verdict = sa.orm.aliased(Verdict)
+    # Two verdict readings: the strict exact_match beside the tolerant
+    # got_facts. EX stays the benchmark-headline number (each benchmark
+    # defines its own); these two are beacon's suite-independent claims, one
+    # grader across benchmarks -- and each read at its CURRENT version only.
+    got_facts_now = _latest_reading("got_facts")
+    exact_now = _latest_reading("exact_match")
 
     stmt = (
         sa.select(
@@ -114,15 +134,15 @@ def results_matrix(
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.output["portable_to_gold_engine"].astext.isnot(None))
             .label("n_portability_flagged"),
-            # The tolerant reading of the same execution. DISTINCT because the
-            # verdict join is otherwise able to multiply outcome counts; the
-            # got_facts join is at most one row per result, but the guarantee
-            # belongs in the query, not in a comment about today's graders.
+            # The tolerant reading of the same execution. The subquery joins
+            # are one row per result by construction; DISTINCT stays anyway --
+            # the guarantee belongs in the query, not in a comment about
+            # today's shape.
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(Verdict.bool_value.is_(True))
+            .filter(got_facts_now.c.bool_value.is_(True))
             .label("n_got_facts"),
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(exact_verdict.bool_value.is_(True))
+            .filter(exact_now.c.bool_value.is_(True))
             .label("n_exact"),
             sa.func.percentile_cont(0.5)
             .within_group(Result.tokens_input + Result.tokens_output)
@@ -131,19 +151,8 @@ def results_matrix(
         )
         .join(Result, Result.run_id == Run.id)
         .join(Solution, Solution.id == Run.solution_id)
-        .join(
-            Verdict,
-            sa.and_(Verdict.result_id == Result.id, Verdict.metric == "got_facts"),
-            isouter=True,
-        )
-        .join(
-            exact_verdict,
-            sa.and_(
-                exact_verdict.result_id == Result.id,
-                exact_verdict.metric == "exact_match",
-            ),
-            isouter=True,
-        )
+        .join(got_facts_now, got_facts_now.c.result_id == Result.id, isouter=True)
+        .join(exact_now, exact_now.c.result_id == Result.id, isouter=True)
         .where(*filters)
         .group_by(
             Run.solution_id,
