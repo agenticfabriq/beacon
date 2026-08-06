@@ -24,7 +24,7 @@ from beacon_runner.types import EvalItem as RunnerItem
 from beacon_runner.types import ExecutionResult, ExecutionStep
 from beacon_storage.db import make_engine, make_session_factory, session_scope
 from beacon_storage.models.eval_items import EvalItem
-from beacon_storage.models.runs import Result, Run
+from beacon_storage.models.runs import Result, Run, Verdict
 from beacon_storage.models.suites import Suite
 from beacon_storage.repository.verdicts import VerdictRepo
 
@@ -74,7 +74,7 @@ def main() -> int:
             )
 
             verdict_repo = VerdictRepo(session)
-            graded = skipped = flipped = orderless = 0
+            graded = skipped = flipped = orderless = current = 0
             true_counts: dict[str, int] = {}
             for run in runs:
                 for result in session.scalars(
@@ -99,6 +99,21 @@ def main() -> int:
                         and not stored_columns
                     ):
                         orderless += 1
+                        continue
+                    # One verdict per (result, metric, grader, version) -- the
+                    # schema enforces it, and a re-run must be a no-op, not a
+                    # crash into the unique index.
+                    already = session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(Verdict)
+                        .where(
+                            Verdict.result_id == result.id,
+                            Verdict.grader == grader.name,
+                            Verdict.grader_version == grader.version,
+                        )
+                    )
+                    if already:
+                        current += 1
                         continue
                     shim_item = RunnerItem(
                         item_id=str(item_row.item_id),
@@ -150,7 +165,8 @@ def main() -> int:
             print(f"runs      {len(runs)} valid")
             print(
                 f"graded    {graded} results at {grader.name} {grader.version}, "
-                f"{skipped} skipped, {orderless} refused (no ordered columns in evidence)"
+                f"{current} already at this version, {skipped} skipped, "
+                f"{orderless} refused (no ordered columns in evidence)"
             )
             for metric in sorted(true_counts):
                 print(f"  {metric:12s} {true_counts[metric]} true")

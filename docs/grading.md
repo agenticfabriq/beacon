@@ -126,11 +126,15 @@ Dict-shaped rows carry their column order only while in flight: JSONB
 canonicalizes object keys at rest, and column order is part of exact match.
 So pushed and imported evidence is stamped with an ordered `columns` array at
 arrival, the grader reads dict rows through it, and a regrade REFUSES
-evidence that lacks one -- refusing beats mangling. Consequence, recorded
-honestly: BIRD verdicts graded before the stamp (v1-v3) are the push-time
-record and cannot be re-derived at a later grader version; their evidence
-lost its column order in storage. The version skew between suites is visible
-and explained, not hidden.
+evidence that lacks one -- refusing beats mangling. BIRD verdicts graded
+before the stamp (v1-v3) are the push-time record and are not re-derived at
+later grader versions. That is chosen policy -- history as graded -- not
+impossibility: the wire order each push carried survives in the v3 verdicts'
+own recorded ``candidate_columns``, and re-execution of the recorded
+``candidate_sql`` against the benchmark databases remains available. Someone
+who needs the historical regrade can have it; nobody should mistake the
+policy for a locked door. The version skew between suites is visible and
+explained, not hidden.
 
 ## Imported runs
 
