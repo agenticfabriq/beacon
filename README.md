@@ -1,4 +1,7 @@
-# Beacon
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/lockup-dark.svg">
+  <img src="docs/lockup-light.svg" alt="Beacon" height="46">
+</picture>
 
 *By [Agentic Fabriq](https://www.ycombinator.com/companies/agentic-fabriq) (YC W26) — made with love, from MIT.*
 

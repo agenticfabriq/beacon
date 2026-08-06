@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Beacon</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230F1419'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%233AA7B5'/%3E%3Ccircle cx='16' cy='16' r='10' fill='none' stroke='%233AA7B5' stroke-width='2.5' stroke-linecap='round' stroke-dasharray='47 15.8' transform='rotate(122 16 16)'/%3E%3C/svg%3E">
 <style>
   :root{
     --ground:#FAFBFC;--surface:#FFFFFF;--surface-2:#F2F5F7;--line:#DCE3E8;--line-soft:#E9EEF1;
@@ -31,6 +32,7 @@
   .brand{display:flex;align-items:baseline;gap:6px;padding:0 6px 2px}
   .brand b{font-size:14px;font-weight:700;letter-spacing:-.01em}
   .brand span{font-size:9px;color:var(--ink-3);letter-spacing:.1em;text-transform:uppercase}
+.brand svg,.loginbrand svg{align-self:center;flex:none}
   .bench{border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2);padding:8px 9px;display:flex;flex-direction:column;gap:2px;cursor:pointer;text-align:left;font:inherit;width:100%;color:var(--ink)}
   .bench .l{font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
   .bench .v{font-size:12px;font-weight:650}
@@ -156,7 +158,7 @@
 
 <div class="screen" id="screen-login">
   <div class="loginwrap">
-    <div class="loginbrand"><b>Beacon</b><span>tracker</span></div>
+    <div class="loginbrand"><svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="4.5" fill="var(--accent)"/><circle cx="16" cy="16" r="10" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="47 15.8" transform="rotate(122 16 16)"/></svg><b>Beacon</b><span>tracker</span></div>
     <div class="loginbox">
       <div class="field"><label for="l-key">API key</label>
         <input id="l-key" type="password" placeholder="bcn_..." autocomplete="off"></div>
@@ -173,7 +175,7 @@
 
 <div class="app hidden" id="app">
   <nav class="rail">
-    <div class="brand"><b>Beacon</b><span>tracker</span></div>
+    <div class="brand"><svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="4.5" fill="var(--accent)"/><circle cx="16" cy="16" r="10" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="47 15.8" transform="rotate(122 16 16)"/></svg><b>Beacon</b><span>tracker</span></div>
     <button class="bench" data-go="benchmarks">
       <span class="l">Benchmark</span>
       <span class="v" id="rail-bench-name">–</span>
