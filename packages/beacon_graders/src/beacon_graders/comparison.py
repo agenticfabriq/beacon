@@ -307,6 +307,13 @@ def diagnose(
             "row_count",
             f"candidate returned {len(candidate.rows)} rows, gold returned {len(gold.rows)}",
         )
+    # Same cells row for row once each row's cells are sorted: the values are
+    # all there and only SELECT order differs. Exact match is position-wise
+    # (BIRD's published metric is), so this fails -- but it should say why.
+    if compare_rows(
+        _sort_cells(candidate.rows), _sort_cells(gold.rows), order_sensitive, tolerance
+    ):
+        return Mismatch("column_order", "same values, columns selected in a different order")
     left, right = candidate.rows, gold.rows
     if not order_sensitive:
         try:

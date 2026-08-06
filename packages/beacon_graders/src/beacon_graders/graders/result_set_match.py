@@ -193,7 +193,8 @@ class ResultSetMatchGrader:
         passed = False
         facts = False
         matched_index: int | None = None
-        first_mismatch: Mismatch | None = None
+        facts_index: int | None = None
+        mismatches: list[Mismatch | None] = []
         for index, variant in enumerate(variants):
             gold = variant.result_set
             evidence_complete_v = (
@@ -229,23 +230,33 @@ class ResultSetMatchGrader:
                         "a pushed row matches no gold row (compared as a preview: "
                         "the push carries fewer rows than it counted)",
                     )
-            if index == 0:
-                first_mismatch = mismatch_v
+            mismatches.append(mismatch_v)
             if passed_v and matched_index is None:
                 matched_index = index
+            if facts_v and facts_index is None:
+                facts_index = index
             passed = passed or passed_v
             facts = facts or facts_v
             if passed and facts:
                 break
 
-        # Evidence in raw reads from the gold that matched, or the first one.
-        shown = variants[matched_index if matched_index is not None else 0]
+        # Evidence in raw reads from the CLOSEST gold: the one that matched
+        # exactly, else the one the facts matched (its mismatch names what
+        # exact still lacks -- e.g. column order), else the first.
+        shown_index = (
+            matched_index
+            if matched_index is not None
+            else facts_index
+            if facts_index is not None
+            else 0
+        )
+        shown = variants[shown_index]
         gold = shown.result_set
         gold_row_count = shown.row_count
         evidence_complete = (
             len(candidate.rows) == candidate_row_count and len(gold.rows) == gold_row_count
         )
-        mismatch = None if passed else first_mismatch
+        mismatch = None if passed else mismatches[shown_index]
 
         raw: dict[str, Any] = {
             "candidate_sql": result.output.get("sql"),

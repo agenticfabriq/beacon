@@ -43,9 +43,16 @@ push natively-typed rows. `values_match` itself stays type-strict — coercing
 
 ## exact
 
-The same result set: gold's columns exactly, no extras, values equal with
-tolerance only for float noise. Row order per the item's declared order
-sensitivity (curated `row_order_insensitive` outranks the ORDER BY heuristic).
+The same result set: gold's columns exactly, **in gold's order**, no extras,
+values equal with tolerance only for float noise. Row order per the item's
+declared order sensitivity (curated `row_order_insensitive` outranks the
+ORDER BY heuristic).
+
+Column order is part of exact match, deliberately: BIRD's official evaluator
+compares row tuples position-wise, so the strict number stays the one the
+leaderboard publishes. Column order is one more thing got-facts tolerates and
+exact does not. A pure column-order miss is diagnosed as `column_order`, not
+as a value difference.
 
 ## Whole numbers
 

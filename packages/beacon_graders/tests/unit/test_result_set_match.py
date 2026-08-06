@@ -329,3 +329,20 @@ def test_a_near_miss_is_not_a_rounding() -> None:
 
     assert exact.bool_value is False
     assert facts.bool_value is False
+
+
+def test_column_order_fails_exact_names_the_reason_and_the_closest_gold() -> None:
+    """Point H: exact is position-wise (BIRD's published metric is). A candidate
+    matching an accepted gold with SELECT order swapped fails exact, passes
+    got-facts, and the mismatch is diagnosed against the gold it nearly
+    matched -- naming column order, not a value difference. (Spider local067.)"""
+    gold = _accepted(
+        _table(["tier", "lowest", "highest"], [[1, -27.94, -10.03]]),
+        _table(["tier", "lowest", "highest"], [[1, 588.36, 785.15]]),
+    )
+    exact, facts = _grade(gold, _push([[1, 785.15, 588.36]]))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+    assert exact.raw_output["mismatch"]["kind"] == "column_order"
+    assert exact.raw_output["gold_sample"] == [[1, 588.36, 785.15]]
