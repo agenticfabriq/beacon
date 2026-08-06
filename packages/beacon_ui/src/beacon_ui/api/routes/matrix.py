@@ -70,6 +70,11 @@ def results_matrix(
         Run.invalidated_at.is_(None),
     ]
     engine_expr = sa.func.coalesce(Run.config["engine"].astext, "")
+    # Second verdict reading, aliased: the strict exact_match beside the
+    # tolerant got_facts. EX stays the benchmark-headline number (each
+    # benchmark defines its own); these two are beacon's suite-independent
+    # claims, one grader across benchmarks.
+    exact_verdict = sa.orm.aliased(Verdict)
 
     stmt = (
         sa.select(
@@ -116,6 +121,9 @@ def results_matrix(
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Verdict.bool_value.is_(True))
             .label("n_got_facts"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(exact_verdict.bool_value.is_(True))
+            .label("n_exact"),
             sa.func.percentile_cont(0.5)
             .within_group(Result.tokens_input + Result.tokens_output)
             .label("median_tokens"),
@@ -126,6 +134,14 @@ def results_matrix(
         .join(
             Verdict,
             sa.and_(Verdict.result_id == Result.id, Verdict.metric == "got_facts"),
+            isouter=True,
+        )
+        .join(
+            exact_verdict,
+            sa.and_(
+                exact_verdict.result_id == Result.id,
+                exact_verdict.metric == "exact_match",
+            ),
             isouter=True,
         )
         .where(*filters)
@@ -164,6 +180,9 @@ def results_matrix(
                     _rate(int(record.n_pass_target_engine), graded)
                     if int(record.n_portability_flagged)
                     else None
+                ),
+                exact_rate=(
+                    _rate(int(record.n_exact), graded) if int(record.n_exact) else None
                 ),
                 got_facts_rate=(
                     _rate(int(record.n_got_facts), graded) if int(record.n_got_facts) else None

@@ -32,6 +32,12 @@ class MatrixRowOut(BaseModel):
     # BIRD-comparable exact match: passes whose SQL the runner verified against
     # the gold's engine. None unless the runner supplied portability flags.
     ex_target_engine_rate: float | None = None
+    # The strict reading: exact result-set match by beacon's own grader,
+    # suite-independent. EX stays the benchmark-headline number (strict for
+    # BIRD, tolerant for Spider -- each benchmark defines its own); this
+    # column means the same thing on every row. None when no verdict carries
+    # the metric, which must not read as 0%.
+    exact_rate: float | None = None
     # The tolerant reading: right data, shape-tolerant (mnemiq's CORRECT_FACTS,
     # computed by beacon's own grader). None when no verdict carries the metric
     # -- runs graded before the grader emitted it -- which must not read as 0%.

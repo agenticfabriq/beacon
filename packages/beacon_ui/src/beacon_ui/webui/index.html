@@ -219,6 +219,7 @@
           <th class="num">runs</th><th class="num">n</th>
           <th class="num sort" data-sort="ex_rate">EX</th>
           <th class="num sort" data-sort="ex_target_engine_rate" title="BIRD-comparable: passes whose SQL the runner verified on the gold engine">EX*</th>
+          <th class="num sort" data-sort="exact_rate" title="beacon's strict reading: exact result-set match, same meaning on every benchmark (EX is the benchmark's own headline rule)">exact</th>
           <th class="num sort" data-sort="got_facts_rate">got-facts</th>
           <th class="num sort" data-sort="defer_rate">deferred</th>
           <th class="num sort" data-sort="wrong_rate">wrong</th>
@@ -496,7 +497,7 @@ async function signIn(key) {
   document.getElementById("screen-login").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   await bootstrapWorkspace();
-  go("matrix");
+  if (!applyRoute()) go("matrix");
 }
 document.getElementById("login-key-btn").addEventListener("click", guard(async () => {
   const key = document.getElementById("l-key").value.trim();
@@ -610,6 +611,7 @@ function renderMatrixRows() {
       <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
       <td class="num ex">${pct(row.ex_rate)}</td>
       <td class="num dim">${pct(row.ex_target_engine_rate)}</td>
+      <td class="num dim">${pct(row.exact_rate)}</td>
       <td class="num dim">${pct(row.got_facts_rate)}</td>
       <td class="num def">${pct(row.defer_rate)}</td>
       <td class="num wr">${pct(row.wrong_rate)}</td>
@@ -617,7 +619,7 @@ function renderMatrixRows() {
       <td class="num dim">${row.median_tokens === null ? "–" : Math.round(row.median_tokens)}</td>
       <td class="num dim">${row.median_runtime_ms === null ? "–" : Math.round(row.median_runtime_ms) + "ms"}</td>
       <td class="dim" style="font-size:11px">open →</td></tr>`).join("")
-    : '<tr><td colspan="15"><div class="empty">No configuration matches these filters.</div></td></tr>';
+    : '<tr><td colspan="16"><div class="empty">No configuration matches these filters.</div></td></tr>';
   document.getElementById("matrix-rows").dataset.payload = JSON.stringify(rows);
 }
 
@@ -707,6 +709,7 @@ const loadRuns = guard(async () => {
 /* ------------------------- run drilldown ------------------------- */
 const openRun = guard(async (runId) => {
   go("run");
+  writeRoute("run", runId);
   S.selectedItem = null;
   S.ritemsOffset = 0;
   const run = await api("run", { run_id: runId });
@@ -932,6 +935,39 @@ const loadSettings = guard(async () => {
 });
 
 /* --------------------------- events --------------------------- */
+/* ----------------------------- routes -----------------------------
+ * The URL is where you are: #/<suite>/<view>, or #/<suite>/run/<id>.
+ * Refresh restores it, links carry it, back/forward walk it. A suite
+ * that no longer exists (deleted, other team) falls back to defaults. */
+const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "benchmarks", "settings"]);
+let lastRoute = "";
+function writeRoute(view, runId) {
+  const parts = [S.suiteId || "-", view];
+  if (view === "run" && runId) parts.push(runId);
+  const target = "#/" + parts.join("/");
+  if (window.location.hash === target) return;
+  lastRoute = target;
+  window.location.hash = target;
+}
+function applyRoute() {
+  const [suitePart, viewPart, runPart] =
+    window.location.hash.replace(/^#\/?/, "").split("/");
+  const suite = S.suites.find((entry) => String(entry.id) === suitePart);
+  if (suite && String(suite.id) !== S.suiteId) {
+    S.suiteId = String(suite.id);
+    S.baselineRunId = suite.baseline_run_id;
+    S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
+    S.runsOffset = 0; S.qOffset = 0; S.ritemsOffset = 0;
+  }
+  if (viewPart === "run" && runPart) { openRun(runPart); return true; }
+  if (ROUTED_VIEWS.has(viewPart)) { go(viewPart); return true; }
+  return false;
+}
+window.addEventListener("hashchange", () => {
+  if (!S.key || window.location.hash === lastRoute) return;
+  applyRoute();
+});
+
 function go(view) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.id === `v-${view}`));
   document.querySelectorAll(".rail .nav[data-go]").forEach((n) => {
@@ -940,6 +976,7 @@ function go(view) {
   });
   renderRail();
   window.scrollTo({ top: 0 });
+  if (view !== "run") writeRoute(view);
   if (view === "matrix") loadMatrix();
   if (view === "runs") loadRuns();
   if (view === "questions") loadQuestions();
