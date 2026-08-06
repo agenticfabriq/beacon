@@ -120,6 +120,18 @@ pushing less, and the incentive must always point toward pushing full rows.
 A reading that excludes them is quotable, but it is the footnote, not the
 headline.
 
+## Stored evidence
+
+Dict-shaped rows carry their column order only while in flight: JSONB
+canonicalizes object keys at rest, and column order is part of exact match.
+So pushed and imported evidence is stamped with an ordered `columns` array at
+arrival, the grader reads dict rows through it, and a regrade REFUSES
+evidence that lacks one -- refusing beats mangling. Consequence, recorded
+honestly: BIRD verdicts graded before the stamp (v1-v3) are the push-time
+record and cannot be re-derived at a later grader version; their evidence
+lost its column order in storage. The version skew between suites is visible
+and explained, not hidden.
+
 ## Imported runs
 
 Beacon's verdict is THE claim. An imported run's results are graded here, by
