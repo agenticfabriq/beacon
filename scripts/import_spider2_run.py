@@ -59,11 +59,13 @@ if TYPE_CHECKING:
 
     from sqlalchemy.orm import Session
 
-# Names the thing that actually graded: mnemiq's result_set_match against the
-# benchmark's published CSVs, not beacon's execution grader (which needs gold SQL
-# Spider 2.0-lite mostly does not publish).
-GRADER = "result_set_match"
-GRADER_VERSION = "v1"
+# Names the thing that actually graded: mnemiq's own grader over the benchmark's
+# published CSVs. NEVER "result_set_match" -- that name and its version belong to
+# beacon's ResultSetMatchGrader, and borrowing them would label imported verdicts
+# as beacon's own claim at a version the grader may not even be at. Grader
+# identity is provenance, not a genre.
+GRADER = "mnemiq.eval.grade.results_match"
+GRADER_VERSION = "imported"
 
 # mnemiq CaseResult.outcome -> beacon verdict. correct_facts is decided at call time.
 _OUTCOME = {
@@ -224,7 +226,9 @@ def main() -> int:
                     "external_knowledge": True,
                     "graded_by": "mnemiq.eval.grade.results_match",
                     "pass_semantics": "strict" if args.strict else "facts",
-                    "imported_from": str(results_path),
+                    # Basename only: a full path leaks the machine home directory,
+                    # and this repo is public-track (repo-guard's rule).
+                    "imported_from": results_path.name,
                     "driver": "mnemiq scripts/run_spider2.py",
                 },
                 model_id=args.model,
@@ -247,19 +251,25 @@ def main() -> int:
                 outcome = str(row.get("outcome", "error"))
                 counts[outcome] = counts.get(outcome, 0) + 1
                 verdict = _verdict(outcome, strict=args.strict)
+                output: dict[str, Any] = {
+                    "sql": row.get("sql", ""),
+                    "answer": row.get("answer", ""),
+                    "db_id": row.get("db_id"),
+                    "engine_row_count": row.get("engine_row_count"),
+                    "gold_row_count": row.get("gold_row_count"),
+                    "mnemiq_outcome": outcome,
+                }
+                # The runner's claim that this SQL already ran on the gold engine
+                # (for the local slice, sqlite-native means it always did). The
+                # matrix's EX* reads it from output; absent means "never claimed".
+                if (portable := row.get("portable_to_gold_engine")) is not None:
+                    output["portable_to_gold_engine"] = portable
                 result_row = result_repo.create(
                     team_id=team.id,
                     run_id=run.id,
                     item_id=item_uuid,
                     attempt_idx=0,
-                    output={
-                        "sql": row.get("sql", ""),
-                        "answer": row.get("answer", ""),
-                        "db_id": row.get("db_id"),
-                        "engine_row_count": row.get("engine_row_count"),
-                        "gold_row_count": row.get("gold_row_count"),
-                        "mnemiq_outcome": outcome,
-                    },
+                    output=output,
                     output_kind="json",
                     tokens_input=0,
                     tokens_output=0,
@@ -273,7 +283,10 @@ def main() -> int:
 
                 # Only executed cases get verdicts. A deferral or an outage produced no
                 # result set to compare, and a got_facts verdict of "false" would report
-                # a wrong answer where there was no answer at all.
+                # a wrong answer where there was no answer at all. Corollary: never
+                # compute a rate from the verdicts table alone -- the denominator
+                # (all graded results, deferrals included) lives in results, which
+                # is how the matrix query reads it.
                 if outcome not in {"correct", "correct_facts", "wrong"}:
                     continue
                 exact = outcome == "correct"
@@ -296,6 +309,8 @@ def main() -> int:
                 mismatch = None if exact else _mismatch(row)
                 if mismatch is not None:
                     raw["mismatch"] = mismatch
+                if (portable := row.get("portable_to_gold_engine")) is not None:
+                    raw["portable_to_gold_engine"] = portable
                 verdict_repo.create(
                     team_id=team.id,
                     result_id=result_row.id,
