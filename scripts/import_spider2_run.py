@@ -31,6 +31,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -169,6 +170,7 @@ def main() -> int:
             solution = _solution_id(session, team.id, user_id, register_mnemiq_solution)
 
             counts: dict[str, int] = {}
+            grader = ResultSetMatchGrader()
             run = RunRepo(session).create(
                 team_id=team.id,
                 solution_id=solution,
@@ -182,12 +184,15 @@ def main() -> int:
                     "executor": "sqlite-native",
                     "candidates": 1,
                     "external_knowledge": True,
-                    "graded_by": "mnemiq.eval.grade.results_match",
+                    "graded_by": f"{grader.name} {grader.version}",
+                    "outcome_mapping": "mnemiq scripts/run_spider2.py",
                     "pass_semantics": "strict" if args.strict else "facts",
                     # Basename only: a full path leaks the machine home directory,
-                    # and this repo is public-track (repo-guard's rule).
+                    # and this repo is public-track (repo-guard's rule). The hash
+                    # says WHICH file was read -- two checkouts can carry the
+                    # same basename at different states, and one already did.
                     "imported_from": results_path.name,
-                    "driver": "mnemiq scripts/run_spider2.py",
+                    "imported_sha256": hashlib.sha256(results_path.read_bytes()).hexdigest(),
                 },
                 model_id=args.model,
                 config_label=args.label,
@@ -198,7 +203,6 @@ def main() -> int:
 
             result_repo = ResultRepo(session)
             verdict_repo = VerdictRepo(session)
-            grader = ResultSetMatchGrader()
             beacon_exact = beacon_facts = beacon_graded = disagreements = 0
             for row in rows:
                 case_id = str(row.get("case_id", ""))
