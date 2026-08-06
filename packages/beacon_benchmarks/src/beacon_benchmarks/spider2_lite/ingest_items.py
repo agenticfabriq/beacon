@@ -28,6 +28,7 @@ import glob
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,7 +43,11 @@ if TYPE_CHECKING:
 
 
 SUITE = "spider2_lite_local_v1"
-DATASET_VERSION = "spider2-lite-local-2026-08-05"
+# Bumped when the materialized gold changes shape, not just when the upstream
+# dataset does: 2026-08-06 typed the CSV gold and attached the benchmark's
+# grading annotations, so runs graded before and after are not against the
+# same materialization.
+DATASET_VERSION = "spider2-lite-local-2026-08-06"
 
 
 @dataclass(frozen=True)
@@ -229,6 +234,7 @@ class IngestResult:
 
     inserted: int = 0
     skipped: int = 0
+    refreshed: int = 0
 
 
 def ingest_spider2_tasks(
@@ -240,55 +246,86 @@ def ingest_spider2_tasks(
 ) -> IngestResult:
     """Upsert Spider 2.0-lite local tasks into ``eval_items``.
 
-    Existing rows (by ``question_hash``) are left untouched and counted under
-    ``skipped`` so re-running the script is safe.
+    Existing rows (by ``question_hash``) whose content matches are counted
+    under ``skipped``; rows whose materialization differs (typed gold, new
+    annotations) get a NEW VERSION under the same ``item_id`` -- the old
+    version closes, results keep joining, and history keeps both readings.
+    Re-running the script is always safe.
     """
     items_repo = EvalItemRepo(session)
     inserted = 0
     skipped = 0
+    refreshed = 0
     for task in tasks:
         question_hash = f"spider2-lite:local:{task.instance_id}"
-        _item, created = items_repo.upsert_by_question_hash(
+        item_input = {
+            "db_id": task.db_id,
+            "question": task.question,
+            # The per-question reference document, where the benchmark ships one.
+            # Named to match BIRD's field so a consumer reads one key, not two.
+            "evidence": task.external_knowledge,
+        }
+        gold_answer = {
+            "accepted_results": task.accepted_results,
+            # Which gold columns the benchmark's evaluator scores, one index
+            # list per accepted result. Empty means "all columns count".
+            "condition_cols": task.condition_cols,
+            # Documentation only: published for a minority of cases, and never the
+            # thing graded against.
+            "sql": task.gold_sql,
+        }
+        item_metadata = {
+            "source": "spider2-lite-local",
+            "instance_id": task.instance_id,
+            "accepted_result_count": len(task.accepted_results),
+            "has_gold_sql": bool(task.gold_sql),
+            "has_external_knowledge": bool(task.external_knowledge),
+            # The Tolerance.for_item seam: curated row-order opinion from the
+            # benchmark itself outranks the ORDER BY heuristic at grading.
+            **(
+                {"tolerance": {"row_order_insensitive": task.ignore_order}}
+                if task.ignore_order is not None
+                else {}
+            ),
+        }
+        item, created = items_repo.upsert_by_question_hash(
             # The accepted answers come from executing the benchmark's own queries.
             tier=EvalItemTier.EXECUTION_CONFIRMED,
             suite=SUITE,
             team_id=team_id,
             dataset_version=DATASET_VERSION,
             question_hash=question_hash,
-            item_input={
-                "db_id": task.db_id,
-                "question": task.question,
-                # The per-question reference document, where the benchmark ships one.
-                # Named to match BIRD's field so a consumer reads one key, not two.
-                "evidence": task.external_knowledge,
-            },
-            gold_answer={
-                "accepted_results": task.accepted_results,
-                # Which gold columns the benchmark's evaluator scores, one index
-                # list per accepted result. Empty means "all columns count".
-                "condition_cols": task.condition_cols,
-                # Documentation only: published for a minority of cases, and never the
-                # thing graded against.
-                "sql": task.gold_sql,
-            },
-            item_metadata={
-                "source": "spider2-lite-local",
-                "instance_id": task.instance_id,
-                "accepted_result_count": len(task.accepted_results),
-                "has_gold_sql": bool(task.gold_sql),
-                "has_external_knowledge": bool(task.external_knowledge),
-                # The Tolerance.for_item seam: curated row-order opinion from the
-                # benchmark itself outranks the ORDER BY heuristic at grading.
-                **(
-                    {"tolerance": {"row_order_insensitive": task.ignore_order}}
-                    if task.ignore_order is not None
-                    else {}
-                ),
-            },
+            item_input=item_input,
+            gold_answer=gold_answer,
+            item_metadata=item_metadata,
             created_by=created_by,
         )
-        if not created:
+        if created:
+            inserted += 1
+            continue
+        if (
+            item.item_input == item_input
+            and item.gold_answer == gold_answer
+            and item.item_metadata == item_metadata
+            and item.dataset_version == DATASET_VERSION
+        ):
             skipped += 1
             continue
-        inserted += 1
-    return IngestResult(inserted=inserted, skipped=skipped)
+        now = datetime.now(UTC)
+        items_repo.set_valid_to(item_id=item.item_id, valid_from=item.valid_from, valid_to=now)
+        items_repo.insert_new_version(
+            item_id=item.item_id,
+            valid_from=now,
+            tier=EvalItemTier.EXECUTION_CONFIRMED,
+            suite=SUITE,
+            team_id=team_id,
+            solution_id=item.solution_id,
+            dataset_version=DATASET_VERSION,
+            item_input=item_input,
+            gold_answer=gold_answer,
+            item_metadata=item_metadata,
+            question_hash=question_hash,
+            created_by=created_by,
+        )
+        refreshed += 1
+    return IngestResult(inserted=inserted, skipped=skipped, refreshed=refreshed)

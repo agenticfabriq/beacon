@@ -306,7 +306,10 @@ def main() -> int:
                 == VerdictOutcome.PASS
             )
             print(f"suite     {SUITE} ({DATASET_VERSION})")
-            print(f"items     {ingested.inserted} inserted, {ingested.skipped} already present")
+            print(
+                f"items     {ingested.inserted} inserted, {ingested.refreshed} re-versioned, "
+                f"{ingested.skipped} already current"
+            )
             print(f"run       {run.id}  [{args.label}, {'strict' if args.strict else 'facts'}]")
             print(f"results   {total} imported")
             for name in sorted(counts):
