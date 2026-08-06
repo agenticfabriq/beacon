@@ -1,12 +1,14 @@
 """Record a mnemiq Spider 2.0-lite run in beacon's store.
 
-This IMPORTS verdicts rather than re-driving the questions. The 135 local cases were
-already answered by mnemiq's own runner against the benchmark's published result CSVs;
-re-asking them through beacon's harness would spend the LLM budget twice for identical
-answers. What beacon adds here is the durable record: a Run, per-item Results, and the
-suite/items that make a harness-driven arm cheap later.
+This imports the RUN rather than re-driving the questions. The 135 local cases were
+already answered by mnemiq's own runner; re-asking them through beacon's harness would
+spend the LLM budget twice for identical answers. What beacon adds is the durable
+record: a Run, per-item Results carrying the pushed rows -- and VERDICTS graded here,
+by beacon's own ResultSetMatchGrader over those rows, the same grader every benchmark
+gets. mnemiq's grading survives as provenance (``Result.outcome``, the benchmark's own
+headline rule, and ``output.mnemiq_outcome``), never as beacon's claim.
 
-The outcome mapping is the whole point of the file, so it is explicit:
+The outcome mapping decides ``Result.outcome`` (the EX column), so it is explicit:
 
     correct, correct_facts  -> PASS    (both got the facts; see --strict)
     wrong                   -> FAIL
@@ -41,8 +43,11 @@ from beacon_benchmarks.spider2_lite.ingest_items import (
     ingest_spider2_tasks,
     load_spider2_tasks,
 )
+from beacon_graders.graders.result_set_match import ResultSetMatchGrader
 from beacon_iam.auth.oidc import OidcClaims
 from beacon_iam.service.users import UserService
+from beacon_runner.types import EvalItem as RunnerItem
+from beacon_runner.types import ExecutionResult, ExecutionStep
 from beacon_storage.db import make_engine, make_session_factory, session_scope
 from beacon_storage.models.runs import HarnessMode, ResultStatus, VerdictOutcome
 from beacon_storage.repository.eval_items import EvalItemRepo
@@ -58,14 +63,6 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.orm import Session
-
-# Names the thing that actually graded: mnemiq's own grader over the benchmark's
-# published CSVs. NEVER "result_set_match" -- that name and its version belong to
-# beacon's ResultSetMatchGrader, and borrowing them would label imported verdicts
-# as beacon's own claim at a version the grader may not even be at. Grader
-# identity is provenance, not a genre.
-GRADER = "mnemiq.eval.grade.results_match"
-GRADER_VERSION = "imported"
 
 # mnemiq CaseResult.outcome -> beacon verdict. correct_facts is decided at call time.
 _OUTCOME = {
@@ -97,38 +94,6 @@ def _verdict(outcome: str, *, strict: bool) -> VerdictOutcome:
     if outcome == "correct_facts":
         return VerdictOutcome.FAIL if strict else VerdictOutcome.PASS
     return _OUTCOME.get(outcome, VerdictOutcome.ERROR)
-
-
-# mnemiq previews rows as a list of dicts; beacon's execution evidence wants the
-# columns and a list-of-lists sample, which is what renders the two result tables
-# side by side in the compare view.
-def _columns_and_sample(
-    preview: list[dict[str, Any]] | None, limit: int = 20
-) -> tuple[list[str], list[list[Any]]]:
-    if not preview:
-        return [], []
-    columns = list(preview[0].keys())
-    return columns, [[row.get(c) for c in columns] for row in preview[:limit]]
-
-
-def _mismatch(row: dict[str, Any]) -> dict[str, str] | None:
-    """Why a WRONG answer differed, in beacon's vocabulary.
-
-    Derived rather than recorded: mnemiq grades against several accepted results and
-    keeps the outcome, not the losing comparison. Row count and column arity are exact
-    from the preview; anything else is a value difference.
-    """
-    ours, gold = row.get("engine_row_count"), row.get("gold_row_count")
-    if isinstance(ours, int) and isinstance(gold, int) and ours != gold:
-        return {"kind": "row_count", "detail": f"candidate returned {ours} rows, gold {gold}"}
-    our_cols, _ = _columns_and_sample(row.get("engine_rows"))
-    gold_cols, _ = _columns_and_sample(row.get("gold_rows"))
-    if our_cols and gold_cols and len(our_cols) != len(gold_cols):
-        return {
-            "kind": "column_arity",
-            "detail": f"candidate has {len(our_cols)} columns, gold {len(gold_cols)}",
-        }
-    return {"kind": "values", "detail": "same shape, different values"}
 
 
 def main() -> int:
@@ -195,15 +160,8 @@ def main() -> int:
 
             # results.item_id carries the eval_item UUID (what grading and the
             # matrix join on), never the benchmark's native case id.
-            item_by_case = {
-                str((r.item_metadata or {}).get("instance_id")): str(r.item_id)
-                for r in item_rows
-            }
-            accepted_counts = {
-                str((r.item_metadata or {}).get("instance_id")): (
-                    r.item_metadata or {}
-                ).get("accepted_result_count")
-                for r in item_rows
+            items_by_case = {
+                str((r.item_metadata or {}).get("instance_id")): r for r in item_rows
             }
 
             from beacon_runner.sut.mnemiq import register_mnemiq_solution  # noqa: PLC0415
@@ -240,10 +198,12 @@ def main() -> int:
 
             result_repo = ResultRepo(session)
             verdict_repo = VerdictRepo(session)
+            grader = ResultSetMatchGrader()
+            beacon_exact = beacon_facts = beacon_graded = disagreements = 0
             for row in rows:
                 case_id = str(row.get("case_id", ""))
-                item_uuid = item_by_case.get(case_id)
-                if item_uuid is None:
+                item_row = items_by_case.get(case_id)
+                if item_row is None:
                     raise SystemExit(
                         f"case_id {case_id!r} is not among the suite's items; "
                         "load the benchmark before importing a run against it"
@@ -255,6 +215,10 @@ def main() -> int:
                     "sql": row.get("sql", ""),
                     "answer": row.get("answer", ""),
                     "db_id": row.get("db_id"),
+                    # The pushed evidence beacon grades: mnemiq's row preview
+                    # (dicts, first N rows) plus the true count.
+                    "rows": row.get("engine_rows"),
+                    "row_count": row.get("engine_row_count"),
                     "engine_row_count": row.get("engine_row_count"),
                     "gold_row_count": row.get("gold_row_count"),
                     "mnemiq_outcome": outcome,
@@ -267,10 +231,10 @@ def main() -> int:
                 result_row = result_repo.create(
                     team_id=team.id,
                     run_id=run.id,
-                    item_id=item_uuid,
+                    item_id=str(item_row.item_id),
                     attempt_idx=0,
                     output=output,
-                    output_kind="json",
+                    output_kind="sql",
                     tokens_input=0,
                     tokens_output=0,
                     runtime_ms=int(row.get("ms") or 0),
@@ -289,60 +253,51 @@ def main() -> int:
                 # is how the matrix query reads it.
                 if outcome not in {"correct", "correct_facts", "wrong"}:
                     continue
-                exact = outcome == "correct"
-                facts = outcome in {"correct", "correct_facts"}
-                our_cols, our_sample = _columns_and_sample(row.get("engine_rows"))
-                gold_cols, gold_sample = _columns_and_sample(row.get("gold_rows"))
-                raw: dict[str, object] = {
-                    "candidate_sql": row.get("sql", ""),
-                    "gold_sql": row.get("gold_sql", ""),
-                    "candidate_row_count": row.get("engine_row_count"),
-                    "gold_row_count": row.get("gold_row_count"),
-                    "candidate_columns": our_cols,
-                    "gold_columns": gold_cols,
-                    "candidate_sample": our_sample,
-                    "gold_sample": gold_sample,
-                    # Gold is a set of accepted results here, and the case passes against
-                    # any of them; the preview shows the first.
-                    "accepted_result_count": accepted_counts.get(case_id),
+
+                # Beacon grades the pushed rows itself: same grader as BIRD, so
+                # exact_match and got_facts are beacon's claims, not mnemiq's
+                # outcome string wearing beacon's label.
+                shim_item = RunnerItem(
+                    item_id=str(item_row.item_id),
+                    suite=SUITE,
+                    query=dict(item_row.item_input or {}),
+                    ground_truth=dict(item_row.gold_answer or {}),
+                    metadata=dict(item_row.item_metadata or {}),
+                )
+                shim_result = ExecutionResult(
+                    output=output,
+                    output_kind="sql",
+                    trace=ExecutionStep(uuid="import", name="import", level="workflow"),
+                    tokens_input=0,
+                    tokens_output=0,
+                    runtime_ms=int(row.get("ms") or 0),
+                )
+                if not grader.applicable(shim_item, shim_result):
+                    continue  # nothing pushed to compare, or gold not materialized
+                graded_verdicts = grader.grade(shim_item, shim_result)
+                for graded in graded_verdicts:
+                    verdict_repo.create(
+                        team_id=team.id,
+                        result_id=result_row.id,
+                        grader=graded.grader,
+                        grader_version=graded.grader_version,
+                        metric=graded.metric or grader.metric or "",
+                        criterion=graded.criterion,
+                        bool_value=graded.bool_value,
+                        value=graded.value,
+                        justification=graded.justification,
+                        raw_output=graded.raw_output,
+                    )
+                beacon_graded += 1
+                by_metric = {
+                    (v.metric or grader.metric): bool(v.bool_value) for v in graded_verdicts
                 }
-                mismatch = None if exact else _mismatch(row)
-                if mismatch is not None:
-                    raw["mismatch"] = mismatch
-                if (portable := row.get("portable_to_gold_engine")) is not None:
-                    raw["portable_to_gold_engine"] = portable
-                verdict_repo.create(
-                    team_id=team.id,
-                    result_id=result_row.id,
-                    grader=GRADER,
-                    grader_version=GRADER_VERSION,
-                    metric="exact_match",
-                    criterion="correctness",
-                    bool_value=exact,
-                    value=1.0 if exact else 0.0,
-                    justification=(
-                        "Candidate result set matches an accepted gold result."
-                        if exact
-                        else f"Mismatch ({(mismatch or {}).get('kind')})."
-                    ),
-                    raw_output=raw,
-                )
-                verdict_repo.create(
-                    team_id=team.id,
-                    result_id=result_row.id,
-                    grader=GRADER,
-                    grader_version=GRADER_VERSION,
-                    metric="got_facts",
-                    criterion="correctness",
-                    bool_value=facts,
-                    value=1.0 if facts else 0.0,
-                    justification=(
-                        "Gold's data is present in the candidate (shape-tolerant)."
-                        if facts
-                        else "Gold's data is not present in the candidate, in any projection."
-                    ),
-                    raw_output={"exact_match": exact},
-                )
+                beacon_exact += int(by_metric.get("exact_match", False))
+                beacon_facts += int(by_metric.get("got_facts", False))
+                if by_metric.get("got_facts", False) != (
+                    outcome in {"correct", "correct_facts"}
+                ):
+                    disagreements += 1
             RunRepo(session).mark_completed(run.id)
 
             total = len(rows)
@@ -357,6 +312,13 @@ def main() -> int:
             for name in sorted(counts):
                 print(f"  {name:20s} {counts[name]}")
             print(f"pass rate {passed / total:.1%}  ({passed}/{total})")
+            if beacon_graded:
+                print(
+                    f"beacon    {grader.name} {grader.version}: "
+                    f"exact {beacon_exact}/{beacon_graded}, "
+                    f"got-facts {beacon_facts}/{beacon_graded}, "
+                    f"disagrees with mnemiq on {disagreements}"
+                )
             if meta:
                 print(f"llm calls {meta.get('llm_calls', 0)}   tokens {meta.get('tokens', 0)}")
     finally:
