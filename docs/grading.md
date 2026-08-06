@@ -103,8 +103,12 @@ headline.
 
 ## Imported runs
 
-Beacon's verdict is THE claim. An imported run keeps the source system's
-grading as provenance (`Result.outcome` under the benchmark's headline rule,
-the raw outcome in `output`), and its results are graded here, by the same
-grader as every push. A run's config records what was read
-(`imported_sha256`), so which file produced a number is never a memory.
+Beacon's verdict is THE claim. An imported run's results are graded here, by
+the same grader as every push, and `Result.outcome` DERIVES from beacon's
+verdict under the suite's `headline_metric`. The source system's own grading
+survives only as provenance, in `output`. DEFER and ERROR are the exception
+and remain the runner's statement: they say whether a query was produced at
+all, and are never inferred from the absence of a passing verdict. A run's
+config records what was read (`imported_sha256`) and whose outcomes rode
+along (`source_runner`, `source_rev`), so which file and which grading
+produced a number is never a memory.

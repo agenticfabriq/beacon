@@ -204,14 +204,16 @@ def main() -> int:
                     "external_knowledge": True,
                     "graded_by": f"{grader.name} {grader.version}",
                     "headline_metric": "exact_match" if args.strict else HEADLINE_METRIC,
-                    # DEFER and ERROR only; PASS/FAIL derive from beacon's verdicts.
-                    "outcome_mapping": "mnemiq scripts/run_spider2.py",
-                    # Whose grading the outcome mapping reflects, pinned the way
-                    # imported_sha256 pins the file: mnemiq's grader has changed
-                    # twice in a day, and an unversioned claim is not a claim.
-                    # Absent means unpinned, and is visible as such.
+                    # Whose report this is: decides DEFER/ERROR only (a refusal
+                    # is the runner's statement) and names whose outcome rides
+                    # in output.mnemiq_outcome as provenance. PASS/FAIL derive
+                    # from beacon's verdicts and owe this nothing.
+                    "source_runner": "mnemiq scripts/run_spider2.py",
+                    # Pinned the way imported_sha256 pins the file: mnemiq's
+                    # grading changed twice in a day, and an unversioned claim
+                    # is not a claim. Absent means unpinned, visibly.
                     **(
-                        {"outcome_mapping_rev": rev}
+                        {"source_rev": rev}
                         if (rev := args.source_rev or meta.get("source_rev"))
                         else {}
                     ),
