@@ -106,6 +106,11 @@ def main() -> int:
     parser.add_argument("--model", default=os.environ.get("MNEMIQ_LLM_MODEL", "mnemiq"))
     parser.add_argument("--label", default="single-shot", help="config_label for the run")
     parser.add_argument(
+        "--source-rev",
+        help="mnemiq commit the outcomes were graded at; defaults to source_rev "
+        "from the report's .meta.json when the exporter stamps one",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="count only exact result-set matches as PASS (default: facts, which is what "
@@ -186,6 +191,15 @@ def main() -> int:
                     "external_knowledge": True,
                     "graded_by": f"{grader.name} {grader.version}",
                     "outcome_mapping": "mnemiq scripts/run_spider2.py",
+                    # Whose grading the outcome mapping reflects, pinned the way
+                    # imported_sha256 pins the file: mnemiq's grader has changed
+                    # twice in a day, and an unversioned claim is not a claim.
+                    # Absent means unpinned, and is visible as such.
+                    **(
+                        {"outcome_mapping_rev": rev}
+                        if (rev := args.source_rev or meta.get("source_rev"))
+                        else {}
+                    ),
                     "pass_semantics": "strict" if args.strict else "facts",
                     # Basename only: a full path leaks the machine home directory,
                     # and this repo is public-track (repo-guard's rule). The hash
