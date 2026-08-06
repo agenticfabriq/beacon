@@ -11,6 +11,12 @@ Two things differ from BIRD Mini-Dev and shape everything here:
   BigQuery and Snowflake instances need cloud credentials and adapters, so they are
   absent rather than failing.
 
+The benchmark also publishes per-instance grading annotations
+(``spider2lite_eval.jsonl``): ``ignore_order`` and ``condition_cols``. They ride
+along as item data -- a row-order tolerance and a per-accepted-result list of the
+gold columns its evaluator scores -- so one grader can honour them per item
+instead of Spider growing a grader of its own.
+
 Tier is EXECUTION_CONFIRMED, not HUMAN_VERIFIED: the accepted answers were produced by
 executing the benchmark's own queries, which is exactly what that tier means.
 """
@@ -20,6 +26,7 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,6 +56,46 @@ class Spider2Task:
     gold_sql: str = ""
     # Every acceptable result, each as {"columns": [...], "rows": [[...], ...]}.
     accepted_results: list[dict[str, object]] = field(default_factory=list)
+    # Grading annotations the benchmark publishes per instance
+    # (evaluation_suite/gold/spider2lite_eval.jsonl). They are item data, not
+    # grader logic: whether row order carries meaning, and which gold columns
+    # the benchmark's own grader scores (one index list per accepted result).
+    ignore_order: bool | None = None
+    condition_cols: list[list[int]] = field(default_factory=list)
+
+
+_INT_RE = re.compile(r"[-+]?\d+\Z")
+_FLOAT_RE = re.compile(r"[-+]?(\d+\.\d*|\.\d+|\d+)([eE][-+]?\d+)?\Z")
+
+
+def _type_csv_rows(rows: list[list[str]]) -> list[list[object]]:
+    """Type CSV cells column-wise, the way the benchmark's own pandas read does.
+
+    A column whose every non-empty cell parses as an integer becomes integers;
+    failing that, floats; anything else stays text. Empty cells become NULL.
+    Grading compares typed values, so leaving gold stringly would fail ``42``
+    against ``"42"`` on every numeric column. Cell-wise typing would be wrong
+    the other way: one stray annotation in a numeric column must demote the
+    whole column, exactly as pandas reads it.
+    """
+    if not rows:
+        return []
+    width = len(rows[0])
+    if any(len(row) != width for row in rows):
+        return [list(row) for row in rows]  # ragged: keep text rather than guess
+    typed_columns: list[list[object]] = []
+    for cells in zip(*rows, strict=True):
+        stripped = [cell.strip() for cell in cells]
+        non_empty = [cell for cell in stripped if cell != ""]
+        cast: type[int] | type[float] | None = None
+        if non_empty and all(_INT_RE.match(cell) for cell in non_empty):
+            cast = int
+        elif non_empty and all(_FLOAT_RE.match(cell) for cell in non_empty):
+            cast = float
+        typed_columns.append(
+            [None if cell == "" else (cast(cell) if cast else cell) for cell in stripped]
+        )
+    return [list(row) for row in zip(*typed_columns, strict=True)]
 
 
 def _read_csv_table(path: Path) -> dict[str, object] | None:
@@ -59,7 +106,54 @@ def _read_csv_table(path: Path) -> dict[str, object] | None:
         return None
     if not rows:
         return None
-    return {"columns": rows[0], "rows": rows[1:]}
+    return {"columns": rows[0], "rows": _type_csv_rows(rows[1:])}
+
+
+def _read_eval_annotations(repo_dir: Path) -> dict[str, dict[str, object]]:
+    """Read per-instance grading annotations the benchmark ships with its gold.
+
+    ``spider2lite_eval.jsonl`` carries ``ignore_order`` and ``condition_cols``
+    for every instance. Dropping them grades stricter than the benchmark's own
+    evaluator, so they are part of the gold, not an optional extra: a missing
+    file is an error, the same as a missing task file.
+    """
+    path = repo_dir / "evaluation_suite" / "gold" / "spider2lite_eval.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(f"Spider 2.0-lite eval annotations not found: {path}")
+    annotations: dict[str, dict[str, object]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        raw = json.loads(line)
+        annotations[str(raw.get("instance_id", ""))] = raw
+    return annotations
+
+
+def _normalize_condition_cols(
+    instance_id: str, raw: object, accepted_count: int
+) -> list[list[int]]:
+    """Mirror the benchmark evaluator's own normalization, one list per gold.
+
+    ``compare_multi_pandas_table`` accepts two shapes: a list of lists is
+    positional (one entry per accepted result), while a FLAT list of indices
+    applies to every accepted result. ``None``/``[]``/``[[]]``/``[None]`` all
+    mean "every column counts". Anything else would restrict the wrong table's
+    columns in silence, so it refuses instead.
+    """
+    if raw in (None, [], [[]], [None]):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{instance_id}: condition_cols is not a list: {raw!r}")
+    if all(isinstance(entry, list) for entry in raw):
+        if len(raw) != accepted_count:
+            raise ValueError(
+                f"{instance_id}: {len(raw)} condition_cols entries for "
+                f"{accepted_count} accepted results -- annotation/CSV mismatch"
+            )
+        return [[int(i) for i in entry] for entry in raw]
+    if all(isinstance(entry, int) and not isinstance(entry, bool) for entry in raw):
+        return [[int(i) for i in raw] for _ in range(accepted_count)]
+    raise ValueError(f"{instance_id}: mixed condition_cols shape: {raw!r}")
 
 
 def load_spider2_tasks(
@@ -72,6 +166,7 @@ def load_spider2_tasks(
     jsonl = repo_dir / "spider2-lite.jsonl"
     if not jsonl.exists():
         raise FileNotFoundError(f"Spider 2.0-lite task file not found: {jsonl}")
+    annotations = _read_eval_annotations(repo_dir)
 
     selected = set(selected_dbs) if selected_dbs else None
     docs = repo_dir / "resource" / "documents"
@@ -106,6 +201,9 @@ def load_spider2_tasks(
         )
         accepted = [t for t in (_read_csv_table(Path(p)) for p in paths) if t is not None]
 
+        note = annotations.get(instance_id, {})
+        ignore_order = note.get("ignore_order")
+
         tasks.append(
             Spider2Task(
                 instance_id=instance_id,
@@ -114,6 +212,10 @@ def load_spider2_tasks(
                 external_knowledge=knowledge,
                 gold_sql=gold_sql,
                 accepted_results=accepted,
+                ignore_order=bool(ignore_order) if ignore_order is not None else None,
+                condition_cols=_normalize_condition_cols(
+                    instance_id, note.get("condition_cols"), len(accepted)
+                ),
             )
         )
         if limit is not None and len(tasks) >= limit:
@@ -162,6 +264,9 @@ def ingest_spider2_tasks(
             },
             gold_answer={
                 "accepted_results": task.accepted_results,
+                # Which gold columns the benchmark's evaluator scores, one index
+                # list per accepted result. Empty means "all columns count".
+                "condition_cols": task.condition_cols,
                 # Documentation only: published for a minority of cases, and never the
                 # thing graded against.
                 "sql": task.gold_sql,
@@ -172,6 +277,13 @@ def ingest_spider2_tasks(
                 "accepted_result_count": len(task.accepted_results),
                 "has_gold_sql": bool(task.gold_sql),
                 "has_external_knowledge": bool(task.external_knowledge),
+                # The Tolerance.for_item seam: curated row-order opinion from the
+                # benchmark itself outranks the ORDER BY heuristic at grading.
+                **(
+                    {"tolerance": {"row_order_insensitive": task.ignore_order}}
+                    if task.ignore_order is not None
+                    else {}
+                ),
             },
             created_by=created_by,
         )
