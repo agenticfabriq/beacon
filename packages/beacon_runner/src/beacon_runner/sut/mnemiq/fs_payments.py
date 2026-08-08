@@ -30,12 +30,12 @@ import hashlib
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from beacon_runner.sut.mnemiq.in_process import MnemiqInProcessSUT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from uuid import UUID
 
 # The one table every question in this suite touches. Used only to check that certified records
 # reach the retrieval packet, never to answer.

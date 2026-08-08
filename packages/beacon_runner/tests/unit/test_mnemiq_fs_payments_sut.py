@@ -7,11 +7,10 @@ a hypothetical. A gate that has never been shown to fire is decoration.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 -- pytest resolves tmp_path hints at runtime
 from uuid import uuid4
 
 import pytest
-
 from beacon_runner.sut.mnemiq.fs_payments import (
     CertifiedRecordsNotGrounded,
     MnemiqFsPaymentsSUT,

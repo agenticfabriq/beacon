@@ -19,6 +19,7 @@ dependencies = [
 dummy = "beacon_runner.dummy_sut:DummySUT"
 mnemiq-inprocess = "beacon_runner.sut.mnemiq:MnemiqInProcessSUT"
 mnemiq-http-sql = "beacon_runner.sut.mnemiq:MnemiqHttpSqlSUT"
+mnemiq-fs-payments = "beacon_runner.sut.mnemiq:MnemiqFsPaymentsSUT"
 reference-langchain-sql = "beacon_runner.sut.reference:LangchainSqlSUT"
 reference-llama-index-sql = "beacon_runner.sut.reference:LlamaIndexSqlSUT"
 reference-spider-agent-lite = "beacon_runner.sut.reference:SpiderAgentLiteSUT"
