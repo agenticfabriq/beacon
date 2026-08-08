@@ -33,12 +33,11 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
-from datetime import date, datetime, time
-from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from beacon_runner.sut.mnemiq.in_process import MnemiqInProcessSUT
+from beacon_runner.transport import transport_value
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -168,6 +167,14 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
         Every row is pushed rather than capped here: ``ResultSetMatchGrader`` owns the cap
         (``MAX_PUSHED_ROWS``) and derives its own truncation signal from what it receives, and a
         second truncation policy in the SUT could only disagree with it.
+
+        Values go through ``transport_value`` -- the one home for Decimal -> float and temporal ->
+        ISO, which the gold loader and the grader's ``canonicalize_cell`` also import, so both
+        sides of the comparison share a rule by construction rather than by three copies agreeing.
+        The near-miss worth remembering: the grader package's ``jsonable()`` sends anything
+        non-primitive through ``str()``, so a money column would arrive as ``"40505.25"`` beside a
+        gold ``40505.25`` -- and since canonicalization strips a string and leaves a float alone,
+        every money answer would have scored wrong while auditing as a real miss.
         """
         import duckdb  # noqa: PLC0415 -- keeps the import cost off engine construction
 
@@ -175,7 +182,7 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
         try:
             cursor = con.execute(sql)
             columns = [description[0] for description in cursor.description]
-            rows = [[_transport_safe(value) for value in row] for row in cursor.fetchall()]
+            rows = [[transport_value(value) for value in row] for row in cursor.fetchall()]
         finally:
             con.close()
         return columns, rows
@@ -297,29 +304,3 @@ def _digest(path: str | None) -> str | None:
     if not path or not Path(path).is_file():
         return None
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _transport_safe(value: Any) -> Any:
-    """A cell JSONB can hold, coerced the way the GOLD was coerced.
-
-    This must match the loader's `_json_safe`, not the grader package's `jsonable()`. `jsonable()`
-    sends anything non-primitive through `str()`, so a money column would arrive as
-    `"40505.25"` while the gold holds `40505.25` -- and `canonicalize_cell` strips a string and
-    leaves a float alone, so the two never compare equal and every money answer scores wrong while
-    looking like a real miss.
-
-    Decimal -> float and temporal -> ISO are the same two rules `canonicalize_cell` applies at
-    comparison time; applying them at the transport boundary is what keeps both sides in one
-    representation. Nothing else is coerced: a genuinely textual code must stay textual.
-
-    Third home for these two lines (the loader's `_json_safe`, the grader's `canonicalize_cell`,
-    here) and it should be one. It cannot be imported from either: `beacon_graders` depends on
-    `beacon_runner`, and `beacon_benchmarks` depends on both, so the runner is the bottom of the
-    graph. Consolidating means this function moving down here and the other two importing it --
-    flagged to beacon-main rather than done unilaterally in a package that is not mine.
-    """
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, datetime | date | time):
-        return value.isoformat()
-    return value
