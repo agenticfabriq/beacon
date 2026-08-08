@@ -27,6 +27,7 @@ its own instrument being disconnected is not a measurement.
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -69,6 +70,7 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
         settings: Any | None = None,
         engine_builder: Callable[[str, Mapping[str, bool]], tuple[Callable[[str], Any], Any]]
         | None = None,
+        packet_probe: Callable[[Any], int] | None = None,
     ) -> None:
         super().__init__(
             owner_team_id=owner_team_id,
@@ -84,6 +86,10 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
         self._records_url = records_url
         self._source_id = source_id
         self._expect_records = expect_records
+        # How many certified objects a real question would pull into the retrieval packet. Injected
+        # for the reason the base class injects its engine builder -- beacon's CI has no mnemiq, and
+        # a gate that can only be shown to fire on a developer's machine is not demonstrably a gate.
+        self._packet_probe = packet_probe or _mnemiq_packet_probe
 
     def run_config(self) -> dict[str, object]:
         """Provenance for the run, so a result can be tied to the exact inputs that produced it.
@@ -133,6 +139,17 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
             verify=enabled.get("verifier", True),
         )
 
+    def _watermark_path(self) -> Path:
+        """A fresh watermark per build.
+
+        The incremental sync stamps one after a successful pull and sends `?since=` on the next, so
+        a deterministic path means the second build of the same arm pulls an empty delta. The gate
+        refuses it -- the right failure direction -- but a re-run should not need manual cleanup to
+        succeed.
+        """
+        directory = Path(tempfile.mkdtemp(prefix="fs-payments-watermark-"))
+        return directory / "watermark.json"
+
     def _settings_for_arm(self, grounded: bool) -> Any:
         settings = self._get_settings()
         if not grounded:
@@ -145,17 +162,11 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
                 "verity_page_size": 0,
                 # A watermark per arm build. Without this the second pull sends `?since=` and gets
                 # an empty delta, so a re-run grounds on nothing and says nothing about it.
-                "verity_watermark_path": str(
-                    Path(self._enrich_cache_dir) / f"watermark-{_short(self._records_url)}.json"
-                ),
+                "verity_watermark_path": str(self._watermark_path()),
             }
         )
 
     def _assert_grounded(self, snapshot: Any, records: list[Any], before: int) -> None:
-        from mnemiq.authz.grants import GrantSet
-        from mnemiq.semantic.glossary import select_definitions
-        from mnemiq.semantic.measures import select_dimensions, select_metrics
-
         if len(records) != self._expect_records:
             raise CertifiedRecordsNotGrounded(
                 f"grounded arm fetched {len(records)} certified records, expected "
@@ -167,19 +178,32 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
                 "apply_certified changed nothing: the records arrived and none was applied."
             )
 
-        grants = GrantSet(objects=frozenset({_PROBE_TABLE}))
-        tables = [_PROBE_TABLE]
-        reached = (
-            len(select_definitions(_PROBE_QUESTION, snapshot.definitions, grants, tables))
-            + len(select_metrics(tables, snapshot.metrics, grants))
-            + len(select_dimensions(tables, snapshot.dimensions, grants))
-        )
-        if reached == 0:
+        if self._packet_probe(snapshot) == 0:
             raise CertifiedRecordsNotGrounded(
                 "nothing certified reaches the retrieval packet. The snapshot changed and the "
                 "model would see none of it, which is where certified metrics and dimensions sat "
                 "for as long as they existed."
             )
+
+
+def _mnemiq_packet_probe(snapshot: Any) -> int:
+    """How many certified objects a real question pulls into the retrieval packet.
+
+    The default probe, and the only part of the gate that needs mnemiq. Selection is the thing being
+    checked: records can reach the snapshot and be selected by nothing, which is where certified
+    metrics and dimensions sat until mnemiq wired them through.
+    """
+    from mnemiq.authz.grants import GrantSet
+    from mnemiq.semantic.glossary import select_definitions
+    from mnemiq.semantic.measures import select_dimensions, select_metrics
+
+    grants = GrantSet(objects=frozenset({_PROBE_TABLE}))
+    tables = [_PROBE_TABLE]
+    return (
+        len(select_definitions(_PROBE_QUESTION, snapshot.definitions, grants, tables))
+        + len(select_metrics(tables, snapshot.metrics, grants))
+        + len(select_dimensions(tables, snapshot.dimensions, grants))
+    )
 
 
 def _standalone_count(snapshot: Any) -> int:
@@ -201,7 +225,3 @@ def _digest(path: str | None) -> str | None:
     if not path or not Path(path).is_file():
         return None
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _short(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()[:12]

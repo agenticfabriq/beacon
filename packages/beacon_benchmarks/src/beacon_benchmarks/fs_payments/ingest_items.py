@@ -21,8 +21,10 @@ Three things this gets right because beacon paid for them:
    CSV-style coercion is needed — but the column order still has to be stamped, because JSONB
    canonicalizes object keys at rest and column order is part of exact match. A regrade refuses
    evidence without one; refusing beats mangling.
-2. **Grading annotations ride as item data.** Row-order opinion goes in ``metadata.tolerance``,
-   where ``Tolerance.for_item`` reads it, not into grader logic.
+2. **Grading annotations ride as item data, when there are any.** ``metadata.tolerance`` carries
+   *curated* opinion and outranks the grader's ORDER BY heuristic — so this suite writes none,
+   because every opinion it could state is one the heuristic already reaches. A derivation stored
+   with curation authority launders its own provenance.
 3. **``answerable`` is outcome semantics, not grading.** A correct deferral is the runner's
    statement (``deferred_correctly``); it carries no verdict and must never be derived from the
    absence of a passing one. The flag rides in item input so the runner can say it.
@@ -41,13 +43,17 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from uuid import UUID
 
-SUITE = "fs-payments"
+SUITE = "fs_payments_v1"
 DATASET_VERSION = "fs-payments-v1"
 
 # beacon-main's call, and the reasoning is on the record: gold is measured on the same DuckDB
 # engine family mnemiq executes on, so the cross-engine float-noise excuse that justifies a
 # tolerant headline does not exist here. The traps are MEANING traps, and a meaning fix that only
 # shows up under a tolerant reading is a weak claim. `got_facts` rides alongside for free.
+#
+# Declared here for the registration step to stamp on `suites.metadata`, which is where the
+# derivation and the regrade read it. It is deliberately NOT copied onto items: a second home for
+# a declaration drives nothing and can only drift from the one that does.
 HEADLINE_METRIC = "exact_match"
 
 
@@ -121,27 +127,17 @@ def execute_gold(task: FsPaymentsTask, con: Any) -> dict[str, object] | None:
     return {"columns": columns, "rows": rows}
 
 
-def _row_order_insensitive(task: FsPaymentsTask) -> bool:
-    """Curated opinion, which outranks the ORDER BY heuristic at grading.
-
-    Every gold query that returns more than one row carries an explicit ``order by``, so its order
-    is meaningful and declared. Single-row answers have no order to be sensitive about, and saying
-    so beats letting a heuristic infer it.
-    """
-    return not (task.gold_sql or "").lower().__contains__("order by")
-
-
 def ingest_fs_payments_tasks(
     *,
     gold_path: Path,
     database_path: Path,
     items_repo: Any,
     team_id: UUID,
-    created_by: str,
+    created_by: UUID,
 ) -> IngestResult:
     import duckdb
 
-    from beacon_storage.models.eval_item import EvalItemTier  # noqa: PLC0415
+    from beacon_storage.models.eval_items import EvalItemTier  # noqa: PLC0415
 
     con = duckdb.connect(str(database_path), read_only=True)
     inserted = skipped = refreshed = 0
@@ -168,16 +164,17 @@ def ingest_fs_payments_tasks(
         }
 
         item_metadata: dict[str, object] = {
-            "source": "fs-payments-local",
+            "source": "fs_payments_local",
             "case_id": task.case_id,
             "band": task.band,
             "corpus_sha256": corpus_digest,
-            "headline_metric": HEADLINE_METRIC,
         }
         if task.trap:
             item_metadata["trap"] = task.trap
-        if gold_table is not None:
-            item_metadata["tolerance"] = {"row_order_insensitive": _row_order_insensitive(task)}
+        # No `tolerance` key. `metadata.tolerance` carries CURATED opinion, which outranks the
+        # grader's ORDER BY heuristic -- and every opinion this suite could state is one the
+        # heuristic already reaches on its own. Writing a derivation into a field that means
+        # "a human decided this" would launder its provenance for no behavioural gain.
 
         item, created = items_repo.upsert_by_question_hash(
             # The gold came from executing the query against the corpus, not from a published file.

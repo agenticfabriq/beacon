@@ -3,21 +3,22 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from uuid import uuid4
 
 import duckdb
-import pytest
 
 from beacon_benchmarks.fs_payments import (
     DATASET_VERSION,
     HEADLINE_METRIC,
     SUITE,
     execute_gold,
+    ingest_fs_payments_tasks,
     load_tasks,
 )
-from beacon_benchmarks.fs_payments.ingest_items import _json_safe, _row_order_insensitive
+from beacon_benchmarks.fs_payments.ingest_items import _json_safe
 
 
 def _gold(tmp_path: Path, cases: list[dict]) -> Path:
@@ -66,24 +67,68 @@ def test_an_unanswerable_case_carries_no_gold(tmp_path):
     assert execute_gold(tasks[0], duckdb.connect()) is None
 
 
-@pytest.mark.parametrize(
-    ("sql", "insensitive"),
-    [
-        ("select payment_channel, sum(v) from t group by 1 order by 1", False),
-        ("select sum(v) from t", True),
-    ],
-)
-def test_row_order_opinion_is_curated_not_inferred(tmp_path, sql, insensitive):
-    """Curated opinion outranks the ORDER BY heuristic at grading, so the loader states it."""
-    tasks = load_tasks(
-        _gold(tmp_path, [{"id": "x", "question": "q", "gold_sql": sql, "answerable": True,
-                          "tags": ["meaning"]}])
+class _FakeItem:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _FakeItemsRepo:
+    """Enough of the repo to run the ingest. Its whole job is to make the function EXECUTE."""
+
+    def __init__(self):
+        self.upserted: list[dict] = []
+        self.versions: list[dict] = []
+
+    def upsert_by_question_hash(self, **kwargs):
+        self.upserted.append(kwargs)
+        return _FakeItem(item_id=uuid4(), valid_from=datetime.now(UTC), solution_id=None,
+                         item_input=kwargs["item_input"], gold_answer=kwargs["gold_answer"],
+                         item_metadata=kwargs["item_metadata"],
+                         dataset_version=kwargs["dataset_version"]), True
+
+    def set_valid_to(self, **kwargs):  # pragma: no cover - only on a refresh
+        self.versions.append(kwargs)
+
+    def insert_new_version(self, **kwargs):  # pragma: no cover - only on a refresh
+        self.versions.append(kwargs)
+
+
+def test_the_ingest_actually_runs(tmp_path):
+    """B1: the lazy `beacon_storage` import was singular where the module is plural, and twelve
+    green tests never caught it because none of them called this function. A test that executes it
+    makes the whole defect class uncatchable-by-accident -- the import runs either way."""
+    database = tmp_path / "corpus.duckdb"
+    con = duckdb.connect(str(database))
+    con.execute("create table t (v integer)")
+    con.execute("insert into t values (1), (2)")
+    con.close()
+
+    gold = _gold(tmp_path, [
+        {"id": "a", "question": "sum?", "gold_sql": "select sum(v) as s from t",
+         "answerable": True, "tags": ["meaning", "revenue"]},
+        {"id": "b", "question": "which merchants churned?", "gold_sql": None,
+         "answerable": False, "tags": ["refusal", "unanswerable"]},
+    ])
+    repo = _FakeItemsRepo()
+
+    result = ingest_fs_payments_tasks(
+        gold_path=gold, database_path=database, items_repo=repo,
+        team_id=uuid4(), created_by=uuid4(),
     )
-    assert _row_order_insensitive(tasks[0]) is insensitive
+
+    assert result.inserted == 2
+    answerable, unanswerable = repo.upserted
+    assert answerable["gold_answer"]["accepted_results"] == [{"columns": ["s"], "rows": [[3]]}]
+    assert unanswerable["gold_answer"]["accepted_results"] == []
+    assert unanswerable["item_input"]["answerable"] is False
+    # S1/S2: neither declaration is copied onto an item.
+    assert "headline_metric" not in answerable["item_metadata"]
+    assert "tolerance" not in answerable["item_metadata"]
+    assert json.dumps(answerable["gold_answer"]), "everything stored must survive JSONB"
 
 
 def test_the_suite_declares_its_headline_metric():
     """Every scored outcome derives from beacon's verdicts under a declared rule."""
     assert HEADLINE_METRIC == "exact_match"
-    assert SUITE == "fs-payments"
+    assert SUITE == "fs_payments_v1"  # underscored + versioned, like its siblings
     assert DATASET_VERSION == "fs-payments-v1"

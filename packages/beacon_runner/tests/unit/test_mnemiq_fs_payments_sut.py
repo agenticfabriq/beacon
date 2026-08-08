@@ -25,7 +25,13 @@ class _Snapshot:
         self.dimensions = list(dimensions)
 
 
-def _sut(tmp_path: Path, *, expect: int = 38) -> MnemiqFsPaymentsSUT:
+def _sut(tmp_path: Path, *, expect: int = 38, reaches: int = 1) -> MnemiqFsPaymentsSUT:
+    """The packet probe is injected, the way the base class injects its engine builder.
+
+    Beacon's CI has no mnemiq, and the default probe imports it. A gate that can only be shown to
+    fire on a machine with mnemiq installed is not demonstrably a gate, so the gate LOGIC is tested
+    against a stub and the mnemiq-backed probe stays the default in production.
+    """
     records = tmp_path / "certified_records.json"
     records.write_text(json.dumps({"records": []}))
     return MnemiqFsPaymentsSUT(
@@ -34,6 +40,7 @@ def _sut(tmp_path: Path, *, expect: int = 38) -> MnemiqFsPaymentsSUT:
         records_url=f"file://{records}",
         enrich_cache_dir=str(tmp_path / "cache"),
         expect_records=expect,
+        packet_probe=lambda _snapshot: reaches,
     )
 
 
@@ -59,22 +66,20 @@ def test_an_empty_incremental_delta_is_refused(tmp_path):
 def test_records_that_never_reach_the_packet_are_refused(tmp_path):
     """The third way, and the one a snapshot-level check misses: certified metrics and dimensions
     sat in `snapshot.metrics` read by nothing for as long as they existed."""
-    sut = _sut(tmp_path, expect=1)
-    # Applied to the snapshot -- `before` was 0 and the snapshot now holds one -- but bound to a
-    # table no question retrieves, so nothing is selected into the packet.
-    elsewhere = _Definition(term="unrelated", bound_objects=["some_other_table"])
+    # Applied to the snapshot -- `before` was 0 and it now holds one -- but selected into the
+    # packet by nothing, which is exactly where certified metrics and dimensions sat.
+    sut = _sut(tmp_path, expect=1, reaches=0)
 
     with pytest.raises(CertifiedRecordsNotGrounded, match="retrieval packet"):
-        sut._assert_grounded(_Snapshot(definitions=[elsewhere]), [object()], before=0)
+        sut._assert_grounded(_Snapshot(definitions=[object()]), [object()], before=0)
 
 
 def test_a_grounded_arm_that_grounded_passes(tmp_path):
-    """Non-vacuity: the gate must not refuse everything. A definition bound to the probe table
-    rides with it into the packet, which is what grounding looks like when it worked."""
-    sut = _sut(tmp_path, expect=1)
-    bound = _Definition(term="revenue", bound_objects=["payment_transaction"])
+    """Non-vacuity: the gate must not refuse everything. Records arrived, the snapshot grew, and
+    something reached the packet -- what grounding looks like when it worked."""
+    sut = _sut(tmp_path, expect=1, reaches=3)
 
-    sut._assert_grounded(_Snapshot(definitions=[bound]), [object()], before=0)
+    sut._assert_grounded(_Snapshot(definitions=[object()]), [object()], before=0)
 
 
 def test_run_config_records_the_snapshot_it_read(tmp_path):
@@ -101,14 +106,3 @@ def test_a_remote_records_url_admits_it_has_no_digest(tmp_path):
     )
 
     assert sut.run_config()["records_sha256"] is None
-
-
-class _Definition:
-    """The shape `select_definitions` reads: a term, a public flag, and its bindings."""
-
-    def __init__(self, *, term: str, bound_objects: list[str]):
-        self.id = f"def:{term}"
-        self.term = term
-        self.definition = "..."
-        self.public = False
-        self.bound_objects = bound_objects
