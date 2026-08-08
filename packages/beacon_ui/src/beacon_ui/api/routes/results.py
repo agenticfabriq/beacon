@@ -189,21 +189,28 @@ def get_result(
         Depends(require_permission(Permission.EVAL_VIEW, scope_kind="run")),
     ],
     session: Annotated[Session, Depends(get_session)],
-    attempt_idx: Annotated[int, Query(ge=0)] = 0,
+    attempt_idx: Annotated[int | None, Query(ge=0)] = None,
 ) -> ResultDetailOut:
-    """Return one item's output, the gold it was graded against, and every verdict."""
+    """Return one item's output, the gold it was graded against, and every verdict.
+
+    ``attempt_idx`` omitted means "the item's result in this run", latest
+    attempt first -- sweep passes store their pass index as the attempt, so a
+    hardcoded 0 made every item of every pass>0 run read as missing while the
+    run's own listing showed it plainly.
+    """
     _run_or_404(session, run_id=run_id)
-    result = session.scalar(
-        sa.select(Result).where(
-            Result.run_id == run_id,
-            Result.item_id == str(item_id),
-            Result.attempt_idx == attempt_idx,
-        )
+    stmt = sa.select(Result).where(
+        Result.run_id == run_id,
+        Result.item_id == str(item_id),
     )
+    if attempt_idx is not None:
+        stmt = stmt.where(Result.attempt_idx == attempt_idx)
+    result = session.scalar(stmt.order_by(Result.attempt_idx.desc()).limit(1))
     if result is None:
+        asked = "" if attempt_idx is None else f" attempt {attempt_idx}"
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"no result for item {item_id} attempt {attempt_idx} in run {run_id}",
+            f"no result for item {item_id}{asked} in run {run_id}",
         )
     item = EvalItemRepo(session).get_active(item_id)
     verdicts = _verdicts_by_result(session, [result.id]).get(result.id, [])
