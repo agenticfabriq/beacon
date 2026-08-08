@@ -191,6 +191,19 @@ class VerdictComposer:
         if any_timeout:
             return verdicts, VerdictOutcome.TIMEOUT
 
+        # An item that DECLARES itself unanswerable judges the refusal, not a
+        # result set: refusing IS the right answer, answering is the wrong one
+        # regardless of what came back (decided 2026-08-08). Before this,
+        # over-answering composed ERROR -- an instrument-failure label, in the
+        # one band whose purpose is detecting over-answering -- and a correct
+        # refusal composed DEFER, which the headline rate quietly penalizes.
+        # Missing gold WITHOUT the declaration still falls through to ERROR
+        # below: that absence is an ingest defect, and the label is correct.
+        if item.query.get("answerable") is False:
+            return verdicts, (
+                VerdictOutcome.PASS if _is_deferred(result) else VerdictOutcome.FAIL
+            )
+
         # Checked after error/timeout — an attempt that never ran cannot be
         # said to have declined — but before pass/fail, because there is no
         # answer to grade. Grader verdicts are still recorded as evidence.

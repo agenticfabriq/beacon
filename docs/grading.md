@@ -136,6 +136,18 @@ who needs the historical regrade can have it; nobody should mistake the
 policy for a locked door. The version skew between suites is visible and
 explained, not hidden.
 
+## Unanswerable items
+
+An item may declare `answerable: false` in its input: nothing in the corpus
+answers it, and deferring is correct BY DECLARATION. Such an item judges the
+refusal, not a result set — a deferral composes PASS (refusing was the right
+answer), an answer composes FAIL (over-answering is a wrong answer whose
+wrongness is answering at all). Errors and timeouts outrank the declaration:
+an outage on an unanswerable item is still an outage. An item whose gold is
+missing WITHOUT the declaration composes ERROR — that absence is an ingest
+defect, and the instrument label is then correct. Two different absences,
+only one legitimate.
+
 ## Imported runs
 
 Beacon's verdict is THE claim. An imported run's results are graded here, by
