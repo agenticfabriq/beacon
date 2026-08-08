@@ -497,7 +497,7 @@ async function signIn(key) {
   document.getElementById("screen-login").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   await bootstrapWorkspace();
-  if (!applyRoute()) go("matrix");
+  if (!(await applyRoute())) go("matrix");
 }
 document.getElementById("login-key-btn").addEventListener("click", guard(async () => {
   const key = document.getElementById("l-key").value.trim();
@@ -936,22 +936,43 @@ const loadSettings = guard(async () => {
 
 /* --------------------------- events --------------------------- */
 /* ----------------------------- routes -----------------------------
- * The URL is where you are: #/<suite>/<view>, or #/<suite>/run/<id>.
- * Refresh restores it, links carry it, back/forward walk it. A suite
- * that no longer exists (deleted, other team) falls back to defaults. */
+ * The URL is where you are: #/<team>/<suite>/<view>, or .../run/<id>.
+ * Refresh restores it, links carry it, back/forward walk it. The team is
+ * part of the location -- a suite id alone validated against the DEFAULT
+ * team's list, so refreshing on another team's benchmark fell back to the
+ * default suite (found the hard way on fs_payments). A team or suite that
+ * no longer exists, or is not visible, falls back to defaults. */
 const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "benchmarks", "settings"]);
 let lastRoute = "";
 function writeRoute(view, runId) {
-  const parts = [S.suiteId || "-", view];
+  const parts = [S.teamId || "-", S.suiteId || "-", view];
   if (view === "run" && runId) parts.push(runId);
   const target = "#/" + parts.join("/");
   if (window.location.hash === target) return;
   lastRoute = target;
   window.location.hash = target;
 }
-function applyRoute() {
-  const [suitePart, viewPart, runPart] =
-    window.location.hash.replace(/^#\/?/, "").split("/");
+async function applyRoute() {
+  const parts = window.location.hash.replace(/^#\/?/, "").split("/");
+  // Legacy two-part shape (#/<suite>/<view>) predates the team segment;
+  // read it as current-team so old links keep working.
+  const legacy = ROUTED_VIEWS.has(parts[1]) || parts[1] === "run";
+  // In either shape the run id occupies the slot after the view.
+  const [teamPart, suitePart, viewPart, runPart] = legacy
+    ? [null, parts[0], parts[1], parts[2]]
+    : parts;
+
+  if (teamPart && teamPart !== "-" && teamPart !== S.teamId) {
+    // The route names another team: adopt it only if it is visible to this
+    // account, and reload the team-scoped state the rest of the route
+    // validates against.
+    const teams = asList(await api("teams"), "teams");
+    if (teams.some((team) => String(team.id) === teamPart)) {
+      S.teamId = teamPart;
+      S.suiteId = null;
+      S.suites = asList(await api("suites", { team_id: S.teamId }), "suites");
+    }
+  }
   const suite = S.suites.find((entry) => String(entry.id) === suitePart);
   if (suite && String(suite.id) !== S.suiteId) {
     S.suiteId = String(suite.id);
@@ -959,6 +980,7 @@ function applyRoute() {
     S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
     S.runsOffset = 0; S.qOffset = 0; S.ritemsOffset = 0;
   }
+  if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
   if (viewPart === "run" && runPart) { openRun(runPart); return true; }
   if (ROUTED_VIEWS.has(viewPart)) { go(viewPart); return true; }
   return false;
