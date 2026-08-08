@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 -- pytest resolves tmp_path hints at runtime
 from uuid import uuid4
 
 import duckdb
-
 from beacon_benchmarks.fs_payments import (
     DATASET_VERSION,
     HEADLINE_METRIC,

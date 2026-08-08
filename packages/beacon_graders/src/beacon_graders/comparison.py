@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, time
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from itertools import combinations
 from typing import Any
+
+from beacon_runner.transport import transport_value
 
 from beacon_graders.tolerance import Tolerance
 
@@ -50,17 +51,17 @@ def canonicalize_cell(value: Any) -> Any:
 
     Rows that crossed an engine or JSON boundary no longer share one driver's
     representations, so before comparison: temporal values become ISO strings,
-    Decimals become floats, strings are stripped, and NULL stays NULL (never
-    0, never the empty string). Bools stay bools -- True is not 1.
+    Decimals become floats (the shared transport rule, one home in
+    beacon_runner), strings are stripped, and NULL stays NULL (never 0, never
+    the empty string). Bools stay bools -- True is not 1.
     """
     if value is None or isinstance(value, bool):
         return value
-    if isinstance(value, datetime | date | time):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, float | int):
-        return value
+    transported = transport_value(value)
+    if isinstance(transported, float | int):
+        return transported
+    if transported is not value:
+        return transported  # a temporal value, already an ISO string
     return str(value).strip()
 
 

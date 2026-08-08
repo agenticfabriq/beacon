@@ -35,12 +35,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from decimal import Decimal
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from beacon_runner.transport import transport_value
+
 if TYPE_CHECKING:
+    from pathlib import Path
     from uuid import UUID
 
 SUITE = "fs_payments_v1"
@@ -93,24 +94,14 @@ def load_tasks(gold_path: Path) -> list[FsPaymentsTask]:
 
 
 def _json_safe(value: object) -> object:
-    """A value JSONB can hold, without becoming stringly where it matters.
+    """The shared transport rule, by import rather than by copy.
 
     Measured against the real corpus: 10 of the 24 gold results failed `json.dumps` outright --
     DuckDB returns `Decimal` for the money columns and `datetime` for the date ones, and neither
-    survives JSONB. So the choice is forced, and it is made here rather than in the comparator,
-    which is where beacon's contract puts transport concerns.
-
-    `Decimal -> float` matches how the rest of beacon types numerics (a pandas read of the same
-    CSV yields float64) and is what `exact`'s float-noise tolerance already expects. `datetime ->
-    ISO 8601` keeps it sortable and comparable as a string, which is the only shape JSON has for an
-    instant. Nothing else is coerced: `values_match` stays type-strict, so turning a genuinely
-    textual code into a number here would be worse than the problem.
+    survives JSONB. The rule's one home is ``beacon_runner.transport`` (Decimal -> float,
+    temporal -> ISO, nothing else coerced); the agreement test holds every consumer to it.
     """
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return value
+    return transport_value(value)
 
 
 def execute_gold(task: FsPaymentsTask, con: Any) -> dict[str, object] | None:
@@ -136,7 +127,6 @@ def ingest_fs_payments_tasks(
     created_by: UUID,
 ) -> IngestResult:
     import duckdb
-
     from beacon_storage.models.eval_items import EvalItemTier  # noqa: PLC0415
 
     con = duckdb.connect(str(database_path), read_only=True)

@@ -22,8 +22,10 @@ from decimal import Decimal
 import pytest
 from beacon_benchmarks.fs_payments.ingest_items import _json_safe
 from beacon_graders.comparison import canonicalize_cell
+from beacon_runner.transport import transport_value
 
 _RULES = {
+    "runner.transport_value": transport_value,  # the one home the others import
     "loader._json_safe": _json_safe,
     "grader.canonicalize_cell": canonicalize_cell,
 }

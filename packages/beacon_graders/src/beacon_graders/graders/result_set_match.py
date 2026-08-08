@@ -45,9 +45,11 @@ if TYPE_CHECKING:
 
 _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 
-# The most rows a push may carry -- BIRD's own cap on gold result sets. More
-# is truncated (recorded), never an error: the true count still grades.
-MAX_PUSHED_ROWS = 1000
+# One policy, one home: the cap lives at the transport boundary in
+# beacon_runner, where an SUT can also reach it without inverting the
+# dependency graph. Re-exported here because this is where graders and
+# existing callers look for it.
+from beacon_runner.transport import MAX_PUSHED_ROWS as MAX_PUSHED_ROWS  # noqa: E402, PLC0414
 
 
 def _rows_from(payload: Any, columns: list[str] | None = None) -> list[tuple[Any, ...]] | None:
