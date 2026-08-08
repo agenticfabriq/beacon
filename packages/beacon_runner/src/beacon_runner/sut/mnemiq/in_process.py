@@ -16,6 +16,10 @@ Each config arm maps onto mnemiq's assembly seams:
   mnemiq's enrichment cache key does not encode the semantic flag.
 - ``grounding`` off -> glossary definitions stripped from the snapshot before
   retrieval.
+- ``certified_records`` off -> Verity's overlay never applied: the settings
+  arm carries ``verity_records_url=None``, so ``apply_certified()`` has
+  nothing to fetch. Distinct from ``grounding``, which is mnemiq's LOCAL
+  glossary -- the two meaning layers ablate separately.
 - ``verifier`` off -> no verification cascade assembled.
 - ``self_consistency`` off -> single candidate, no selector.
 - ``mode_routing`` -> declared for completeness of the product's layer map,
@@ -57,6 +61,15 @@ GROUNDING_LAYER = Layer(
     name="grounding",
     description="Glossary definitions carried into retrieval (code-meaning grounding).",
     ablation_semantic="definitions stripped from the snapshot before retrieval",
+    instrumentation="native",
+)
+# Distinct from grounding on purpose: grounding is mnemiq's LOCAL glossary,
+# certified_records is Verity's overlay (apply_certified via verity_records_url).
+# Both are real meaning layers, and an ablation must separate them.
+CERTIFIED_RECORDS_LAYER = Layer(
+    name="certified_records",
+    description="Verity's certified records overlaid onto retrieval (apply_certified).",
+    ablation_semantic="no Verity overlay: verity_records_url unset, local snapshot only",
     instrumentation="native",
 )
 VERIFIER_LAYER = Layer(
@@ -103,6 +116,7 @@ class MnemiqInProcessSUT:
     LAYERS: tuple[Layer, ...] = (
         ENRICHMENT_LAYER,
         GROUNDING_LAYER,
+        CERTIFIED_RECORDS_LAYER,
         VERIFIER_LAYER,
         SELF_CONSISTENCY_LAYER,
         MODE_ROUTING_LAYER,
@@ -194,6 +208,17 @@ class MnemiqInProcessSUT:
         from mnemiq.eval.engine import build_engine
 
         settings = self._get_settings()
+        if not enabled.get("certified_records", True):
+            # Verity's overlay is a settings-level knob: with the URL unset,
+            # apply_certified() never runs and mnemiq answers from its local
+            # snapshot alone. Refuse rather than no-op if the knob is absent --
+            # an arm that silently equals baseline fakes a zero effect.
+            if not hasattr(settings, "verity_records_url"):
+                raise RuntimeError(
+                    "certified_records ablation needs mnemiq Settings.verity_records_url; "
+                    "this mnemiq build has no Verity overlay knob"
+                )
+            settings = settings.model_copy(update={"verity_records_url": None})
         semantic = enabled.get("enrichment", True)
         # mnemiq's enrichment cache key does not encode the semantic flag;
         # separate directories keep the arms from silently sharing snapshots.

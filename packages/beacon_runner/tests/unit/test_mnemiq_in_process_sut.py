@@ -17,7 +17,14 @@ from beacon_runner.types import EvalItem, SolutionConfig
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-LAYER_NAMES = ("enrichment", "grounding", "verifier", "self_consistency", "mode_routing")
+LAYER_NAMES = (
+    "enrichment",
+    "grounding",
+    "certified_records",
+    "verifier",
+    "self_consistency",
+    "mode_routing",
+)
 
 
 @dataclass
@@ -93,7 +100,7 @@ def _item(evidence: str = "") -> EvalItem:
     )
 
 
-def test_identity_declares_five_layers() -> None:
+def test_identity_declares_six_layers() -> None:
     sut = _sut(_Builder(_FakeAnswer(trace=_FakeTrace())))
     identity = sut.identity()
     assert identity.solution_id == "mnemiq"
