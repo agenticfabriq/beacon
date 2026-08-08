@@ -62,6 +62,7 @@ def test_register_is_idempotent_and_links_project(engine: Engine) -> None:
         assert [layer["name"] for layer in first.layers] == [
             "enrichment",
             "grounding",
+            "certified_records",
             "verifier",
             "self_consistency",
             "mode_routing",
