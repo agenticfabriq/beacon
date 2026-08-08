@@ -9,11 +9,13 @@ contract and is not used for ablation.
 
 from __future__ import annotations
 
+from beacon_runner.sut.mnemiq.fs_payments import MnemiqFsPaymentsSUT
 from beacon_runner.sut.mnemiq.http_sql import MnemiqHttpSqlSUT
 from beacon_runner.sut.mnemiq.in_process import MnemiqInProcessSUT
 from beacon_runner.sut.mnemiq.register import register_mnemiq_solution
 
 __all__ = [
+    "MnemiqFsPaymentsSUT",
     "MnemiqHttpSqlSUT",
     "MnemiqInProcessSUT",
     "register_mnemiq_solution",
