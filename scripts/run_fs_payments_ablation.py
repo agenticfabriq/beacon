@@ -305,18 +305,33 @@ def main(argv: list[str] | None = None) -> int:
         with session_scope(factory) as session:
             runs = list(session.scalars(sa.select(Run).where(Run.parent_sweep_id == sweep_id)))
             arms: dict[str, object] = {}
+            gradeable = 0
             for run in sorted(runs, key=lambda r: (str(r.sweep_arm), r.pass_idx)):
                 results = ResultRepo(session).list_for_run(run.id)
                 outcomes: dict[str, int] = {}
                 for result in results:
                     key = str(getattr(result.outcome, "value", result.outcome) or "none")
                     outcomes[key] = outcomes.get(key, 0) + 1
+                    if key in ("PASS", "FAIL"):
+                        gradeable += 1
                 arms[f"{run.sweep_arm}#{run.pass_idx}"] = {
                     "run_id": str(run.id),
                     "status": str(getattr(run.status, "value", run.status)),
                     "items": len(results),
                     "outcomes": outcomes,
                 }
+        if gradeable == 0:
+            # A sweep in which NOTHING was gradeable is an instrument reading,
+            # not an effect: delta 0.0 with p 1.0 over zero passes is precisely
+            # the manufactured null this corpus was built to make impossible.
+            # (Learned live: the first sweep scored ERROR on every non-deferred
+            # item because the SUT pushed no rows and the grader never applied.)
+            print(json.dumps({"void": True, "arms": arms}, indent=2))
+            raise SystemExit(
+                "VOID sweep: zero gradeable results in every arm -- the grader never "
+                "applied. Did the SUT push rows? Runs are persisted for diagnosis; "
+                "invalidate them once diagnosed. Refusing to print statistics."
+            )
 
         print(
             json.dumps(
