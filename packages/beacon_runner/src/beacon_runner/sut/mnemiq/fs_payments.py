@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+from datetime import date, datetime, time
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -112,6 +114,71 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
             "expect_records": self._expect_records,
             "source_id": self._source_id,
         }
+
+
+    def _to_execution_result(
+        self,
+        *,
+        item: Any,
+        answer: Any,
+        enabled: Mapping[str, bool],
+        tokens_used: int,
+        runtime_ms: int,
+    ) -> Any:
+        """Push the rows the answer's SQL returns, not just the SQL.
+
+        ``ResultSetMatchGrader.applicable()`` requires ``output["rows"]``; the base class emits
+        ``{"sql": ..., "item_id": ...}``. The BIRD SUT can do that because beacon executes candidate
+        SQL against the benchmark Postgres -- this corpus is a DuckDB file only this SUT holds a
+        handle on, so nothing downstream can turn an answer into a result set.
+
+        The first real sweep is what this is written from: 24 of 29 items composed ERROR in BOTH
+        arms and the ablation reported delta 0.0 at p = 1.0. The answers were fine -- one of those
+        "errors", executed by hand against the corpus, returned 12 rows and had handled the CDC
+        revision trap correctly. A grader that never applies produces a null result that looks
+        exactly like a real one.
+        """
+        result = super()._to_execution_result(
+            item=item, answer=answer, enabled=enabled,
+            tokens_used=tokens_used, runtime_ms=runtime_ms,
+        )
+        sql = str(result.output.get("sql") or "")
+        if result.error is not None or result.deferred or not sql:
+            # A deferral is not an answer, and a failure already has its own story. Inventing an
+            # empty result set for either would make it gradeable, which is precisely wrong.
+            return result
+
+        try:
+            columns, rows = self._execute(sql)
+        except Exception as exc:  # noqa: BLE001 -- any engine error is the same story here
+            # mnemiq already executed this SQL to produce its answer, so a failure here means the
+            # two disagree about the same corpus. That has to be loud: quietly pushing no rows is
+            # what made the first sweep unreadable.
+            return result.model_copy(update={
+                "error": f"candidate_sql_failed: {type(exc).__name__}: {str(exc)[:200]}",
+            })
+
+        return result.model_copy(update={
+            "output": {**result.output, "columns": columns, "rows": rows, "row_count": len(rows)},
+        })
+
+    def _execute(self, sql: str) -> tuple[list[str], list[list[Any]]]:
+        """Run the chosen SQL read-only against the corpus and return JSONB-safe rows.
+
+        Every row is pushed rather than capped here: ``ResultSetMatchGrader`` owns the cap
+        (``MAX_PUSHED_ROWS``) and derives its own truncation signal from what it receives, and a
+        second truncation policy in the SUT could only disagree with it.
+        """
+        import duckdb  # noqa: PLC0415 -- keeps the import cost off engine construction
+
+        con = duckdb.connect(self._database_path, read_only=True)
+        try:
+            cursor = con.execute(sql)
+            columns = [description[0] for description in cursor.description]
+            rows = [[_transport_safe(value) for value in row] for row in cursor.fetchall()]
+        finally:
+            con.close()
+        return columns, rows
 
     def _build_engine(
         self, db_id: str, enabled: Mapping[str, bool]
@@ -230,3 +297,29 @@ def _digest(path: str | None) -> str | None:
     if not path or not Path(path).is_file():
         return None
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _transport_safe(value: Any) -> Any:
+    """A cell JSONB can hold, coerced the way the GOLD was coerced.
+
+    This must match the loader's `_json_safe`, not the grader package's `jsonable()`. `jsonable()`
+    sends anything non-primitive through `str()`, so a money column would arrive as
+    `"40505.25"` while the gold holds `40505.25` -- and `canonicalize_cell` strips a string and
+    leaves a float alone, so the two never compare equal and every money answer scores wrong while
+    looking like a real miss.
+
+    Decimal -> float and temporal -> ISO are the same two rules `canonicalize_cell` applies at
+    comparison time; applying them at the transport boundary is what keeps both sides in one
+    representation. Nothing else is coerced: a genuinely textual code must stay textual.
+
+    Third home for these two lines (the loader's `_json_safe`, the grader's `canonicalize_cell`,
+    here) and it should be one. It cannot be imported from either: `beacon_graders` depends on
+    `beacon_runner`, and `beacon_benchmarks` depends on both, so the runner is the bottom of the
+    graph. Consolidating means this function moving down here and the other two importing it --
+    flagged to beacon-main rather than done unilaterally in a package that is not mine.
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    return value
