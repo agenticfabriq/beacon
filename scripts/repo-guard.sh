@@ -24,6 +24,17 @@ if [ -z "${REPO_GUARD_NAME_PATTERNS:-}" ] && [ -f .env ]; then
   REPO_GUARD_NAME_PATTERNS="$(grep '^REPO_GUARD_NAME_PATTERNS=' .env | head -1 | cut -d= -f2- \
     | sed -e "s/^['\"]//" -e "s/['\"]\$//")"
 fi
+# A linked worktree has no .env of its own -- .env is gitignored and does not
+# carry across -- so fall back to the main checkout's. Still fails closed when
+# neither has it: the fallback widens where the secret is FOUND, never what
+# happens without one.
+if [ -z "${REPO_GUARD_NAME_PATTERNS:-}" ]; then
+  MAIN_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
+  if [ -n "$MAIN_ROOT" ] && [ -f "$MAIN_ROOT/.env" ]; then
+    REPO_GUARD_NAME_PATTERNS="$(grep '^REPO_GUARD_NAME_PATTERNS=' "$MAIN_ROOT/.env" | head -1 \
+      | cut -d= -f2- | sed -e "s/^['\"]//" -e "s/['\"]\$//")"
+  fi
+fi
 if [ -z "${REPO_GUARD_NAME_PATTERNS:-}" ]; then
   echo "repo-guard: BLOCKED [config]: REPO_GUARD_NAME_PATTERNS is not set."
   echo "Set it in .env (gitignored) or the environment; in CI it comes from a repo secret."
