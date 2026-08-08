@@ -105,3 +105,137 @@ def test_a_remote_records_url_admits_it_has_no_digest(tmp_path):
     )
 
     assert sut.run_config()["records_sha256"] is None
+
+
+# --- The SUT must push the rows it executed, not just the SQL -----------------------------------
+#
+# The first real sweep returned ERROR on 24 of 29 items in BOTH arms and reported delta 0.0,
+# p = 1.0. Nothing was wrong with the answers: one of those "errors" was pulled out of the results
+# table and executed fine against the corpus, returning 12 rows, having handled the CDC revision
+# trap correctly. `ResultSetMatchGrader.applicable()` requires `output["rows"]`, the base SUT emits
+# `{"sql": ..., "item_id": ...}`, so the grader never applied and the composer scored every
+# non-deferred item ERROR.
+#
+# The BIRD SUT gets away with emitting SQL because beacon executes it against the benchmark
+# Postgres. This corpus is a DuckDB file only the SUT holds a handle on, so only the SUT can turn
+# an answer into a result set.
+
+
+class _Trace:
+    def __init__(self, sql):
+        self.target_sql = sql
+        self.enrichment_version = "v1"
+
+
+class _Answer:
+    def __init__(self, sql, *, deferred=False, failed=False):
+        self.answer = "answer text"
+        self.trace = _Trace(sql)
+        self.deferred = deferred
+        self.failed = failed
+        self.reason_code = None
+        self.cached = False
+
+
+def _corpus(tmp_path):
+    import duckdb
+
+    path = tmp_path / "corpus.duckdb"
+    con = duckdb.connect(str(path))
+    con.execute(
+        "create table payment_transaction "
+        "(channel varchar, amount decimal(12,2), day date)"
+    )
+    con.execute("insert into payment_transaction values ('IN_STORE', 40505.25, date '2026-01-02')")
+    con.execute("insert into payment_transaction values ('ONLINE', 12.50, date '2026-01-03')")
+    con.close()
+    return path
+
+
+def _item():
+    from beacon_runner.types import EvalItem
+
+    return EvalItem(item_id="i1", suite="fs_payments_v1", query={"question": "q"})
+
+
+def _sut_over(corpus, tmp_path):
+    records = tmp_path / "certified_records.json"
+    records.write_text(json.dumps({"records": []}))
+    return MnemiqFsPaymentsSUT(
+        owner_team_id=uuid4(),
+        database_path=str(corpus),
+        records_url=f"file://{records}",
+        enrich_cache_dir=str(tmp_path / "cache"),
+        expect_records=0,
+        packet_probe=lambda _s: 1,
+    )
+
+
+def test_an_answered_item_pushes_the_rows_it_executed(tmp_path):
+    corpus = _corpus(tmp_path)
+    sut = _sut_over(corpus, tmp_path)
+
+    result = sut._to_execution_result(
+        item=_item(),
+        answer=_Answer("select channel, amount, day from payment_transaction order by channel"),
+        enabled={},
+        tokens_used=10,
+        runtime_ms=5,
+    )
+
+    assert result.error is None
+    assert result.output["columns"] == ["channel", "amount", "day"]
+    assert result.output["rows"] == [
+        ["IN_STORE", 40505.25, "2026-01-02"],
+        ["ONLINE", 12.5, "2026-01-03"],
+    ], "Decimal must arrive as float and a date as an ISO string -- the same coercion the gold "
+    assert result.output["row_count"] == 2
+
+
+def test_pushed_values_match_how_the_gold_was_stored(tmp_path):
+    """The comparison is only meaningful if both sides canonicalize to the same thing.
+
+    Gold went through Decimal -> float. `jsonable()` in the grader package would give
+    str(Decimal) -- and a string never equals a float, so every money answer would score wrong
+    while looking like a real miss. This asserts the type, not just the value.
+    """
+    corpus = _corpus(tmp_path)
+    sut = _sut_over(corpus, tmp_path)
+
+    result = sut._to_execution_result(
+        item=_item(),
+        answer=_Answer("select sum(amount) as total from payment_transaction"),
+        enabled={}, tokens_used=1, runtime_ms=1,
+    )
+
+    total = result.output["rows"][0][0]
+    assert isinstance(total, float), f"money must be float, got {type(total).__name__}: {total!r}"
+    assert total == 40517.75
+
+
+def test_a_deferral_pushes_no_rows(tmp_path):
+    """A deferral is not an answer; inventing an empty result set for it would let it be graded."""
+    corpus = _corpus(tmp_path)
+    sut = _sut_over(corpus, tmp_path)
+
+    result = sut._to_execution_result(
+        item=_item(), answer=_Answer("", deferred=True), enabled={}, tokens_used=1, runtime_ms=1,
+    )
+
+    assert result.deferred is True
+    assert "rows" not in result.output
+
+
+def test_sql_that_will_not_execute_is_a_visible_error(tmp_path):
+    """mnemiq already executed this SQL to answer, so a failure here means the two disagree. That
+    must be loud: silently pushing no rows is what made the first sweep unreadable."""
+    corpus = _corpus(tmp_path)
+    sut = _sut_over(corpus, tmp_path)
+
+    result = sut._to_execution_result(
+        item=_item(), answer=_Answer("select * from no_such_table"),
+        enabled={}, tokens_used=1, runtime_ms=1,
+    )
+
+    assert result.error is not None
+    assert "candidate_sql_failed" in result.error

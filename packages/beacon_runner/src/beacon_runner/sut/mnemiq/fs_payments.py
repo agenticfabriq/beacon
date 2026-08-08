@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from beacon_runner.sut.mnemiq.in_process import MnemiqInProcessSUT
+from beacon_runner.transport import transport_value
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -112,6 +113,79 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
             "expect_records": self._expect_records,
             "source_id": self._source_id,
         }
+
+
+    def _to_execution_result(
+        self,
+        *,
+        item: Any,
+        answer: Any,
+        enabled: Mapping[str, bool],
+        tokens_used: int,
+        runtime_ms: int,
+    ) -> Any:
+        """Push the rows the answer's SQL returns, not just the SQL.
+
+        ``ResultSetMatchGrader.applicable()`` requires ``output["rows"]``; the base class emits
+        ``{"sql": ..., "item_id": ...}``. The BIRD SUT can do that because beacon executes candidate
+        SQL against the benchmark Postgres -- this corpus is a DuckDB file only this SUT holds a
+        handle on, so nothing downstream can turn an answer into a result set.
+
+        The first real sweep is what this is written from: 24 of 29 items composed ERROR in BOTH
+        arms and the ablation reported delta 0.0 at p = 1.0. The answers were fine -- one of those
+        "errors", executed by hand against the corpus, returned 12 rows and had handled the CDC
+        revision trap correctly. A grader that never applies produces a null result that looks
+        exactly like a real one.
+        """
+        result = super()._to_execution_result(
+            item=item, answer=answer, enabled=enabled,
+            tokens_used=tokens_used, runtime_ms=runtime_ms,
+        )
+        sql = str(result.output.get("sql") or "")
+        if result.error is not None or result.deferred or not sql:
+            # A deferral is not an answer, and a failure already has its own story. Inventing an
+            # empty result set for either would make it gradeable, which is precisely wrong.
+            return result
+
+        try:
+            columns, rows = self._execute(sql)
+        except Exception as exc:  # noqa: BLE001 -- any engine error is the same story here
+            # mnemiq already executed this SQL to produce its answer, so a failure here means the
+            # two disagree about the same corpus. That has to be loud: quietly pushing no rows is
+            # what made the first sweep unreadable.
+            return result.model_copy(update={
+                "error": f"candidate_sql_failed: {type(exc).__name__}: {str(exc)[:200]}",
+            })
+
+        return result.model_copy(update={
+            "output": {**result.output, "columns": columns, "rows": rows, "row_count": len(rows)},
+        })
+
+    def _execute(self, sql: str) -> tuple[list[str], list[list[Any]]]:
+        """Run the chosen SQL read-only against the corpus and return JSONB-safe rows.
+
+        Every row is pushed rather than capped here: ``ResultSetMatchGrader`` owns the cap
+        (``MAX_PUSHED_ROWS``) and derives its own truncation signal from what it receives, and a
+        second truncation policy in the SUT could only disagree with it.
+
+        Values go through ``transport_value`` -- the one home for Decimal -> float and temporal ->
+        ISO, which the gold loader and the grader's ``canonicalize_cell`` also import, so both
+        sides of the comparison share a rule by construction rather than by three copies agreeing.
+        The near-miss worth remembering: the grader package's ``jsonable()`` sends anything
+        non-primitive through ``str()``, so a money column would arrive as ``"40505.25"`` beside a
+        gold ``40505.25`` -- and since canonicalization strips a string and leaves a float alone,
+        every money answer would have scored wrong while auditing as a real miss.
+        """
+        import duckdb  # noqa: PLC0415 -- keeps the import cost off engine construction
+
+        con = duckdb.connect(self._database_path, read_only=True)
+        try:
+            cursor = con.execute(sql)
+            columns = [description[0] for description in cursor.description]
+            rows = [[transport_value(value) for value in row] for row in cursor.fetchall()]
+        finally:
+            con.close()
+        return columns, rows
 
     def _build_engine(
         self, db_id: str, enabled: Mapping[str, bool]
