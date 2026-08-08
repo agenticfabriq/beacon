@@ -19,6 +19,11 @@ doing that were measured while building this corpus:
 * records reaching the **snapshot but not the retrieval packet**. Certified metrics and dimensions
   sat in ``snapshot.metrics`` read by nothing until mnemiq wired them through; a snapshot-level
   assertion would have passed while the model saw no difference at all.
+* a **mid-session outage after a successful pull** (mnemiq M18 confirmed the class in production
+  code: an incremental pull plus a from-scratch rebuild emptied the overlay on the SECOND pull,
+  38 then 0, silently). mnemiq now serves last-known-good on outage and does periodic full
+  re-syncs; the ``expect_records`` gate here guards regardless, because belt and suspenders is
+  the correct number of ways to hold up the pants an experiment is wearing.
 
 So the grounded arm asserts it actually grounded, and raises if it did not. A run that cannot detect
 its own instrument being disconnected is not a measurement.
