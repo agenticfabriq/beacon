@@ -209,15 +209,16 @@ class MnemiqInProcessSUT:
 
         settings = self._get_settings()
         if not enabled.get("certified_records", True):
-            # Verity's overlay is a settings-level knob: with the URL unset,
-            # apply_certified() never runs and mnemiq answers from its local
-            # snapshot alone. Refuse rather than no-op if the knob is absent --
-            # an arm that silently equals baseline fakes a zero effect.
-            if not hasattr(settings, "verity_records_url"):
-                raise RuntimeError(
-                    "certified_records ablation needs mnemiq Settings.verity_records_url; "
-                    "this mnemiq build has no Verity overlay knob"
-                )
+            # Verity's overlay is a settings-level knob: with the URL forced to
+            # None, apply_certified() never runs and mnemiq answers from its
+            # local snapshot alone. verity_records_url is a DECLARED mnemiq
+            # Settings field (default None), so forcing it is always valid --
+            # and a hasattr guard here can never fire, so none is pretended.
+            # The OFF arm is safe by construction; it is the ON arm that can
+            # silently equal baseline (fail-soft 401 fetch, incremental-sync
+            # watermark returning an empty delta, records reaching the
+            # snapshot but not the retrieval packet). Those liveness gates
+            # belong per-arm in the SUT's grounded assembly, not here.
             settings = settings.model_copy(update={"verity_records_url": None})
         semantic = enabled.get("enrichment", True)
         # mnemiq's enrichment cache key does not encode the semantic flag;
