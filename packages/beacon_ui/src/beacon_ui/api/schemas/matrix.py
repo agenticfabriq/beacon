@@ -23,6 +23,10 @@ class MatrixRowOut(BaseModel):
     model_id: str | None = None
     config_label: str | None = None
     config_digest: str | None = None
+    # The sweep arms pooled into this row, comma-joined. A run's arm is part
+    # of its identity; when config_label is empty this is the readable name,
+    # and more than one arm here means the row pools across arms.
+    arms: str | None = None
     # The engine the runner declared it executed against; a facet, not a verdict.
     engine: str | None = None
     n_runs: int

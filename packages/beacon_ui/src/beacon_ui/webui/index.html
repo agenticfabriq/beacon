@@ -606,7 +606,7 @@ function renderMatrixRows() {
     `<tr class="click" data-cell="${index}">
       <td>${esc(row.solution_name)} <span class="dim">${esc(row.solution_version)}</span></td>
       <td>${esc(row.model_id || "")}</td>
-      <td class="cfgcell">${esc(row.config_label || "")}</td>
+      <td class="cfgcell">${esc(row.config_label || row.arms || "")}</td>
       <td class="dim">${esc(row.engine || "")}</td>
       <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
       <td class="num ex">${pct(row.ex_rate)}</td>

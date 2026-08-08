@@ -105,6 +105,12 @@ def results_matrix(
             Run.config_label,
             Run.config_digest,
             engine_expr.label("engine"),
+            # The arms pooled into this row, made visible: a sweep run's
+            # config_label is empty and its identity lives in sweep_arm, so a
+            # blank cell over a pooled average answered nobody's question.
+            # More than one distinct arm in the cell is itself information --
+            # the row is pooling things a reader may not want pooled.
+            sa.func.string_agg(Run.sweep_arm.distinct(), sa.literal(", ")).label("arms"),
             sa.func.count(sa.func.distinct(Run.id)).label("n_runs"),
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome.in_(_GRADED))
@@ -180,6 +186,7 @@ def results_matrix(
                 model_id=record.model_id,
                 config_label=record.config_label,
                 config_digest=record.config_digest,
+                arms=record.arms,
                 engine=str(record.engine) or None,
                 n_runs=int(record.n_runs),
                 n_graded=graded,

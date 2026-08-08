@@ -136,6 +136,18 @@ who needs the historical regrade can have it; nobody should mistake the
 policy for a locked door. The version skew between suites is visible and
 explained, not hidden.
 
+## Passes and power
+
+`pass@k` is a union metric: extra passes can only add passes. When a
+treatment's mechanism is "makes the system consistent" — a deterministic
+treated arm against a noisy baseline — extra passes flatter ONLY the noisy
+arm, so K>1 systematically understates exactly the effect being measured
+(measured live: discordant pairs fell from 5 to 4 going from one pass to
+three, while the treated arm answered the same items every pass). More
+passes cannot buy power there; more items can. Suites whose treatment
+reduces variance should read the per-pass numbers beside `pass@k`, and a
+paired test's binding constraint is item count.
+
 ## Unanswerable items
 
 An item may declare `answerable: false` in its input: nothing in the corpus
