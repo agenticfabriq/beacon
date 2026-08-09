@@ -67,6 +67,8 @@
   tr.gone td{opacity:.5}
   .qcell{white-space:normal;max-width:430px;font-family:var(--prose);font-size:12.5px;line-height:1.45}
   .ex{color:var(--pass);font-weight:650} .def{color:var(--defer);font-weight:650}
+  /* The pooled row's own error bar, under the number it qualifies. */
+  .spread{display:block;font-size:9.5px;font-weight:400;color:var(--ink-3);letter-spacing:0}
   .wr{color:var(--wrong)} .er{color:var(--error)}
   .num{text-align:right} .dim{color:var(--ink-3)}
   .ref td{box-shadow:inset 3px 0 0 var(--accent)}
@@ -609,7 +611,8 @@ function renderMatrixRows() {
       <td class="cfgcell">${esc(row.config_label || row.arms || "")}</td>
       <td class="dim">${esc(row.engine || "")}</td>
       <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
-      <td class="num ex">${pct(row.ex_rate)}</td>
+      <td class="num ex">${pct(row.ex_rate)}${row.ex_rate_min !== null && row.ex_rate_max !== null && row.ex_rate_max > row.ex_rate_min
+        ? `<span class="spread" title="lowest and highest of the ${row.n_runs} runs pooled here — the row's own error bar">${pct(row.ex_rate_min)}–${pct(row.ex_rate_max)}</span>` : ""}</td>
       <td class="num dim">${pct(row.ex_target_engine_rate)}</td>
       <td class="num dim">${pct(row.exact_rate)}</td>
       <td class="num dim">${pct(row.got_facts_rate)}</td>

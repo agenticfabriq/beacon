@@ -325,3 +325,66 @@ def test_only_the_latest_verdict_version_is_read(
     # Exactly one of the two results is true at its latest reading. Under
     # "any version true" both would count and the rate would be 2/3.
     assert row["got_facts_rate"] == pytest.approx(1 / 3)
+
+
+def test_a_pooled_row_shows_the_spread_it_averages(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """A row over several runs reports one number, and a reader takes it for a
+    quantity. It is a mean over repetitions that disagree -- so the row carries
+    the lowest and highest per-run rate it pooled. A single run has no spread."""
+    from beacon_storage.ids import uuid7
+    from beacon_storage.models.runs import Result, Run
+    from sqlalchemy import select
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+    assert row["n_runs"] == 1
+    assert row["ex_rate_min"] is None, "one measurement has no error bar"
+
+    # A second run of the SAME configuration -- a deliberate replicate -- that
+    # answers every item correctly where the first did not.
+    original = session.scalar(select(Run).where(Run.model_id == "model-a"))
+    replicate = Run(
+        id=uuid7(),
+        team_id=original.team_id,
+        solution_id=original.solution_id,
+        suite_id=original.suite_id,
+        suite=original.suite,
+        dataset_version=original.dataset_version,
+        mode=original.mode,
+        status=original.status,
+        pass_idx=1,
+        model_id=original.model_id,
+        config_label=original.config_label,
+        config_digest=original.config_digest,
+        config=dict(original.config or {}),
+        created_by=original.created_by,
+    )
+    session.add(replicate)
+    session.flush()
+    for result in session.scalars(select(Result).where(Result.run_id == original.id)):
+        session.add(
+            Result(
+                id=uuid7(),
+                team_id=result.team_id,
+                run_id=replicate.id,
+                item_id=result.item_id,
+                attempt_idx=1,
+                output=dict(result.output or {}),
+                output_kind=result.output_kind,
+                tokens_input=result.tokens_input,
+                tokens_output=result.tokens_output,
+                runtime_ms=result.runtime_ms,
+                status=result.status,
+                outcome="PASS" if str(result.outcome) != "DEFER" else result.outcome,
+            )
+        )
+    session.commit()
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    assert row["n_runs"] == 2
+    # The two runs disagree; the row must say so rather than only averaging.
+    assert row["ex_rate_min"] == pytest.approx(1 / 3)
+    assert row["ex_rate_max"] == pytest.approx(2 / 3)
+    assert row["ex_rate_min"] < row["ex_rate"] < row["ex_rate_max"]

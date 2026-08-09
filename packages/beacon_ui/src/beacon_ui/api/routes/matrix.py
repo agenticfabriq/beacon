@@ -49,6 +49,31 @@ def _rate(part: int, whole: int) -> float | None:
     return part / whole if whole else None
 
 
+def _per_run_rate(filters: list[sa.ColumnElement[bool]]) -> sa.Subquery:
+    """Each valid run's own headline rate, one row per run.
+
+    A row aggregating several runs reports one number, and a reader takes it
+    for a quantity. It is a mean over repetitions that disagree -- measured on
+    the first real sweep, one arm's three passes read 53.4 / 58.6 / 51.7 and
+    the row said 54.3. Repeating a config is how you learn the error bar, so
+    the row must be able to SHOW the spread rather than average it away.
+    """
+    return (
+        sa.select(
+            Run.id.label("run_id"),
+            (
+                sa.cast(sa.func.count().filter(Result.outcome == "PASS"), sa.Float)
+                / sa.func.nullif(sa.func.count().filter(Result.outcome.in_(_GRADED)), 0)
+            ).label("rate"),
+        )
+        .select_from(Run)
+        .join(Result, Result.run_id == Run.id)
+        .where(*filters)
+        .group_by(Run.id)
+        .subquery("per_run_rate")
+    )
+
+
 def _latest_reading(metric: str) -> sa.Subquery:
     """The CURRENT verdict per result for one metric, one row each.
 
@@ -95,6 +120,7 @@ def results_matrix(
     # grader across benchmarks -- and each read at its CURRENT version only.
     got_facts_now = _latest_reading("got_facts")
     exact_now = _latest_reading("exact_match")
+    per_run = _per_run_rate(filters)
 
     stmt = (
         sa.select(
@@ -112,6 +138,11 @@ def results_matrix(
             # the row is pooling things a reader may not want pooled.
             sa.func.string_agg(Run.sweep_arm.distinct(), sa.literal(", ")).label("arms"),
             sa.func.count(sa.func.distinct(Run.id)).label("n_runs"),
+            # The spread across the runs pooled here. min/max survive the
+            # row multiplication this join causes (unlike a sum), so the
+            # per-run subquery can ride along with the item-level counts.
+            sa.func.min(per_run.c.rate).label("ex_rate_min"),
+            sa.func.max(per_run.c.rate).label("ex_rate_max"),
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome.in_(_GRADED))
             .label("n_graded"),
@@ -159,6 +190,7 @@ def results_matrix(
         .join(Solution, Solution.id == Run.solution_id)
         .join(got_facts_now, got_facts_now.c.result_id == Result.id, isouter=True)
         .join(exact_now, exact_now.c.result_id == Result.id, isouter=True)
+        .join(per_run, per_run.c.run_id == Run.id, isouter=True)
         .where(*filters)
         .group_by(
             Run.solution_id,
@@ -187,6 +219,17 @@ def results_matrix(
                 config_label=record.config_label,
                 config_digest=record.config_digest,
                 arms=record.arms,
+                # Only meaningful across repetitions; one run has no spread.
+                ex_rate_min=(
+                    float(record.ex_rate_min)
+                    if int(record.n_runs) > 1 and record.ex_rate_min is not None
+                    else None
+                ),
+                ex_rate_max=(
+                    float(record.ex_rate_max)
+                    if int(record.n_runs) > 1 and record.ex_rate_max is not None
+                    else None
+                ),
                 engine=str(record.engine) or None,
                 n_runs=int(record.n_runs),
                 n_graded=graded,

@@ -27,6 +27,12 @@ class MatrixRowOut(BaseModel):
     # of its identity; when config_label is empty this is the readable name,
     # and more than one arm here means the row pools across arms.
     arms: str | None = None
+    # The lowest and highest per-run headline rate pooled into this row, when
+    # it pools more than one run. A single number over repetitions that
+    # disagree reads as a quantity; this is the error bar the row already had
+    # and never showed. None for a single run -- one measurement has no spread.
+    ex_rate_min: float | None = None
+    ex_rate_max: float | None = None
     # The engine the runner declared it executed against; a facet, not a verdict.
     engine: str | None = None
     n_runs: int
