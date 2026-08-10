@@ -98,3 +98,70 @@ def test_a_config_naming_no_model_yields_none() -> None:
 def test_the_label_is_read_out_of_extras() -> None:
     assert config_label_of(_config(extras={"config_label": "+guided"})) == "+guided"
     assert config_label_of(_config()) is None
+
+
+def test_provenance_does_not_change_a_configuration_s_identity() -> None:
+    """Re-running a config produces a new report file, so its digest changes --
+    and if that reached the identity, every replicate would land in its own
+    matrix row. Repetition is how a row learns its error bar, so provenance
+    must not split one: the digest covers what was CONFIGURED, never how the
+    record was MADE."""
+    configured = {"model_id": "gpt-5.5", "retrieval_k": 24, "candidates": 1}
+    first = {
+        **configured,
+        "imported_from": "spider2-results.jsonl",
+        "imported_sha256": "5a91bab93b23",
+        "source_runner": "mnemiq scripts/run_spider2.py",
+        "source_rev": "2ba8894",
+    }
+    replicate = {
+        **configured,
+        "imported_from": "spider2-results.jsonl",
+        "imported_sha256": "0000deadbeef",  # a second run of the same config
+        "source_runner": "mnemiq scripts/run_spider2.py",
+        # A stamp the earlier run does not carry at all. An absent stamp means
+        # an UNRECORDED engine build, never a different one -- splitting on it
+        # would break a real replicate pair. A genuinely different build must
+        # separate through Solution.version, which is where the system's
+        # identity lives; that gap is open and does not belong in this digest.
+        "source_rev": "d85fd04",
+    }
+
+    assert config_digest(first) == config_digest(replicate)
+    assert config_digest(first) == config_digest(configured)
+
+
+def test_a_knob_that_changes_what_is_measured_does_change_identity() -> None:
+    """The other half of the same rule: retrieval_k=12 and retrieval_k=24 are
+    different experiments and must never pool into one row."""
+    k12 = {"model_id": "gpt-5.5", "retrieval_k": 12}
+    k24 = {"model_id": "gpt-5.5", "retrieval_k": 24}
+
+    assert config_digest(k12) != config_digest(k24)
+
+
+def test_a_knob_change_still_splits_when_provenance_moves_with_it() -> None:
+    """The two rules together, which is how they actually arrive: a real knob
+    change lands in a new run, from a new file, at a new revision. The
+    provenance must not mask the knob."""
+    k12 = {"model_id": "gpt-5.5", "retrieval_k": 12,
+           "imported_sha256": "aaaa", "source_rev": "97ff945"}
+    k24 = {"model_id": "gpt-5.5", "retrieval_k": 24,
+           "imported_sha256": "bbbb", "source_rev": "d85fd04"}
+
+    assert config_digest(k12) != config_digest(k24)
+
+
+def test_the_import_paths_own_semantics_knobs_split_a_row() -> None:
+    """--strict is not a label, it changes what PASS means: the headline
+    metric and the derivation both move. Two imports that disagree about the
+    definition of correct must never average into one number (the defect that
+    put two grading semantics in one row once already)."""
+    facts = {"executor": "sqlite-native", "headline_metric": "got_facts",
+             "pass_semantics": "derived from beacon got_facts",
+             "imported_sha256": "aaaa"}
+    strict = {"executor": "sqlite-native", "headline_metric": "exact_match",
+              "pass_semantics": "derived from beacon exact_match",
+              "imported_sha256": "bbbb"}
+
+    assert config_digest(facts) != config_digest(strict)

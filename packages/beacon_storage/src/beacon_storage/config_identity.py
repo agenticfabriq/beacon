@@ -21,7 +21,40 @@ if TYPE_CHECKING:
 
 # Excluded from the digest: a credential reference says nothing about what was
 # measured, and rotating one would otherwise look like a new configuration.
-EXCLUDED_KEYS = frozenset({"secret_refs"})
+#
+# The provenance keys are excluded for the same reason and a sharper one. They
+# record WHERE a run's record came from -- which file, which revision, which
+# runner -- and they vary between two runs of the very same configuration by
+# construction: re-run a config and the report file's digest changes. A
+# digest that included them would give every repeat a new identity, so
+# replicates would stop pooling into one row and the matrix's error bar (the
+# spread across a row's runs) would silently die -- the feature and the trap
+# arrive together. The rule: **the digest covers what was CONFIGURED, never
+# how the record was MADE.**
+#
+# ``source_rev`` is the sharpest of them and the argument for excluding it is
+# NOT that the engine build is irrelevant -- it is that the build is a fact
+# about the SYSTEM, and beacon models the system in ``Solution.version``, not
+# in a config knob. Digesting it would mislabel a system fact as a knob, and
+# it would split genuine replicates on a missing stamp: the first imported
+# Spider run predates the field entirely, so an absent stamp would read as a
+# different engine when it only means an unrecorded one. The real gap it
+# exposes lives elsewhere and is open -- an in-process SUT hardcodes its
+# VERSION, so two genuinely different engine builds register as one solution
+# version and DO merge. That must be fixed where version is declared.
+#
+# These names are excluded from EVERY config, not only an importer's, so they
+# are reserved: a SUT must not use one of them for a knob that changes what a
+# run measures.
+EXCLUDED_KEYS = frozenset(
+    {
+        "secret_refs",
+        "imported_from",
+        "imported_sha256",
+        "source_runner",
+        "source_rev",
+    }
+)
 # Also excluded: bookkeeping a loader attaches to a run, which varies between two
 # runs of the very same configuration and says nothing about what was measured.
 #

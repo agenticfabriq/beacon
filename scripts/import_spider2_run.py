@@ -45,6 +45,7 @@ from beacon_iam.auth.oidc import OidcClaims
 from beacon_iam.service.users import UserService
 from beacon_runner.types import EvalItem as RunnerItem
 from beacon_runner.types import ExecutionResult, ExecutionStep
+from beacon_storage.config_identity import config_digest
 from beacon_storage.db import make_engine, make_session_factory, session_scope
 from beacon_storage.models.runs import HarnessMode, ResultStatus, VerdictOutcome
 from beacon_storage.repository.eval_items import EvalItemRepo
@@ -189,6 +190,36 @@ def main() -> int:
 
             counts: dict[str, int] = {}
             grader = ResultSetMatchGrader()
+            # Recorded so the number is never read without its conditions.
+            run_config: dict[str, Any] = {
+                "executor": "sqlite-native",
+                "candidates": 1,
+                "external_knowledge": True,
+                "graded_by": f"{grader.name} {grader.version}",
+                "headline_metric": "exact_match" if args.strict else HEADLINE_METRIC,
+                # Whose report this is: decides DEFER/ERROR only (a refusal
+                # is the runner's statement) and names whose outcome rides
+                # in output.mnemiq_outcome as provenance. PASS/FAIL derive
+                # from beacon's verdicts and owe this nothing.
+                "source_runner": "mnemiq scripts/run_spider2.py",
+                # Pinned the way imported_sha256 pins the file: mnemiq's
+                # grading changed twice in a day, and an unversioned claim
+                # is not a claim. Absent means unpinned, visibly.
+                **(
+                    {"source_rev": rev}
+                    if (rev := args.source_rev or meta.get("source_rev"))
+                    else {}
+                ),
+                "pass_semantics": (
+                    f"derived from beacon {'exact_match' if args.strict else HEADLINE_METRIC}"
+                ),
+                # Basename only: a full path leaks the machine home directory,
+                # and this repo is public-track (repo-guard's rule). The hash
+                # says WHICH file was read -- two checkouts can carry the
+                # same basename at different states, and one already did.
+                "imported_from": results_path.name,
+                "imported_sha256": hashlib.sha256(results_path.read_bytes()).hexdigest(),
+}
             run = RunRepo(session).create(
                 team_id=team.id,
                 solution_id=solution,
@@ -197,38 +228,16 @@ def main() -> int:
                 dataset_version=DATASET_VERSION,
                 mode=HarnessMode.EVAL,
                 pass_idx=0,
-                # Recorded so the number is never read without its conditions.
-                config={
-                    "executor": "sqlite-native",
-                    "candidates": 1,
-                    "external_knowledge": True,
-                    "graded_by": f"{grader.name} {grader.version}",
-                    "headline_metric": "exact_match" if args.strict else HEADLINE_METRIC,
-                    # Whose report this is: decides DEFER/ERROR only (a refusal
-                    # is the runner's statement) and names whose outcome rides
-                    # in output.mnemiq_outcome as provenance. PASS/FAIL derive
-                    # from beacon's verdicts and owe this nothing.
-                    "source_runner": "mnemiq scripts/run_spider2.py",
-                    # Pinned the way imported_sha256 pins the file: mnemiq's
-                    # grading changed twice in a day, and an unversioned claim
-                    # is not a claim. Absent means unpinned, visibly.
-                    **(
-                        {"source_rev": rev}
-                        if (rev := args.source_rev or meta.get("source_rev"))
-                        else {}
-                    ),
-                    "pass_semantics": (
-                        f"derived from beacon {'exact_match' if args.strict else HEADLINE_METRIC}"
-                    ),
-                    # Basename only: a full path leaks the machine home directory,
-                    # and this repo is public-track (repo-guard's rule). The hash
-                    # says WHICH file was read -- two checkouts can carry the
-                    # same basename at different states, and one already did.
-                    "imported_from": results_path.name,
-                    "imported_sha256": hashlib.sha256(results_path.read_bytes()).hexdigest(),
-                },
+                config=run_config,
                 model_id=args.model,
                 config_label=args.label,
+                # Without this the row's identity was label+model alone, and
+                # every import shared one NULL digest -- so a --strict import
+                # would have pooled with a facts import under one label and
+                # averaged two definitions of correct into a single number.
+                # Provenance is excluded from the digest, so replicates of one
+                # config still land in one row and keep their spread.
+                config_digest=config_digest(run_config),
                 created_by=user_id,
                 parent_sweep_id=uuid7(),  # makes each import a distinct run
             )
@@ -278,6 +287,19 @@ def main() -> int:
                 # matrix's EX* reads it from output; absent means "never claimed".
                 if (portable := row.get("portable_to_gold_engine")) is not None:
                     output["portable_to_gold_engine"] = portable
+                # The engine's own prior on its answer, beside beacon's verdict
+                # on the same case -- that pairing is what makes "does the
+                # engine know when it is wrong" a query instead of another run.
+                # NOT a verdict field: `verdicts.confidence` means how sure
+                # BEACON's grader is, and one column cannot mean two things.
+                # The layer travels with the number or neither does: the
+                # cascade's sanity leg returns a deterministic 0.0, so a curve
+                # drawn without filtering to the judge leg reads those as
+                # "scored zero" and is wrong in the confident direction.
+                confidence, layer = row.get("verify_confidence"), row.get("verify_layer")
+                if confidence is not None and layer is not None:
+                    output["verify_confidence"] = confidence
+                    output["verify_layer"] = layer
 
                 # Only executed cases get verdicts. A deferral or an outage produced no
                 # result set to compare, and a got_facts verdict of "false" would report
