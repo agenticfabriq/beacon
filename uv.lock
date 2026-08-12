@@ -374,7 +374,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.0" },
     { name = "pytest-postgresql", specifier = ">=6.0" },
     { name = "responses", specifier = ">=0.25" },
-    { name = "ruff", specifier = ">=0.6" },
+    { name = "ruff", specifier = "==0.15.16" },
     { name = "statsmodels", specifier = ">=0.14" },
 ]
 
