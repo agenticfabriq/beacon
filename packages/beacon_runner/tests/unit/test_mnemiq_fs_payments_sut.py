@@ -7,6 +7,7 @@ a hypothetical. A gate that has never been shown to fire is decoration.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence  # noqa: TC003 -- resolved at runtime with the hints below
 from pathlib import Path  # noqa: TC003 -- pytest resolves tmp_path hints at runtime
 from uuid import uuid4
 
@@ -15,10 +16,16 @@ from beacon_runner.sut.mnemiq.fs_payments import (
     CertifiedRecordsNotGrounded,
     MnemiqFsPaymentsSUT,
 )
+from beacon_runner.types import EvalItem
 
 
 class _Snapshot:
-    def __init__(self, definitions=(), metrics=(), dimensions=()):
+    def __init__(
+        self,
+        definitions: Sequence[object] = (),
+        metrics: Sequence[object] = (),
+        dimensions: Sequence[object] = (),
+    ) -> None:
         self.definitions = list(definitions)
         self.metrics = list(metrics)
         self.dimensions = list(dimensions)
@@ -43,7 +50,7 @@ def _sut(tmp_path: Path, *, expect: int = 38, reaches: int = 1) -> MnemiqFsPayme
     )
 
 
-def test_a_short_fetch_is_refused(tmp_path):
+def test_a_short_fetch_is_refused(tmp_path: Path) -> None:
     """The fail-soft 401. `fetch_certified_records` returns [] on any transport failure so a Verity
     outage cannot brick mnemiq — correct for the product, fatal for an experiment, because both
     arms then produce an identical prompt and the run reports no effect."""
@@ -53,7 +60,7 @@ def test_a_short_fetch_is_refused(tmp_path):
         sut._assert_grounded(_Snapshot(), [], before=0)
 
 
-def test_an_empty_incremental_delta_is_refused(tmp_path):
+def test_an_empty_incremental_delta_is_refused(tmp_path: Path) -> None:
     """The watermark. A successful pull stamps one; the next sends `?since=` and receives nothing.
     An eval whose second run grounds on less than its first, with nothing saying so."""
     sut = _sut(tmp_path, expect=38)
@@ -62,7 +69,7 @@ def test_an_empty_incremental_delta_is_refused(tmp_path):
         sut._assert_grounded(_Snapshot(), [object()], before=0)
 
 
-def test_records_that_never_reach_the_packet_are_refused(tmp_path):
+def test_records_that_never_reach_the_packet_are_refused(tmp_path: Path) -> None:
     """The third way, and the one a snapshot-level check misses: certified metrics and dimensions
     sat in `snapshot.metrics` read by nothing for as long as they existed."""
     # Applied to the snapshot -- `before` was 0 and it now holds one -- but selected into the
@@ -73,7 +80,7 @@ def test_records_that_never_reach_the_packet_are_refused(tmp_path):
         sut._assert_grounded(_Snapshot(definitions=[object()]), [object()], before=0)
 
 
-def test_a_grounded_arm_that_grounded_passes(tmp_path):
+def test_a_grounded_arm_that_grounded_passes(tmp_path: Path) -> None:
     """Non-vacuity: the gate must not refuse everything. Records arrived, the snapshot grew, and
     something reached the packet -- what grounding looks like when it worked."""
     sut = _sut(tmp_path, expect=1, reaches=3)
@@ -81,7 +88,7 @@ def test_a_grounded_arm_that_grounded_passes(tmp_path):
     sut._assert_grounded(_Snapshot(definitions=[object()]), [object()], before=0)
 
 
-def test_run_config_records_the_snapshot_it_read(tmp_path):
+def test_run_config_records_the_snapshot_it_read(tmp_path: Path) -> None:
     """Two checkouts carrying the same basename at different states is the same trap as two
     databases with the same name, so the digest is of the bytes actually read."""
     sut = _sut(tmp_path)
@@ -90,10 +97,10 @@ def test_run_config_records_the_snapshot_it_read(tmp_path):
 
     assert config["records_sha256"] is not None, "a local snapshot must carry its digest"
     assert config["expect_records"] == 38
-    assert config["verity_records_url"].startswith("file://")
+    assert str(config["verity_records_url"]).startswith("file://")
 
 
-def test_a_remote_records_url_admits_it_has_no_digest(tmp_path):
+def test_a_remote_records_url_admits_it_has_no_digest(tmp_path: Path) -> None:
     """Claiming a digest for something not read from disk would be worse than admitting there is
     none."""
     sut = MnemiqFsPaymentsSUT(
@@ -122,13 +129,13 @@ def test_a_remote_records_url_admits_it_has_no_digest(tmp_path):
 
 
 class _Trace:
-    def __init__(self, sql):
+    def __init__(self, sql: str) -> None:
         self.target_sql = sql
         self.enrichment_version = "v1"
 
 
 class _Answer:
-    def __init__(self, sql, *, deferred=False, failed=False):
+    def __init__(self, sql: str, *, deferred: bool = False, failed: bool = False) -> None:
         self.answer = "answer text"
         self.trace = _Trace(sql)
         self.deferred = deferred
@@ -137,7 +144,7 @@ class _Answer:
         self.cached = False
 
 
-def _corpus(tmp_path):
+def _corpus(tmp_path: Path) -> Path:
     import duckdb
 
     path = tmp_path / "corpus.duckdb"
@@ -151,13 +158,11 @@ def _corpus(tmp_path):
     return path
 
 
-def _item():
-    from beacon_runner.types import EvalItem
-
+def _item() -> EvalItem:
     return EvalItem(item_id="i1", suite="fs_payments_v1", query={"question": "q"})
 
 
-def _sut_over(corpus, tmp_path):
+def _sut_over(corpus: Path, tmp_path: Path) -> MnemiqFsPaymentsSUT:
     records = tmp_path / "certified_records.json"
     records.write_text(json.dumps({"records": []}))
     return MnemiqFsPaymentsSUT(
@@ -170,7 +175,7 @@ def _sut_over(corpus, tmp_path):
     )
 
 
-def test_an_answered_item_pushes_the_rows_it_executed(tmp_path):
+def test_an_answered_item_pushes_the_rows_it_executed(tmp_path: Path) -> None:
     corpus = _corpus(tmp_path)
     sut = _sut_over(corpus, tmp_path)
 
@@ -191,7 +196,7 @@ def test_an_answered_item_pushes_the_rows_it_executed(tmp_path):
     assert result.output["row_count"] == 2
 
 
-def test_pushed_values_match_how_the_gold_was_stored(tmp_path):
+def test_pushed_values_match_how_the_gold_was_stored(tmp_path: Path) -> None:
     """The comparison is only meaningful if both sides canonicalize to the same thing.
 
     Gold went through Decimal -> float. `jsonable()` in the grader package would give
@@ -214,7 +219,7 @@ def test_pushed_values_match_how_the_gold_was_stored(tmp_path):
     assert total == 40517.75
 
 
-def test_a_deferral_pushes_no_rows(tmp_path):
+def test_a_deferral_pushes_no_rows(tmp_path: Path) -> None:
     """A deferral is not an answer; inventing an empty result set for it would let it be graded."""
     corpus = _corpus(tmp_path)
     sut = _sut_over(corpus, tmp_path)
@@ -231,7 +236,7 @@ def test_a_deferral_pushes_no_rows(tmp_path):
     assert "rows" not in result.output
 
 
-def test_sql_that_will_not_execute_is_a_visible_error(tmp_path):
+def test_sql_that_will_not_execute_is_a_visible_error(tmp_path: Path) -> None:
     """mnemiq already executed this SQL to answer, so a failure here means the two disagree. That
     must be loud: silently pushing no rows is what made the first sweep unreadable."""
     corpus = _corpus(tmp_path)

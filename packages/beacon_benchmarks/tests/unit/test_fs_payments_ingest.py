@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path  # noqa: TC003 -- pytest resolves tmp_path hints at runtime
+from typing import Any
 from uuid import uuid4
 
 import duckdb
@@ -20,13 +21,13 @@ from beacon_benchmarks.fs_payments import (
 from beacon_benchmarks.fs_payments.ingest_items import _json_safe
 
 
-def _gold(tmp_path: Path, cases: list[dict]) -> Path:
+def _gold(tmp_path: Path, cases: list[dict[str, Any]]) -> Path:
     path = tmp_path / "gold.json"
     path.write_text(json.dumps(cases))
     return path
 
 
-def test_gold_rows_survive_jsonb():
+def test_gold_rows_survive_jsonb() -> None:
     """Measured against the real corpus before this existed: 10 of 24 gold results failed
     `json.dumps` outright. DuckDB hands back Decimal for money and datetime for instants, and JSONB
     holds neither."""
@@ -37,7 +38,7 @@ def test_gold_rows_survive_jsonb():
     assert _json_safe(20000) == 20000
 
 
-def test_gold_carries_its_column_order(tmp_path):
+def test_gold_carries_its_column_order(tmp_path: Path) -> None:
     """Column order is part of exact match and dict rows carry theirs only in flight, so the
     ordered array is stamped at ingest. A regrade refuses evidence without one."""
     con = duckdb.connect()
@@ -60,11 +61,13 @@ def test_gold_carries_its_column_order(tmp_path):
 
     table = execute_gold(tasks[0], con)
 
+    # An answerable case must produce gold; None is the unanswerable case's answer.
+    assert table is not None
     assert table["columns"] == ["b", "a"], "the query's order, not the table's"
     assert table["rows"] == [[1, 2]]
 
 
-def test_an_unanswerable_case_carries_no_gold(tmp_path):
+def test_an_unanswerable_case_carries_no_gold(tmp_path: Path) -> None:
     """A correct deferral is the runner's statement. The loader must not manufacture an empty gold
     for it, or a missing verdict starts to look like a failed one."""
     tasks = load_tasks(
@@ -87,18 +90,18 @@ def test_an_unanswerable_case_carries_no_gold(tmp_path):
 
 
 class _FakeItem:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         self.__dict__.update(kwargs)
 
 
 class _FakeItemsRepo:
     """Enough of the repo to run the ingest. Its whole job is to make the function EXECUTE."""
 
-    def __init__(self):
-        self.upserted: list[dict] = []
-        self.versions: list[dict] = []
+    def __init__(self) -> None:
+        self.upserted: list[dict[str, Any]] = []
+        self.versions: list[dict[str, Any]] = []
 
-    def upsert_by_question_hash(self, **kwargs):
+    def upsert_by_question_hash(self, **kwargs: Any) -> tuple[_FakeItem, bool]:
         self.upserted.append(kwargs)
         return _FakeItem(
             item_id=uuid4(),
@@ -110,14 +113,14 @@ class _FakeItemsRepo:
             dataset_version=kwargs["dataset_version"],
         ), True
 
-    def set_valid_to(self, **kwargs):  # pragma: no cover - only on a refresh
+    def set_valid_to(self, **kwargs: Any) -> None:  # pragma: no cover - only on a refresh
         self.versions.append(kwargs)
 
-    def insert_new_version(self, **kwargs):  # pragma: no cover - only on a refresh
+    def insert_new_version(self, **kwargs: Any) -> None:  # pragma: no cover - only on a refresh
         self.versions.append(kwargs)
 
 
-def test_the_ingest_actually_runs(tmp_path):
+def test_the_ingest_actually_runs(tmp_path: Path) -> None:
     """B1: the lazy `beacon_storage` import was singular where the module is plural, and twelve
     green tests never caught it because none of them called this function. A test that executes it
     makes the whole defect class uncatchable-by-accident -- the import runs either way."""
@@ -167,7 +170,7 @@ def test_the_ingest_actually_runs(tmp_path):
     assert json.dumps(answerable["gold_answer"]), "everything stored must survive JSONB"
 
 
-def test_the_suite_declares_its_headline_metric():
+def test_the_suite_declares_its_headline_metric() -> None:
     """Every scored outcome derives from beacon's verdicts under a declared rule."""
     assert HEADLINE_METRIC == "exact_match"
     assert SUITE == "fs_payments_v1"  # underscored + versioned, like its siblings

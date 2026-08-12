@@ -69,6 +69,10 @@ from beacon_storage.repository.teams import TeamRepo
 if TYPE_CHECKING:
     from uuid import UUID
 
+    # Aliased: `EvalItem` is already the RUNNER's item here (the thing a SUT is
+    # asked), and this is the STORED row (the thing gold lives on). Two types,
+    # one name, one script -- the annotation has to say which.
+    from beacon_storage.models.eval_items import EvalItem as StoredEvalItem
     from sqlalchemy.orm import Session
 
 
@@ -83,7 +87,7 @@ def _seed_user_id(session: Session) -> UUID:
     return user.id
 
 
-def _digest_gate(rows: list, database_path: Path) -> str:
+def _digest_gate(rows: list[StoredEvalItem], database_path: Path) -> str:
     """Gold and execution must come from the same corpus bytes, provably.
 
     The items' ``corpus_sha256`` records what the gold was measured against;

@@ -25,7 +25,7 @@ from beacon_runner.types import EvalItem as RunnerItem
 from beacon_runner.types import ExecutionResult, ExecutionStep
 from beacon_storage.db import make_engine, make_session_factory, session_scope
 from beacon_storage.models.eval_items import EvalItem
-from beacon_storage.models.runs import Result, Run, Verdict
+from beacon_storage.models.runs import Result, Run, Verdict, VerdictOutcome
 from beacon_storage.models.suites import Suite
 from beacon_storage.repository.verdicts import VerdictRepo
 
@@ -174,8 +174,10 @@ def main() -> int:
                     if outcome_is_the_graders_to_restate(
                         dict(item_row.item_input or {}), str(result.outcome)
                     ):
-                        derived = "PASS" if by_metric.get(headline) else "FAIL"
-                        if str(result.outcome) != derived:
+                        derived = (
+                            VerdictOutcome.PASS if by_metric.get(headline) else VerdictOutcome.FAIL
+                        )
+                        if str(result.outcome) != derived.value:
                             result.outcome = derived
                             flipped += 1
             session.flush()

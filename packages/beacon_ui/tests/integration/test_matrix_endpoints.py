@@ -359,6 +359,7 @@ def test_a_pooled_row_shows_the_spread_it_averages(
     # A second run of the SAME configuration -- a deliberate replicate -- that
     # answers every item correctly where the first did not.
     original = session.scalar(select(Run).where(Run.model_id == "model-a"))
+    assert original is not None
     replicate = Run(
         id=uuid7(),
         team_id=original.team_id,

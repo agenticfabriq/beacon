@@ -220,13 +220,18 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
         if not enabled.get("grounding", True):
             snapshot = snapshot.model_copy(update={"definitions": []})
 
-        return build_engine(
+        # mnemiq ships no type information, so build_engine is Any. Naming the
+        # pair here is what makes the annotation above a claim rather than a
+        # comment: every caller is checked against it, even though nothing can
+        # check it against mnemiq.
+        engine: tuple[Callable[[str], Any], Any] = build_engine(
             snapshot,
             adapter,
             settings,
             candidates=self._candidates if enabled.get("self_consistency", True) else 1,
             verify=enabled.get("verifier", True),
         )
+        return engine
 
     def _watermark_path(self) -> Path:
         """A fresh watermark per build.
