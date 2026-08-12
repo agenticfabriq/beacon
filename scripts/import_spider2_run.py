@@ -412,6 +412,12 @@ def main() -> int:
 
             total = len(rows)
             passed = derived_counts.get("PASS", 0)
+            # ERROR leaves the denominator, exactly as the matrix computes it.
+            # This line divided by every result instead, so one import printed
+            # 5.2% for a run the dashboard reads as 5.3% -- one system, one run,
+            # two numbers, and the console one is what a person copies while the
+            # import is still on screen. DEFER stays in: declining is an outcome.
+            gradeable = total - derived_counts.get("ERROR", 0)
             print(f"suite     {SUITE} ({DATASET_VERSION})")
             print(
                 f"items     {ingested.inserted} inserted, {ingested.refreshed} re-versioned, "
@@ -421,7 +427,12 @@ def main() -> int:
             print(f"results   {total} imported")
             for name in sorted(counts):
                 print(f"  {name:20s} {counts[name]}")
-            print(f"pass rate {passed / total:.1%}  ({passed}/{total})")
+            print(
+                f"pass rate {passed / gradeable:.1%}  ({passed}/{gradeable} gradeable; "
+                f"{derived_counts.get('ERROR', 0)} ERROR left the denominator)"
+                if gradeable
+                else "pass rate n/a  (nothing gradeable)"
+            )
             if beacon_graded:
                 print(
                     f"beacon    {grader.name} {grader.version}: "
