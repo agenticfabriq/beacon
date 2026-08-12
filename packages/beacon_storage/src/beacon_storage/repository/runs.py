@@ -125,10 +125,13 @@ class RunRepo:
         Invalidating by mistake must not be permanent, or the safe action stops
         being safe and people reach for the database instead.
 
-        Validity is restored; execution is not. A run cancelled by invalidation
-        stays cancelled, because nothing resumed it -- and the matrix keys on
-        ``invalidated_at``, not status, so a restored run counts again either
-        way.
+        That has to include the cancellation, not just the invalidation flags.
+        Results may only be pushed to a PENDING or RUNNING run, so a run retired
+        mid-flight and then restored would accept nothing and could not be
+        completed either -- undoing the mistake would leave it bricked, with its
+        partial results still counting in the matrix. ``invalidate`` is the only
+        writer of CANCELLED, so finding one here means it put it there, and
+        ``started_at`` says which state to return it to.
         """
         run = self.session.get(Run, run_id)
         if run is None or run.invalidated_at is None:
@@ -136,6 +139,9 @@ class RunRepo:
         run.invalidated_at = None
         run.invalidated_by = None
         run.invalidation_reason = None
+        if run.status == RunStatus.CANCELLED:
+            run.status = RunStatus.RUNNING if run.started_at else RunStatus.PENDING
+            run.completed_at = None
         self.session.flush()
         return run
 

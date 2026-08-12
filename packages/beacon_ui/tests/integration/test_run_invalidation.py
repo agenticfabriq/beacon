@@ -311,10 +311,16 @@ def test_retiring_a_run_mid_flight_stops_it_running(
     assert body["completed_at"] is not None
 
 
-def test_restoring_leaves_the_cancellation_alone(
+def test_restoring_an_in_flight_run_lets_it_be_pushed_to_again(
     api_client: TestClient, world: _World, seeded: Seeded, session: Session
 ) -> None:
-    """Restoring validity does not resurrect execution."""
+    """Undoing the mistake must undo the cancellation with it.
+
+    Results may only be pushed to a PENDING or RUNNING run. If restore left
+    the run CANCELLED it would accept nothing and could not be completed
+    either -- bricked by the very action that exists to be safe -- while its
+    partial results kept counting in the matrix.
+    """
     RunRepo(session).mark_running(UUID(seeded.other_run_id))
     session.commit()
     _invalidate(api_client, world, seeded.other_run_id)
@@ -324,4 +330,31 @@ def test_restoring_leaves_the_cancellation_alone(
     ).json()
 
     assert body["invalidated_at"] is None
-    assert body["status"] == RunStatus.CANCELLED.value
+    assert body["status"] == RunStatus.RUNNING.value
+    assert body["completed_at"] is None
+
+
+def test_restoring_does_not_resurrect_a_run_that_never_started(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """started_at is the evidence for which state to return to."""
+    run = RunRepo(session).create(
+        team_id=world.acme_team_id,
+        suite_id=UUID(seeded.suite_id),
+        solution_id=RunRepo(session).get(UUID(seeded.run_id)).solution_id,  # type: ignore[union-attr]
+        suite=SUITE,
+        dataset_version="v1",
+        mode=HarnessMode.EVAL,
+        pass_idx=7,
+        config={},
+        created_by=world.alice_id,
+    )
+    session.commit()
+    _invalidate(api_client, world, str(run.id))
+
+    body = api_client.post(f"/v1/runs/{run.id}/restore", headers=_headers(world)).json()
+
+    # The API presents PENDING as "queued" (_run_status); the column holds PENDING.
+    assert body["status"] == "queued"
+    session.expire_all()
+    assert RunRepo(session).get(run.id).status == RunStatus.PENDING  # type: ignore[union-attr]

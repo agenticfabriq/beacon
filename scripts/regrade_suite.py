@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import Any
 
 import sqlalchemy as sa
 from beacon_graders.graders.result_set_match import ResultSetMatchGrader
@@ -27,6 +28,24 @@ from beacon_storage.models.eval_items import EvalItem
 from beacon_storage.models.runs import Result, Run, Verdict
 from beacon_storage.models.suites import Suite
 from beacon_storage.repository.verdicts import VerdictRepo
+
+
+def outcome_is_the_graders_to_restate(item_input: dict[str, Any], outcome: str) -> bool:
+    """Whether a regrade may re-derive this result's outcome from the headline.
+
+    Two results are off limits. One whose outcome is not PASS/FAIL -- DEFER,
+    ERROR and TIMEOUT are the runner's statement about whether a query was
+    produced at all. And one whose item DECLARES itself unanswerable, where the
+    refusal contract decides the outcome and the grader has no say at all
+    (composer.py): refusing IS the right answer there, answering is the wrong
+    one whatever came back. Re-deriving that from a result-set comparison would
+    credit an over-answer whose SQL happened to match gold, and fail a refusal
+    that pushed an empty row set -- inverting the one band whose whole purpose
+    is detecting over-answering.
+    """
+    if item_input.get("answerable") is False:
+        return False
+    return outcome in {"PASS", "FAIL"}
 
 
 def main() -> int:
@@ -154,8 +173,11 @@ def main() -> int:
                             true_counts[metric] = true_counts.get(metric, 0) + 1
                     graded += 1
                     # Decision "(a)": PASS/FAIL derive from the headline verdict.
-                    # Anything else is the runner's statement and stays.
-                    if str(result.outcome) in {"PASS", "FAIL"}:
+                    # Verdicts above are recorded as evidence either way; only the
+                    # outcome is not always the grader's to restate.
+                    if outcome_is_the_graders_to_restate(
+                        dict(item_row.item_input or {}), str(result.outcome)
+                    ):
                         derived = "PASS" if by_metric.get(headline) else "FAIL"
                         if str(result.outcome) != derived:
                             result.outcome = derived
