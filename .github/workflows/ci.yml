@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# The lint and typecheck jobs run the Makefile targets rather than repeating
+# their commands. Repeating them is how CI came to check less than `make
+# typecheck` did: the Makefile added scripts/ (deliberately -- the ablation
+# runner's protocol had drifted for the repo's whole history while it sat
+# outside the target) and this file was never updated to match.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -13,10 +18,8 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - name: Install
         run: uv sync --all-packages
-      - name: Ruff check
-        run: uv run ruff check .
-      - name: Ruff format
-        run: uv run ruff format --check .
+      - name: Lint
+        run: make lint
 
   typecheck:
     runs-on: ubuntu-latest
@@ -25,17 +28,39 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - name: Install
         run: uv sync --all-packages
-      - name: Mypy
-        run: uv run mypy packages/
+      - name: Typecheck
+        run: make typecheck
 
   test:
     runs-on: ubuntu-latest
     env:
       BEACON_JWT_SIGNING_KEY: ci-test
+    # The root conftest sets DATABASE_URL with `setdefault` and every package's
+    # db_url fixture returns it when present, so the pytest-postgresql fallback
+    # beneath it is unreachable and the suite ALWAYS wants a server at this
+    # address. Locally that is the docker-compose Postgres; CI had none, and
+    # started one only in the alembic step below -- after pytest had already
+    # failed against it. Credentials match the conftest default exactly, so the
+    # default is what gets exercised.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: beacon
+          POSTGRES_PASSWORD: beacon_dev
+          POSTGRES_DB: beacon_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U beacon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - name: Install Postgres binaries
+        # For pytest-postgresql's own instances. Kept so the fallback above
+        # stays runnable if the unconditional DATABASE_URL default ever goes.
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-16 postgresql-client-16
@@ -45,11 +70,18 @@ jobs:
       - name: Pytest
         run: uv run pytest -v
       - name: Smoke alembic against a fresh DB
+        # A database of its own, created here rather than by initdb: the service
+        # already owns :5432, and a second server on that port cannot bind. The
+        # _ci suffix is what the conftest's wipe guard permits.
         env:
-          DATABASE_URL: postgresql+psycopg://postgres@localhost:5432/beacon_ci
+          DATABASE_URL: postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon_ci
         run: |
-          sudo install -d -o postgres -g postgres /tmp/ci-pg
-          sudo -u postgres /usr/lib/postgresql/16/bin/initdb -A trust -D /tmp/ci-pg
-          sudo -u postgres /usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ci-pg -l /tmp/ci-pg.log start
-          sudo -u postgres /usr/lib/postgresql/16/bin/createdb beacon_ci
+          uv run python -c "
+          import psycopg
+          with psycopg.connect(
+              'postgresql://beacon:beacon_dev@localhost:5432/postgres', autocommit=True
+          ) as conn:
+              conn.execute('DROP DATABASE IF EXISTS beacon_ci')
+              conn.execute('CREATE DATABASE beacon_ci')
+          "
           uv run alembic -c packages/beacon_storage/src/beacon_storage/migrations/alembic.ini upgrade head
