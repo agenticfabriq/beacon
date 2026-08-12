@@ -111,6 +111,15 @@ def main() -> int:
     parser.add_argument("--model", default=os.environ.get("MNEMIQ_LLM_MODEL", "mnemiq"))
     parser.add_argument("--label", default="single-shot", help="config_label for the run")
     parser.add_argument(
+        "--retrieval-k",
+        type=int,
+        help="retrieval depth the run used, when the runner turned that knob. A real "
+        "config key, so two depths get two digests and two rows on the knob itself "
+        "rather than on a label somebody typed. NO DEFAULT on purpose: stamping one "
+        "would change the digest of every run imported before this flag existed, "
+        "splitting each from its own replicates. Absent means unrecorded, visibly.",
+    )
+    parser.add_argument(
         "--source-rev",
         help="mnemiq commit the outcomes were graded at; defaults to source_rev "
         "from the report's .meta.json when the exporter stamps one",
@@ -193,6 +202,10 @@ def main() -> int:
                 "executor": "sqlite-native",
                 "candidates": 1,
                 "external_knowledge": True,
+                # A knob, so it belongs in the digest and not in a label: two
+                # depths are two configurations, and the row has to say so on
+                # the thing that differs rather than on prose beside it.
+                **({"retrieval_k": args.retrieval_k} if args.retrieval_k is not None else {}),
                 "graded_by": f"{grader.name} {grader.version}",
                 "headline_metric": "exact_match" if args.strict else HEADLINE_METRIC,
                 # Whose report this is: decides DEFER/ERROR only (a refusal
