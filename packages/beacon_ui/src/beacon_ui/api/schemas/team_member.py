@@ -48,4 +48,3 @@ class MemberKeyOut(BaseModel):
     user_id: UUID
     label: str
     api_key: str
-

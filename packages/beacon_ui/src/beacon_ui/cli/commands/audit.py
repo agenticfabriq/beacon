@@ -87,9 +87,7 @@ def spot_check(run_id: str, db_url: str, sample: int, seed: int) -> None:
                     f"DIVERGED {item_id}: pushed row_count={claimed}, engine returned "
                     f"{len(executed)}"
                 )
-            elif len(pushed) == claimed and not compare_rows(
-                pushed, executed, False, tolerance
-            ):
+            elif len(pushed) == claimed and not compare_rows(pushed, executed, False, tolerance):
                 diverged += 1
                 click.echo(f"DIVERGED {item_id}: pushed rows differ from engine rows")
             else:

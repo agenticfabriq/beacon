@@ -144,10 +144,18 @@ def test_a_knob_change_still_splits_when_provenance_moves_with_it() -> None:
     """The two rules together, which is how they actually arrive: a real knob
     change lands in a new run, from a new file, at a new revision. The
     provenance must not mask the knob."""
-    k12 = {"model_id": "gpt-5.5", "retrieval_k": 12,
-           "imported_sha256": "aaaa", "source_rev": "97ff945"}
-    k24 = {"model_id": "gpt-5.5", "retrieval_k": 24,
-           "imported_sha256": "bbbb", "source_rev": "d85fd04"}
+    k12 = {
+        "model_id": "gpt-5.5",
+        "retrieval_k": 12,
+        "imported_sha256": "aaaa",
+        "source_rev": "97ff945",
+    }
+    k24 = {
+        "model_id": "gpt-5.5",
+        "retrieval_k": 24,
+        "imported_sha256": "bbbb",
+        "source_rev": "d85fd04",
+    }
 
     assert config_digest(k12) != config_digest(k24)
 
@@ -157,11 +165,17 @@ def test_the_import_paths_own_semantics_knobs_split_a_row() -> None:
     metric and the derivation both move. Two imports that disagree about the
     definition of correct must never average into one number (the defect that
     put two grading semantics in one row once already)."""
-    facts = {"executor": "sqlite-native", "headline_metric": "got_facts",
-             "pass_semantics": "derived from beacon got_facts",
-             "imported_sha256": "aaaa"}
-    strict = {"executor": "sqlite-native", "headline_metric": "exact_match",
-              "pass_semantics": "derived from beacon exact_match",
-              "imported_sha256": "bbbb"}
+    facts = {
+        "executor": "sqlite-native",
+        "headline_metric": "got_facts",
+        "pass_semantics": "derived from beacon got_facts",
+        "imported_sha256": "aaaa",
+    }
+    strict = {
+        "executor": "sqlite-native",
+        "headline_metric": "exact_match",
+        "pass_semantics": "derived from beacon exact_match",
+        "imported_sha256": "bbbb",
+    }
 
     assert config_digest(facts) != config_digest(strict)

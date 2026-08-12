@@ -170,9 +170,7 @@ def issue_member_key(
     their own Settings once signed in.
     """
     memberships = MembershipRepo(session).list_for_user(user_id)
-    is_member = any(
-        m.scope_kind == ScopeKind.TEAM and m.scope_id == team_id for m in memberships
-    )
+    is_member = any(m.scope_kind == ScopeKind.TEAM and m.scope_id == team_id for m in memberships)
     if not is_member:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user is not a member of this team")
 
@@ -180,4 +178,3 @@ def issue_member_key(
     ApiKeyRepo(session).create(user_id=user_id, key_hash=hash_api_key(key), label=body.label)
     session.commit()
     return MemberKeyOut(user_id=user_id, label=body.label, api_key=key)
-

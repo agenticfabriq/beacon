@@ -44,8 +44,18 @@ def test_gold_carries_its_column_order(tmp_path):
     con.execute("create table t (b integer, a integer)")
     con.execute("insert into t values (1, 2)")
     tasks = load_tasks(
-        _gold(tmp_path, [{"id": "x", "question": "q", "gold_sql": "select b, a from t",
-                          "answerable": True, "tags": ["meaning", "trap"]}])
+        _gold(
+            tmp_path,
+            [
+                {
+                    "id": "x",
+                    "question": "q",
+                    "gold_sql": "select b, a from t",
+                    "answerable": True,
+                    "tags": ["meaning", "trap"],
+                }
+            ],
+        )
     )
 
     table = execute_gold(tasks[0], con)
@@ -58,8 +68,18 @@ def test_an_unanswerable_case_carries_no_gold(tmp_path):
     """A correct deferral is the runner's statement. The loader must not manufacture an empty gold
     for it, or a missing verdict starts to look like a failed one."""
     tasks = load_tasks(
-        _gold(tmp_path, [{"id": "r", "question": "which merchants churned?", "gold_sql": None,
-                          "answerable": False, "tags": ["refusal", "unanswerable"]}])
+        _gold(
+            tmp_path,
+            [
+                {
+                    "id": "r",
+                    "question": "which merchants churned?",
+                    "gold_sql": None,
+                    "answerable": False,
+                    "tags": ["refusal", "unanswerable"],
+                }
+            ],
+        )
     )
 
     assert tasks[0].answerable is False
@@ -80,10 +100,15 @@ class _FakeItemsRepo:
 
     def upsert_by_question_hash(self, **kwargs):
         self.upserted.append(kwargs)
-        return _FakeItem(item_id=uuid4(), valid_from=datetime.now(UTC), solution_id=None,
-                         item_input=kwargs["item_input"], gold_answer=kwargs["gold_answer"],
-                         item_metadata=kwargs["item_metadata"],
-                         dataset_version=kwargs["dataset_version"]), True
+        return _FakeItem(
+            item_id=uuid4(),
+            valid_from=datetime.now(UTC),
+            solution_id=None,
+            item_input=kwargs["item_input"],
+            gold_answer=kwargs["gold_answer"],
+            item_metadata=kwargs["item_metadata"],
+            dataset_version=kwargs["dataset_version"],
+        ), True
 
     def set_valid_to(self, **kwargs):  # pragma: no cover - only on a refresh
         self.versions.append(kwargs)
@@ -102,17 +127,33 @@ def test_the_ingest_actually_runs(tmp_path):
     con.execute("insert into t values (1), (2)")
     con.close()
 
-    gold = _gold(tmp_path, [
-        {"id": "a", "question": "sum?", "gold_sql": "select sum(v) as s from t",
-         "answerable": True, "tags": ["meaning", "revenue"]},
-        {"id": "b", "question": "which merchants churned?", "gold_sql": None,
-         "answerable": False, "tags": ["refusal", "unanswerable"]},
-    ])
+    gold = _gold(
+        tmp_path,
+        [
+            {
+                "id": "a",
+                "question": "sum?",
+                "gold_sql": "select sum(v) as s from t",
+                "answerable": True,
+                "tags": ["meaning", "revenue"],
+            },
+            {
+                "id": "b",
+                "question": "which merchants churned?",
+                "gold_sql": None,
+                "answerable": False,
+                "tags": ["refusal", "unanswerable"],
+            },
+        ],
+    )
     repo = _FakeItemsRepo()
 
     result = ingest_fs_payments_tasks(
-        gold_path=gold, database_path=database, items_repo=repo,
-        team_id=uuid4(), created_by=uuid4(),
+        gold_path=gold,
+        database_path=database,
+        items_repo=repo,
+        team_id=uuid4(),
+        created_by=uuid4(),
     )
 
     assert result.inserted == 2

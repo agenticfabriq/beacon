@@ -43,9 +43,6 @@ def _primary_grader_for(name: str) -> Any:
         grader.order_sensitive_when_order_by = True
         return grader
 
-
-
-
     raise AssertionError(f"unknown adapter for regression: {name}")
 
 

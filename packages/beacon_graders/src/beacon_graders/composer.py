@@ -200,9 +200,7 @@ class VerdictComposer:
         # Missing gold WITHOUT the declaration still falls through to ERROR
         # below: that absence is an ingest defect, and the label is correct.
         if item.query.get("answerable") is False:
-            return verdicts, (
-                VerdictOutcome.PASS if _is_deferred(result) else VerdictOutcome.FAIL
-            )
+            return verdicts, (VerdictOutcome.PASS if _is_deferred(result) else VerdictOutcome.FAIL)
 
         # Checked after error/timeout — an attempt that never ran cannot be
         # said to have declined — but before pass/fail, because there is no

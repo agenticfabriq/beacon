@@ -86,9 +86,7 @@ def main() -> int:
             }
             runs = list(
                 session.scalars(
-                    sa.select(Run).where(
-                        Run.suite_id == suite.id, Run.invalidated_at.is_(None)
-                    )
+                    sa.select(Run).where(Run.suite_id == suite.id, Run.invalidated_at.is_(None))
                 )
             )
 
@@ -96,9 +94,7 @@ def main() -> int:
             graded = skipped = flipped = orderless = current = 0
             true_counts: dict[str, int] = {}
             for run in runs:
-                for result in session.scalars(
-                    sa.select(Result).where(Result.run_id == run.id)
-                ):
+                for result in session.scalars(sa.select(Result).where(Result.run_id == run.id)):
                     item_row = items.get(str(result.item_id))
                     if item_row is None:
                         skipped += 1

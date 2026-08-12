@@ -226,9 +226,7 @@ class ResultSetMatchGrader:
         dedupe = tolerance.duplicate_rows_insignificant is True
         candidate_was_complete = len(candidate.rows) == candidate_row_count
         if dedupe:
-            candidate = ResultSet(
-                columns=candidate.columns, rows=_distinct_rows(candidate.rows)
-            )
+            candidate = ResultSet(columns=candidate.columns, rows=_distinct_rows(candidate.rows))
             if candidate_was_complete:
                 candidate_row_count = len(candidate.rows)
             # else: the declared count is a raw count and the distinct count is
@@ -252,8 +250,7 @@ class ResultSetMatchGrader:
                 if gold_was_complete:
                     gold_count = len(gold.rows)
             evidence_complete_v = (
-                len(candidate.rows) == candidate_row_count
-                and len(gold.rows) == gold_count
+                len(candidate.rows) == candidate_row_count and len(gold.rows) == gold_count
             )
             mismatch_v: Mismatch | None = None
             if candidate_row_count != gold_count and not (dedupe and not candidate_was_complete):

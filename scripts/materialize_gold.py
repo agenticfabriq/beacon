@@ -33,9 +33,9 @@ from beacon_storage.models.eval_items import EvalItem
 MAX_GOLD_ROWS = 1000
 
 
-def _execute_gold(engine: sa.Engine, sql: str, timeout_seconds: int = 60) -> tuple[
-    list[str], list[list[object]], int
-]:
+def _execute_gold(
+    engine: sa.Engine, sql: str, timeout_seconds: int = 60
+) -> tuple[list[str], list[list[object]], int]:
     """Run one gold query, returning canonical (columns, rows, true row count)."""
     if engine.dialect.paramstyle in ("pyformat", "format"):
         sql = sql.replace("%", "%%")

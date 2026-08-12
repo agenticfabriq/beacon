@@ -240,9 +240,7 @@ def results_matrix(
                     if int(record.n_portability_flagged)
                     else None
                 ),
-                exact_rate=(
-                    _rate(int(record.n_exact), graded) if int(record.n_exact) else None
-                ),
+                exact_rate=(_rate(int(record.n_exact), graded) if int(record.n_exact) else None),
                 got_facts_rate=(
                     _rate(int(record.n_got_facts), graded) if int(record.n_got_facts) else None
                 ),

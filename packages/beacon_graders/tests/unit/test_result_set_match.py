@@ -232,7 +232,6 @@ def test_tie_order_variance_fails_exact_but_passes_got_facts() -> None:
     assert facts.bool_value is True
 
 
-
 # ---- multi-gold: a set of accepted results, any of which passes (v4) ----
 
 
@@ -358,8 +357,9 @@ def _flagged(gold: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
 def _grade_with_meta(
     gold: dict[str, Any], metadata: dict[str, Any], output: dict[str, Any]
 ) -> tuple[Any, Any]:
-    item = EvalItem(item_id="i-1", suite="s", query={"question": "q?"},
-                    ground_truth=gold, metadata=metadata)
+    item = EvalItem(
+        item_id="i-1", suite="s", query={"question": "q?"}, ground_truth=gold, metadata=metadata
+    )
     verdicts = ResultSetMatchGrader().grade(item, _result(output))
     exact = next(v for v in verdicts if v.metric != "got_facts")
     facts = next(v for v in verdicts if v.metric == "got_facts")
@@ -404,9 +404,7 @@ def test_stored_dict_rows_grade_by_the_stamped_column_order() -> None:
     and must win over insertion order. (Found when a regrade over scrambled
     rows flipped 699 outcomes before being reverted.)"""
     gold = _gold([["Ann", "Smith"]], columns=["first", "last"])
-    scrambled = _push(
-        [{"last": "Smith", "first": "Ann"}], columns=["first", "last"], row_count=1
-    )
+    scrambled = _push([{"last": "Smith", "first": "Ann"}], columns=["first", "last"], row_count=1)
     exact, _ = _grade(gold, scrambled)
 
     assert exact.bool_value is True

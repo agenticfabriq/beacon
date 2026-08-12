@@ -12,9 +12,7 @@ from beacon_graders.llm.provider import JudgeRequest
 
 
 def _provider() -> OpenAICompatibleProvider:
-    return OpenAICompatibleProvider(
-        base_url="https://judge.example/v1", api_key="k", model="m-1"
-    )
+    return OpenAICompatibleProvider(base_url="https://judge.example/v1", api_key="k", model="m-1")
 
 
 def _ok_body(text: str = "verdict") -> dict[str, Any]:
@@ -58,9 +56,7 @@ def test_legacy_servers_get_the_max_tokens_spelling(monkeypatch: pytest.MonkeyPa
     def fake_post(url: str, *, json: Any, headers: Any, timeout: Any) -> httpx.Response:
         payloads.append(json)
         if "max_completion_tokens" in json:
-            return httpx.Response(
-                400, text="Unrecognized request argument: max_completion_tokens"
-            )
+            return httpx.Response(400, text="Unrecognized request argument: max_completion_tokens")
         return httpx.Response(200, json=_ok_body("ok"))
 
     monkeypatch.setattr(httpx, "post", fake_post)
@@ -113,9 +109,7 @@ def test_exhausted_retries_raise(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_an_empty_choices_list_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        httpx, "post", lambda url, **_: httpx.Response(200, json={"choices": []})
-    )
+    monkeypatch.setattr(httpx, "post", lambda url, **_: httpx.Response(200, json={"choices": []}))
 
     with pytest.raises(GraderJudgeError, match="Empty response"):
         _provider().generate(JudgeRequest(prompt="p", grader_version="v1"))

@@ -156,7 +156,6 @@ def facts_values_match(candidate: Any, gold: Any, tolerance: Tolerance) -> bool:
     return False
 
 
-
 CellMatch = Any  # Callable[[Any, Any, Tolerance], bool]; kept loose for mypy simplicity
 
 
@@ -289,9 +288,7 @@ def got_facts_contained(
         projected = [tuple(row[i] for i in keep) for row in candidate.rows]
         if contains_rows(projected, gold.rows, tolerance, facts_values_match):
             return True
-        if contains_rows(
-            _sort_cells(projected), gold_cells_sorted, tolerance, facts_values_match
-        ):
+        if contains_rows(_sort_cells(projected), gold_cells_sorted, tolerance, facts_values_match):
             return True
     return False
 

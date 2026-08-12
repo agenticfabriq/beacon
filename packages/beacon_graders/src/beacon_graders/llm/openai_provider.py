@@ -89,9 +89,7 @@ class OpenAICompatibleProvider:
         last_error: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
-                response = httpx.post(
-                    url, json=payload, headers=headers, timeout=self._timeout_s
-                )
+                response = httpx.post(url, json=payload, headers=headers, timeout=self._timeout_s)
             except httpx.HTTPError as exc:
                 last_error = exc
             else:

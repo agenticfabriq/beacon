@@ -270,9 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             # no_certified_records, the two arms and nothing else.
             layers_enabled={"certified_records": True},
         )
-        adapter = AttributionHarnessRunner(
-            runner=runner, session_factory=factory, user_id=user_id
-        )
+        adapter = AttributionHarnessRunner(runner=runner, session_factory=factory, user_id=user_id)
 
         with session_scope(factory) as session:
             attributions = AttributionEngine(session).sweep(

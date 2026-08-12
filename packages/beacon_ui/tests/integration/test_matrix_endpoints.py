@@ -266,9 +266,7 @@ def test_got_facts_is_reported_beside_exact_match(
     from beacon_storage.repository.verdicts import VerdictRepo
     from sqlalchemy import select
 
-    results = session.scalars(
-        select(Result).where(Result.team_id == world.acme_team_id)
-    ).all()
+    results = session.scalars(select(Result).where(Result.team_id == world.acme_team_id)).all()
     for result in results:
         if str(result.outcome) not in ("PASS", "FAIL"):
             continue
@@ -314,9 +312,7 @@ def test_only_the_latest_verdict_version_is_read(
 
     results = [
         r
-        for r in session.scalars(
-            select(Result).where(Result.team_id == world.acme_team_id)
-        )
+        for r in session.scalars(select(Result).where(Result.team_id == world.acme_team_id))
         if str(r.outcome) in ("PASS", "FAIL")
     ]
     old_true_now_false, old_false_now_true = results[0], results[1]

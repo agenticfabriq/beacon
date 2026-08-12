@@ -147,9 +147,7 @@ def list_results(
     for result, item in page:
         evidence = _execution_evidence(verdicts.get(result.id, []))
         mismatch = evidence.get("mismatch")
-        facts = next(
-            (v for v in verdicts.get(result.id, []) if v.metric == "got_facts"), None
-        )
+        facts = next((v for v in verdicts.get(result.id, []) if v.metric == "got_facts"), None)
         rows.append(
             ResultRowOut(
                 item_id=UUID(result.item_id),

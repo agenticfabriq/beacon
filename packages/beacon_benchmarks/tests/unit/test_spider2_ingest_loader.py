@@ -184,8 +184,16 @@ def test_missing_annotations_file_is_an_error(tmp_path: Path) -> None:
 
 def test_a_case_with_no_published_result_still_loads(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    records = json.loads(json.dumps({"instance_id": "local003", "db": "chinook",
-                                     "question": "Q", "external_knowledge": None}))
+    records = json.loads(
+        json.dumps(
+            {
+                "instance_id": "local003",
+                "db": "chinook",
+                "question": "Q",
+                "external_knowledge": None,
+            }
+        )
+    )
     with (repo / "spider2-lite.jsonl").open("a", encoding="utf-8") as handle:
         handle.write("\n" + json.dumps(records))
 

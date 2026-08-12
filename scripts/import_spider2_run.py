@@ -180,9 +180,7 @@ def main() -> int:
 
             # results.item_id carries the eval_item UUID (what grading and the
             # matrix join on), never the benchmark's native case id.
-            items_by_case = {
-                str((r.item_metadata or {}).get("instance_id")): r for r in item_rows
-            }
+            items_by_case = {str((r.item_metadata or {}).get("instance_id")): r for r in item_rows}
 
             from beacon_runner.sut.mnemiq import register_mnemiq_solution  # noqa: PLC0415
 
@@ -219,7 +217,7 @@ def main() -> int:
                 # same basename at different states, and one already did.
                 "imported_from": results_path.name,
                 "imported_sha256": hashlib.sha256(results_path.read_bytes()).hexdigest(),
-}
+            }
             run = RunRepo(session).create(
                 team_id=team.id,
                 solution_id=solution,
@@ -357,9 +355,7 @@ def main() -> int:
                     tokens_input=0,
                     tokens_output=0,
                     runtime_ms=int(row.get("ms") or 0),
-                    status=(
-                        ResultStatus.ERROR if outcome == "error" else ResultStatus.COMPLETED
-                    ),
+                    status=(ResultStatus.ERROR if outcome == "error" else ResultStatus.COMPLETED),
                     outcome=verdict,
                     error=row.get("answer") if outcome == "error" else None,
                 )

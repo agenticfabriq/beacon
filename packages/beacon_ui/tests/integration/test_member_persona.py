@@ -82,9 +82,7 @@ def test_the_admin_sees_all_teams_but_lands_in_their_own(
     assert boot["team"]["id"] == str(world.acme_team_id)
 
 
-def test_an_empty_team_can_be_deleted_by_the_admin(
-    api_client: TestClient, world: _World
-) -> None:
+def test_an_empty_team_can_be_deleted_by_the_admin(api_client: TestClient, world: _World) -> None:
     created = api_client.post(
         "/v1/teams",
         json={"name": "typo-team", "description": ""},
@@ -99,9 +97,7 @@ def test_an_empty_team_can_be_deleted_by_the_admin(
     assert deleted.status_code == 204, deleted.text
 
 
-def test_a_creator_is_on_the_roster_as_team_admin(
-    api_client: TestClient, world: _World
-) -> None:
+def test_a_creator_is_on_the_roster_as_team_admin(api_client: TestClient, world: _World) -> None:
     """A team is never born ownerless."""
     created = api_client.post(
         "/v1/teams",
@@ -133,18 +129,14 @@ def test_deleting_a_team_revokes_its_grants(api_client: TestClient, world: _Worl
     )
     assert added.status_code == 201, added.text
 
-    deleted = api_client.delete(
-        f"/v1/teams/{team_id}", headers={"X-API-Key": world.alice_key}
-    )
+    deleted = api_client.delete(f"/v1/teams/{team_id}", headers={"X-API-Key": world.alice_key})
     assert deleted.status_code == 204, deleted.text
 
     bob_teams = api_client.get("/v1/teams", headers={"X-API-Key": world.bob_key}).json()
     assert team_id not in {t["id"] for t in bob_teams}
 
 
-def test_a_team_holding_anything_refuses_deletion(
-    api_client: TestClient, world: _World
-) -> None:
+def test_a_team_holding_anything_refuses_deletion(api_client: TestClient, world: _World) -> None:
     response = api_client.delete(
         f"/v1/teams/{world.acme_team_id}",
         headers={"X-API-Key": world.alice_key},

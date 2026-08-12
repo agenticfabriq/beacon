@@ -125,4 +125,3 @@ def delete_team(
     )
     session.delete(team)
     session.commit()
-

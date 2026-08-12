@@ -246,9 +246,7 @@ def test_an_unportable_answer_no_longer_flips_the_expectation() -> None:
 
 
 def test_portability_rides_along_in_the_output() -> None:
-    payload = ingest_payload(
-        _record(portable_to_gold_engine=False), item_id="i", engine="duckdb"
-    )
+    payload = ingest_payload(_record(portable_to_gold_engine=False), item_id="i", engine="duckdb")
 
     assert payload["output"]["portable_to_gold_engine"] is False
     assert payload["output"]["engine"] == "duckdb"

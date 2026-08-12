@@ -59,8 +59,7 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
 
     SLUG = "mnemiq-fs-payments"
     SUMMARY = (
-        "mnemiq over the fs payments corpus, with Verity's certified records as the ablated "
-        "layer."
+        "mnemiq over the fs payments corpus, with Verity's certified records as the ablated layer."
     )
 
     def __init__(
@@ -114,7 +113,6 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
             "source_id": self._source_id,
         }
 
-
     def _to_execution_result(
         self,
         *,
@@ -138,8 +136,11 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
         exactly like a real one.
         """
         result = super()._to_execution_result(
-            item=item, answer=answer, enabled=enabled,
-            tokens_used=tokens_used, runtime_ms=runtime_ms,
+            item=item,
+            answer=answer,
+            enabled=enabled,
+            tokens_used=tokens_used,
+            runtime_ms=runtime_ms,
         )
         sql = str(result.output.get("sql") or "")
         if result.error is not None or result.deferred or not sql:
@@ -153,13 +154,22 @@ class MnemiqFsPaymentsSUT(MnemiqInProcessSUT):
             # mnemiq already executed this SQL to produce its answer, so a failure here means the
             # two disagree about the same corpus. That has to be loud: quietly pushing no rows is
             # what made the first sweep unreadable.
-            return result.model_copy(update={
-                "error": f"candidate_sql_failed: {type(exc).__name__}: {str(exc)[:200]}",
-            })
+            return result.model_copy(
+                update={
+                    "error": f"candidate_sql_failed: {type(exc).__name__}: {str(exc)[:200]}",
+                }
+            )
 
-        return result.model_copy(update={
-            "output": {**result.output, "columns": columns, "rows": rows, "row_count": len(rows)},
-        })
+        return result.model_copy(
+            update={
+                "output": {
+                    **result.output,
+                    "columns": columns,
+                    "rows": rows,
+                    "row_count": len(rows),
+                },
+            }
+        )
 
     def _execute(self, sql: str) -> tuple[list[str], list[list[Any]]]:
         """Run the chosen SQL read-only against the corpus and return JSONB-safe rows.

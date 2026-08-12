@@ -103,4 +103,3 @@ def test_issuing_for_a_non_member_is_a_404(api_client: TestClient, world: _World
     )
 
     assert response.status_code == 404
-

@@ -136,9 +136,7 @@ def test_an_invalidated_run_leaves_the_default_listing(
 ) -> None:
     _invalidate(api_client, world, seeded.run_id)
 
-    listed = api_client.get(
-        f"/v1/suites/{seeded.suite_id}/runs", headers=_headers(world)
-    ).json()
+    listed = api_client.get(f"/v1/suites/{seeded.suite_id}/runs", headers=_headers(world)).json()
 
     ids = [row["run_id"] for row in listed]
     assert seeded.run_id not in ids
@@ -177,9 +175,7 @@ def test_its_results_survive(api_client: TestClient, world: _World, seeded: Seed
 def test_it_is_still_readable_by_id(api_client: TestClient, world: _World, seeded: Seeded) -> None:
     _invalidate(api_client, world, seeded.run_id)
 
-    response = api_client.get(
-        f"/v1/runs/{seeded.run_id}", headers=_headers(world)
-    )
+    response = api_client.get(f"/v1/runs/{seeded.run_id}", headers=_headers(world))
 
     assert response.status_code == 200
     assert response.json()["invalidated_at"] is not None
@@ -243,9 +239,7 @@ def test_an_invalidation_can_be_undone(
 
     assert restored.status_code == 200
     assert restored.json()["invalidated_at"] is None
-    listed = api_client.get(
-        f"/v1/suites/{seeded.suite_id}/runs", headers=_headers(world)
-    ).json()
+    listed = api_client.get(f"/v1/suites/{seeded.suite_id}/runs", headers=_headers(world)).json()
     assert seeded.run_id in [row["run_id"] for row in listed]
 
 

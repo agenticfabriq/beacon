@@ -143,8 +143,7 @@ def _corpus(tmp_path):
     path = tmp_path / "corpus.duckdb"
     con = duckdb.connect(str(path))
     con.execute(
-        "create table payment_transaction "
-        "(channel varchar, amount decimal(12,2), day date)"
+        "create table payment_transaction (channel varchar, amount decimal(12,2), day date)"
     )
     con.execute("insert into payment_transaction values ('IN_STORE', 40505.25, date '2026-01-02')")
     con.execute("insert into payment_transaction values ('ONLINE', 12.50, date '2026-01-03')")
@@ -205,7 +204,9 @@ def test_pushed_values_match_how_the_gold_was_stored(tmp_path):
     result = sut._to_execution_result(
         item=_item(),
         answer=_Answer("select sum(amount) as total from payment_transaction"),
-        enabled={}, tokens_used=1, runtime_ms=1,
+        enabled={},
+        tokens_used=1,
+        runtime_ms=1,
     )
 
     total = result.output["rows"][0][0]
@@ -219,7 +220,11 @@ def test_a_deferral_pushes_no_rows(tmp_path):
     sut = _sut_over(corpus, tmp_path)
 
     result = sut._to_execution_result(
-        item=_item(), answer=_Answer("", deferred=True), enabled={}, tokens_used=1, runtime_ms=1,
+        item=_item(),
+        answer=_Answer("", deferred=True),
+        enabled={},
+        tokens_used=1,
+        runtime_ms=1,
     )
 
     assert result.deferred is True
@@ -233,8 +238,11 @@ def test_sql_that_will_not_execute_is_a_visible_error(tmp_path):
     sut = _sut_over(corpus, tmp_path)
 
     result = sut._to_execution_result(
-        item=_item(), answer=_Answer("select * from no_such_table"),
-        enabled={}, tokens_used=1, runtime_ms=1,
+        item=_item(),
+        answer=_Answer("select * from no_such_table"),
+        enabled={},
+        tokens_used=1,
+        runtime_ms=1,
     )
 
     assert result.error is not None
