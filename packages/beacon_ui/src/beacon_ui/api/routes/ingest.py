@@ -196,7 +196,7 @@ def ingest_result(
     item = _eval_item(session, item_id=body.item_id, suite=run.suite)
     _assert_trace_matches_declared_config(body, run_config=run.config)
     exec_result = ExecutionResult(
-        output=_stamped_output(body.output),
+        output=_stamped_output(body.output, deferred=body.deferred),
         output_kind=body.output_kind,
         trace=_trace_step(body),
         tokens_input=body.tokens_input,
@@ -236,30 +236,36 @@ def ingest_result(
     )
 
 
-def _stamped_output(output: dict[str, Any]) -> dict[str, Any]:
-    """The push's output with the wire column order made durable.
+def _stamped_output(output: dict[str, Any], *, deferred: bool = False) -> dict[str, Any]:
+    """The push's output with the facts grading needs made durable.
 
     Dict-shaped rows carry their SELECT order only while in flight: JSONB
     canonicalizes object keys at rest, and column order is part of exact
     match. Stamp an ordered ``columns`` array now, while the order is still
     the wire's, so the stored evidence can be regraded faithfully later.
+
+    A declined answer is stamped for the same reason. ``deferred`` arrives as
+    a first-class field of the push, but only ``output`` is persisted, and a
+    regrade rebuilds its ExecutionResult from ``output`` alone. Left unstamped,
+    a refusal graded PASS at ingest would come back FAIL the next time the
+    suite was regraded -- and on an unanswerable item that inversion is the
+    whole measurement. Every SUT here happens to mirror the flag itself, which
+    is precisely why the gap was invisible.
     """
+    stamped = dict(output)
     rows = output.get("rows")
-    if (
-        isinstance(rows, list)
-        and rows
-        and isinstance(rows[0], dict)
-        and not output.get("columns")
-    ):
-        return {**output, "columns": list(rows[0].keys())}
-    return output
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict) and not output.get("columns"):
+        stamped["columns"] = list(rows[0].keys())
+    if deferred:
+        stamped["deferred"] = True
+    return stamped
 
 
 def _payload_matches(existing: Result, body: ResultIngestIn) -> bool:
     """Return whether a re-push is byte-identical to what is already stored."""
     stored: dict[str, Any] = dict(existing.output)
     return (
-        stored == _stamped_output(body.output)
+        stored == _stamped_output(body.output, deferred=body.deferred)
         and existing.output_kind == body.output_kind
         and existing.tokens_input == body.tokens_input
         and existing.tokens_output == body.tokens_output

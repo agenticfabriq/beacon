@@ -260,9 +260,15 @@ def results_matrix(
 
     # Facet counts over the unfiltered selection, so a filtered view still
     # shows what it is a slice of.
+    #
+    # DISTINCT items, not result rows. A bare count here counted one row per
+    # graded attempt, so the facet read runs x items: a 135-question suite
+    # showed "all 675" once five runs existed, and grew whenever anyone added
+    # a run. The chip names the slice of the BENCHMARK the rates are over --
+    # how many attempts backs each rate is n_graded's job, per row.
     level = sa.func.coalesce(EvalItem.item_metadata["difficulty"].astext, "unknown")
     facet_stmt = (
-        sa.select(level, sa.func.count())
+        sa.select(level, sa.func.count(sa.distinct(Result.item_id)))
         .select_from(Run)
         .join(Result, Result.run_id == Run.id)
         .join(EvalItem, _item_join_clause(), isouter=True)

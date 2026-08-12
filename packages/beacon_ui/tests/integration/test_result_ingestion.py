@@ -14,6 +14,7 @@ import pytest
 from beacon_storage.models.eval_items import EvalItemTier
 from beacon_storage.models.runs import HarnessMode, RunStatus
 from beacon_storage.repository.eval_items import EvalItemRepo
+from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
 from beacon_storage.repository.suites import SuiteRepo
@@ -137,6 +138,26 @@ def test_a_declined_answer_grades_defer(
     response = _push(api_client, world, run_id, _payload(item_id, "", deferred=True))
 
     assert response.json()["outcome"] == "DEFER"
+
+
+def test_a_declined_answer_stays_declined_in_storage(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The refusal must survive in ``output``, or a regrade reverses it.
+
+    ``deferred`` arrives as a first-class field of the push, but only
+    ``output`` is persisted and a regrade rebuilds its ExecutionResult from
+    ``output`` alone. A pusher that set the documented top-level field and
+    nothing else would grade DEFER here and FAIL on the next regrade -- and on
+    an unanswerable item, where declining is the right answer, that is a PASS
+    silently becoming a FAIL.
+    """
+    run_id, item_id = _seed(session, world)
+
+    _push(api_client, world, run_id, _payload(item_id, "", deferred=True))
+
+    stored = ResultRepo(session).list_for_run(UUID(run_id))
+    assert [row.output.get("deferred") for row in stored] == [True]
 
 
 def test_pushing_marks_the_run_running(

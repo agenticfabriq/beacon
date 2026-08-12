@@ -288,3 +288,40 @@ def test_the_run_keeps_its_execution_status(
 
     assert body["status"] == RunStatus.COMPLETED.value
     assert body["invalidated_at"] is not None
+
+
+def test_retiring_a_run_mid_flight_stops_it_running(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """A run retired while RUNNING is cancelled, not left running forever.
+
+    The orthogonality above holds for a run that ENDED: completed stays
+    completed. A run that never ended has no such fact to preserve, and
+    leaving it RUNNING makes a status query report live runs that died days
+    ago -- two aborted sweep arms sat that way until someone querying by
+    status had to be told to read a second column.
+    """
+    RunRepo(session).mark_running(UUID(seeded.other_run_id))
+    session.commit()
+
+    body = _invalidate(api_client, world, seeded.other_run_id).json()
+
+    assert body["status"] == RunStatus.CANCELLED.value
+    assert body["invalidated_at"] is not None
+    assert body["completed_at"] is not None
+
+
+def test_restoring_leaves_the_cancellation_alone(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """Restoring validity does not resurrect execution."""
+    RunRepo(session).mark_running(UUID(seeded.other_run_id))
+    session.commit()
+    _invalidate(api_client, world, seeded.other_run_id)
+
+    body = api_client.post(
+        f"/v1/runs/{seeded.other_run_id}/restore", headers=_headers(world)
+    ).json()
+
+    assert body["invalidated_at"] is None
+    assert body["status"] == RunStatus.CANCELLED.value

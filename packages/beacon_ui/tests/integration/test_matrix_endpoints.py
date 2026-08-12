@@ -193,9 +193,28 @@ def test_facet_counts_cover_the_unfiltered_selection(
 ) -> None:
     body = _matrix(api_client, world, seeded, difficulty="challenging")
 
-    # 2 simple results per run across both valid runs; the invalidated run's
-    # three do not appear
-    assert body["difficulty_counts"] == {"simple": 4, "challenging": 2}
+    # Questions, not attempts. Both valid runs answer the same 2 simple and 1
+    # challenging item; the invalidated run's three do not appear at all.
+    assert body["difficulty_counts"] == {"simple": 2, "challenging": 1}
+
+
+def test_facet_counts_do_not_grow_with_the_number_of_runs(
+    api_client: TestClient, world: _World, seeded: Seeded
+) -> None:
+    """The chip names a slice of the benchmark, so runs must not multiply it.
+
+    Counting result rows made it read runs x items: a 135-question suite
+    showed "all 675" once five runs existed, and a reader took that for the
+    suite's size. How many attempts back each rate is n_graded's job, per row.
+    """
+    counts = _matrix(api_client, world, seeded)["difficulty_counts"]
+
+    assert sum(counts.values()) == 3
+    items = api_client.get(
+        f"/v1/suites/{seeded.suite_id}/items",
+        headers={"X-API-Key": world.alice_key},
+    ).json()
+    assert counts == items["difficulty_counts"]
 
 
 def test_medians_are_reported(api_client: TestClient, world: _World, seeded: Seeded) -> None:

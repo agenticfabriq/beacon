@@ -98,15 +98,24 @@ class RunRepo:
 
         The reason is required. An invalidation with no reason is a deletion
         with extra steps, and the point of keeping the row is the explanation.
+
+        A run retired mid-flight also stops running. Without this, an aborted
+        run kept ``status='running'`` forever: the invalidation was the real
+        signal, but anyone querying by status saw runs that had been dead for
+        days and had to know to check a second column to find out otherwise.
         """
         if not reason.strip():
             raise ValueError("an invalidation needs a reason")
         run = self.session.get(Run, run_id)
         if run is None or run.invalidated_at is not None:
             return None
-        run.invalidated_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        run.invalidated_at = now
         run.invalidated_by = user_id
         run.invalidation_reason = reason.strip()
+        if run.status in {RunStatus.PENDING, RunStatus.RUNNING}:
+            run.status = RunStatus.CANCELLED
+            run.completed_at = run.completed_at or now
         self.session.flush()
         return run
 
@@ -115,6 +124,11 @@ class RunRepo:
 
         Invalidating by mistake must not be permanent, or the safe action stops
         being safe and people reach for the database instead.
+
+        Validity is restored; execution is not. A run cancelled by invalidation
+        stays cancelled, because nothing resumed it -- and the matrix keys on
+        ``invalidated_at``, not status, so a restored run counts again either
+        way.
         """
         run = self.session.get(Run, run_id)
         if run is None or run.invalidated_at is None:
