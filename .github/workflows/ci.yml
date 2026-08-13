@@ -58,13 +58,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - name: Install Postgres binaries
-        # For pytest-postgresql's own instances. Kept so the fallback above
-        # stays runnable if the unconditional DATABASE_URL default ever goes.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-16 postgresql-client-16
-          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      # No Postgres binaries installed here. They were, for pytest-postgresql's
+      # `postgresql_proc` factories -- but nothing ever reaches those: the root
+      # conftest sets DATABASE_URL unconditionally and every package's db_url
+      # fixture returns it when present, so the factory branch beneath is
+      # unreachable in all six packages. Dead weight, and worse than inert: the
+      # Debian package's post-install starts a cluster on 5432, which is the
+      # port this service container has already bound. It did not collide only
+      # because the runner image ships postgresql-16 already, so apt did nothing
+      # -- a green run resting on an image detail nobody chose.
       - name: Install
         run: uv sync --all-packages
       - name: Pytest
