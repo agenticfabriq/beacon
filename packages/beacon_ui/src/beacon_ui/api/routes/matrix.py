@@ -114,6 +114,7 @@ def results_matrix(
         Run.invalidated_at.is_(None),
     ]
     engine_expr = sa.func.coalesce(Run.config["engine"].astext, "")
+    retrieval_k_expr = Run.config["retrieval_k"].astext
     # Two verdict readings: the strict exact_match beside the tolerant
     # got_facts. EX stays the benchmark-headline number (each benchmark
     # defines its own); these two are beacon's suite-independent claims, one
@@ -130,6 +131,14 @@ def results_matrix(
             Run.model_id,
             Run.config_label,
             Run.config_digest,
+            # A knob that is in the digest but on no screen splits a row and
+            # cannot say why. Two retrieval depths under the default label
+            # ("single-shot") are two rows, correctly, and identical to look at
+            # -- which is how a reader attributes a difference to the wrong
+            # thing. Named explicitly rather than dumping the config: that blob
+            # can carry a secret reference, and a table is not the place to
+            # discover one.
+            retrieval_k_expr.label("retrieval_k"),
             engine_expr.label("engine"),
             # The arms pooled into this row, made visible: a sweep run's
             # config_label is empty and its identity lives in sweep_arm, so a
@@ -199,6 +208,7 @@ def results_matrix(
             Run.model_id,
             Run.config_label,
             Run.config_digest,
+            retrieval_k_expr,
             engine_expr,
         )
     )
@@ -218,6 +228,9 @@ def results_matrix(
                 model_id=record.model_id,
                 config_label=record.config_label,
                 config_digest=record.config_digest,
+                retrieval_k=(
+                    int(record.retrieval_k) if str(record.retrieval_k or "").isdigit() else None
+                ),
                 arms=record.arms,
                 # Only meaningful across repetitions; one run has no spread.
                 ex_rate_min=(

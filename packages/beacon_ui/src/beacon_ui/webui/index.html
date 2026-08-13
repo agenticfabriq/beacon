@@ -69,6 +69,8 @@
   .ex{color:var(--pass);font-weight:650} .def{color:var(--defer);font-weight:650}
   /* The pooled row's own error bar, under the number it qualifies. */
   .spread{display:block;font-size:9.5px;font-weight:400;color:var(--ink-3);letter-spacing:0}
+  /* A knob that is in the digest but on no screen splits a row without saying why. */
+  .knob{font-size:9.5px;color:var(--ink-3);border:1px solid var(--line);border-radius:3px;padding:0 4px;margin-left:4px;white-space:nowrap}
   .wr{color:var(--wrong)} .er{color:var(--error)}
   .num{text-align:right} .dim{color:var(--ink-3)}
   /* A partition and two overlapping readings sit in one strip of percentages,
@@ -208,9 +210,11 @@
       <div class="crumb" id="matrix-crumb"></div>
       <h1>Results</h1>
       <p class="sub">One row per <b>system · version · model · config</b>, over that
-      configuration's valid runs. Two readings of correctness side by side — exact match decides,
-      got-facts is the tolerant one — with what each row costs. Open a row for its layer effect
-      and its runs. Invalidated runs are out of every number here.</p>
+      configuration's valid runs. <b>EX</b> is each benchmark's own headline rule — exact match for
+      BIRD, got-facts for Spider — and it partitions the run with deferred and wrong, so those three
+      sum to 100%. <b>exact</b> and <b>got-facts</b> are alternative readings of the same items and
+      overlap them; adding a reading to wrong double-counts. Open a row for its layer effect and its
+      runs. Invalidated runs are out of every number here.</p>
       <div class="chips" id="matrix-filters">
         <input type="search" id="matrix-q" placeholder="Search model or config…" style="flex:1 1 200px;min-width:170px">
         <select id="matrix-system"></select>
@@ -326,7 +330,8 @@
         <span class="box"><b>Result</b>per question · EX + got-facts</span>
       </div>
       <p class="sub">A run is registered here, executed on your hardware, and its rows pushed back;
-      each result is graded twice — exact match decides, got-the-facts reads tolerantly. One run per
+      each result is graded twice — strictly and tolerantly, with the benchmark's own headline rule
+      deciding which reading is its EX. One run per
       benchmark is pinned as the reference; a bad run is invalidated, never deleted.</p>
       <div class="tw" style="margin-top:14px"><table>
         <thead><tr><th>Benchmark</th><th class="num">Questions</th><th class="num">Runs</th><th></th></tr></thead>
@@ -628,7 +633,8 @@ function renderMatrixRows() {
     `<tr class="click" data-cell="${index}">
       <td>${esc(row.solution_name)} <span class="dim">${esc(row.solution_version)}</span></td>
       <td>${esc(row.model_id || "")}</td>
-      <td class="cfgcell">${esc(row.config_label || row.arms || "")}</td>
+      <td class="cfgcell">${esc(row.config_label || row.arms || "")}${row.retrieval_k !== null && row.retrieval_k !== undefined
+        ? ` <span class="knob" title="retrieval depth this configuration ran at — part of its identity, so a different depth is a different row">k=${row.retrieval_k}</span>` : ""}</td>
       <td class="dim">${esc(row.engine || "")}</td>
       <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
       <td class="num ex grp">${pct(row.ex_rate)}${row.ex_rate_min !== null && row.ex_rate_max !== null && row.ex_rate_max > row.ex_rate_min
@@ -1297,7 +1303,7 @@ uv run python scripts/materialize_gold.py \\
   --suite &lt;suite_name&gt; --engine-url &lt;reference_engine_url&gt;</pre>
       <h3>Rules the numbers live by</h3>
       <pre>DEFER is not FAIL &middot; ERROR leaves the denominator
-exact_match decides; got-facts is the tolerant second reading
+EX is the benchmark's own rule; exact and got-facts overlap it
 SQL is evidence, never scored &middot; invalidate, never delete</pre>
     </div>`;
 });

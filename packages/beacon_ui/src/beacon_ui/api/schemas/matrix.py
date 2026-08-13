@@ -23,6 +23,11 @@ class MatrixRowOut(BaseModel):
     model_id: str | None = None
     config_label: str | None = None
     config_digest: str | None = None
+    # The retrieval depth this configuration ran at, when the runner recorded
+    # one. It is part of the digest, so it already splits rows -- this is what
+    # lets a row SAY which depth it is instead of differing invisibly. None
+    # means unrecorded, which is not the same as any particular depth.
+    retrieval_k: int | None = None
     # The sweep arms pooled into this row, comma-joined. A run's arm is part
     # of its identity; when config_label is empty this is the readable name,
     # and more than one arm here means the row pools across arms.
