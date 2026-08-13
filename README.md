@@ -44,8 +44,10 @@ Two levels, no more: a **team** is the access boundary, a **suite** is the
 benchmark. Runs hang off the benchmark, and each benchmark can pin one run as
 the reference everything else is read against.
 
-The results matrix — one row per system · version · model · config, exact match
-and got-the-facts side by side, with what each row costs:
+The results matrix — one row per system · version · model · config. `EX` is each
+benchmark's own headline rule, and with deferred and wrong it partitions the run;
+`exact` and `got-facts` are alternative readings of the same items, so they
+overlap it rather than adding to it:
 
 ![The results matrix](docs/screenshots/results-matrix.png)
 

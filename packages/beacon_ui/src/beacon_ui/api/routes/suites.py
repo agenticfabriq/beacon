@@ -10,6 +10,7 @@ from beacon_registry.errors import DuplicateSuiteError
 from beacon_registry.suites import SuiteService
 from beacon_storage.models.suites import Suite  # noqa: TC002
 from beacon_storage.models.tenancy import User  # noqa: TC002
+from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.suites import SuiteRepo
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session  # noqa: TC002
@@ -27,10 +28,24 @@ from beacon_ui.api.schemas.project_suite import (
 router = APIRouter(prefix="/v1", tags=["suites"])
 
 
-def _suite_out(service: SuiteService, suite: Suite) -> SuiteOut:
+def _suite_out(session: Session, suite: Suite) -> SuiteOut:
     kind: SuiteKind = "curated" if suite.method == "separability_gain" else "manual"
     method = cast("SuiteMethod", suite.method)
-    item_count = len(service.list_item_ids(suite.id))
+    # An item belongs to a benchmark two ways, and BOTH are real. Ingested
+    # corpora carry the suite's NAME on the item -- the key grading and the
+    # matrix use -- while a hand-built suite exists only as rows in the
+    # eval_item_suites join table, its items keeping whatever name they came
+    # with. Counting the join table alone read "10 questions" for
+    # bird_minidev_v2, whose 10 rows are a leftover demo slice, directly beside
+    # a table reporting n=487 of the same benchmark. Counting by name alone
+    # gives a hand-built suite zero. The union is the only count that is right
+    # for both, and it is a union of IDS so an item claimed both ways is still
+    # one question.
+    by_name = {
+        item.item_id
+        for item in EvalItemRepo(session).list_active(suite=suite.name, team_id=suite.team_id)
+    }
+    item_count = len(by_name | set(SuiteRepo(session).list_item_ids(suite.id)))
     return SuiteOut(
         suite_id=suite.id,
         id=suite.id,
@@ -91,7 +106,7 @@ def create_suite(
             detail=str(exc),
         ) from exc
 
-    return _suite_out(service, suite)
+    return _suite_out(session, suite)
 
 
 @router.get("/teams/{team_id}/suites", response_model=list[SuiteOut])
@@ -105,9 +120,8 @@ def list_suites(
     session: Annotated[Session, Depends(get_session)],
 ) -> list[SuiteOut]:
     """List the team's benchmarks."""
-    service = SuiteService(session)
     suites = SuiteRepo(session).list_for_team(team_id)
-    return [_suite_out(service, suite) for suite in suites]
+    return [_suite_out(session, suite) for suite in suites]
 
 
 @router.patch(
@@ -132,4 +146,4 @@ def patch_suite(
     if "baseline_run_id" in body.model_fields_set:
         repo.set_baseline(suite_id, body.baseline_run_id)
     session.commit()
-    return _suite_out(SuiteService(session), suite)
+    return _suite_out(session, suite)
