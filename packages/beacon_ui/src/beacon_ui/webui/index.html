@@ -564,6 +564,23 @@ function renderRail() {
 const NO_BENCH =
   '<div class="empty">This team has no benchmark yet — create one under Benchmarks.</div>';
 
+// A load that FAILED and a load that has not finished look identical when the
+// table keeps its headers and says nothing, and so does a benchmark that
+// genuinely has no rows. Three different facts, one blank strip. This says
+// which: the numbers are unknown, not zero and not absent. Written straight
+// into the table because that is where the reader is looking -- the error bar
+// is at the top of the page and gets scrolled past.
+function matrixUnknown(message) {
+  S.matrixRows = [];
+  const rows = document.getElementById("matrix-rows");
+  document.getElementById("matrix-diff-chips").innerHTML = "";
+  document.getElementById("matrix-count").textContent = "";
+  rows.dataset.payload = "[]";
+  rows.innerHTML =
+    `<tr><td colspan="16"><div class="empty">Could not load results — ${esc(message)}.` +
+    " These numbers are unknown, not zero. Retry when the API is reachable.</div></td></tr>";
+}
+
 const loadMatrix = guard(async () => {
   if (!S.suiteId) {
     S.matrixRows = [];
@@ -575,8 +592,16 @@ const loadMatrix = guard(async () => {
   }
   // Difficulty re-aggregates the rates, so it is server-side; everything else
   // below is a refinement over the returned rows and stays in the client.
-  const body = await api("matrix", { suite_id: S.suiteId },
-    { query: { difficulty: S.matrixDifficulty } });
+  let body;
+  try {
+    body = await api("matrix", { suite_id: S.suiteId },
+      { query: { difficulty: S.matrixDifficulty } });
+  } catch (error) {
+    // Not on sign-out: that hides the whole app, and a failure notice behind
+    // the login screen would be a lie about why the table went away.
+    if (error.message !== "signed out") matrixUnknown(error.message);
+    throw error;
+  }
   S.matrixRows = body.rows;
   const counts = body.difficulty_counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
