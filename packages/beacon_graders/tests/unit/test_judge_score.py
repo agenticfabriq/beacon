@@ -211,8 +211,10 @@ def test_a_bare_string_is_reported_as_a_bare_string_with_its_words(text: str) ->
     """
     reason = unscored_reason(text)
 
-    assert reason.startswith("Criterion in judge output is a bare string, not an object:")
-    assert text.strip() in reason
+    # Not `startswith(prefix)`: the wordless message shares every character up
+    # to the colon, so a reflow of it would leave this green against a build
+    # that reported "80%" as having no words.
+    assert reason == f"Criterion in judge output is a bare string, not an object: {text.strip()}"
 
 
 def test_a_bare_string_justification_is_not_bounded() -> None:
@@ -225,7 +227,7 @@ def test_a_bare_string_justification_is_not_bounded() -> None:
     assert words.strip() in reason
 
 
-@pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("blank", ["", "   ", " " * 200])
 def test_a_wordless_bare_string_names_its_shape_without_claiming_which(blank: str) -> None:
     """Otherwise it is byte-identical to the message for `{"score": null}`.
 
@@ -235,6 +237,12 @@ def test_a_wordless_bare_string_names_its_shape_without_claiming_which(blank: st
     whitespace, which this module is careful about everywhere else -- so the
     message echoes what arrived instead of naming it.
     """
-    assert unscored_reason(blank) == (
-        f"Criterion in judge output is a bare string, not an object, with no words: {blank!r}"
-    )
+    prefix = "Criterion in judge output is a bare string, not an object, with no words: "
+    reason = unscored_reason(blank)
+
+    assert reason == prefix + quote_judge_value(blank)
+    # A wordless string is an ECHO -- there are no judge's words in it to
+    # preserve -- so it takes the echo's bound, unlike a 500-word one, which
+    # is the judge's reasoning and is kept whole. The 200-space case is what
+    # makes that asymmetry visible rather than accidental.
+    assert ("cut," in reason) is (len(repr(blank)) > 120)
