@@ -139,6 +139,11 @@ def test_a_criterion_the_judge_never_scored_is_not_a_score_of_zero(
 
     assert verdicts["insight_recall"].value == 0.8
     assert "Missing criterion" in (verdicts["citation_correctness"].justification or "")
+    # The number is the part that decides anything: `composer.compose` averages
+    # every LLM verdict value into the PASS/FAIL composite and skips only None,
+    # so a 0.0 here would drag the SUT's score down for a criterion nobody
+    # scored -- a justification string no scoring path reads cannot fix that.
+    assert verdicts["citation_correctness"].value is None
 
 
 def test_a_judge_that_really_scored_zero_still_scores_zero(
@@ -163,3 +168,93 @@ def test_a_judge_that_really_scored_zero_still_scores_zero(
 
     assert verdicts["insight_recall"].value == 0.0
     assert verdicts["insight_recall"].justification == "nothing recalled"
+    assert verdicts["citation_correctness"].value == 0.0
+
+
+def test_a_criterion_present_but_unscored_is_also_unscored(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """The guard has to reach the score, not stop at the object around it.
+
+    A judge cut off mid-criterion emits the key with no usable score --
+    `{}`, `{"justification": "cut off"}`, `{"score": null}`. Coercing those
+    to 0.0 is the same absence-as-measurement one level down.
+    """
+    grader = _grader_with(
+        {
+            "insight_recall": {"justification": "cut off mid-sentence"},
+            "citation_correctness": {"score": None},
+        }
+    )
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(
+        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
+    )
+
+    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
+
+    assert verdicts["insight_recall"].value is None
+    assert verdicts["citation_correctness"].value is None
+
+
+def test_an_unscored_criterion_keeps_the_evidence_of_the_call_that_produced_it(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """The judge did answer; only this criterion is missing from what it said.
+
+    `_fail` drops `raw_output`, which is where the model version and token
+    counts live and what the drill-down shows as evidence. Losing it would
+    make an unscored criterion look like a call that never happened.
+    """
+    grader = _grader_with({"insight_recall": {"score": 0.5, "justification": "half"}})
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(
+        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
+    )
+
+    missing = next(v for v in grader.grade(item, result) if v.criterion == "citation_correctness")
+
+    assert missing.raw_output is not None
+    assert missing.raw_output["model_version"] == "stub-1"
+
+
+def test_a_score_that_is_not_a_number_does_not_become_a_perfect_one(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """NaN clamps UPWARD, and `True` is an int.
+
+    `max(0.0, min(1.0, nan))` is nan, and the stdlib decoder `extract_json`
+    uses accepts a bare `NaN` literal -- so a judge emitting one handed out a
+    perfect score. `{"score": true}` did the same by being an int. Neither is
+    a reading, so neither is scored.
+    """
+    grader = _grader_with(
+        {
+            "insight_recall": {"score": float("nan")},
+            "citation_correctness": {"score": True},
+        }
+    )
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(
+        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
+    )
+
+    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
+
+    assert verdicts["insight_recall"].value is None
+    assert verdicts["citation_correctness"].value is None

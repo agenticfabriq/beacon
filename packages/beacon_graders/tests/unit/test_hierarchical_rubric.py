@@ -92,10 +92,16 @@ def test_applicable_requires_rubric_in_metadata(
     assert rubric_grader.applicable(with_rubric, result) is True
 
 
-def test_missing_criterion_in_judge_output_returns_zero(
+def test_missing_criterion_in_judge_output_is_unscored_not_zero(
     make_item: Callable[..., EvalItem],
     make_result: Callable[..., ExecutionResult],
 ) -> None:
+    """The justification said "missing"; the 0.0 beside it still counted.
+
+    `composer.compose` averages every LLM verdict value into the PASS/FAIL
+    composite and skips only None, so a criterion the judge never emitted
+    dragged the SUT's score down while claiming to report its own absence.
+    """
     provider = _StubProvider({"criteria": {"completeness": {"score": 1.0, "justification": ""}}})
     rubric_grader = HierarchicalRubricGrader(judge_cache=JudgeCache(provider=provider))
     item = make_item(
@@ -111,7 +117,7 @@ def test_missing_criterion_in_judge_output_returns_zero(
     result = make_result(output={"answer": "x"}, output_kind="answer")
     verdicts = rubric_grader.grade(item, result)
     correctness = next(verdict for verdict in verdicts if verdict.criterion == "correctness")
-    assert correctness.value == 0.0
+    assert correctness.value is None
     assert "missing" in correctness.justification.lower()
 
 
@@ -158,3 +164,40 @@ def test_cache_avoids_duplicate_calls_for_same_item(
     rubric_grader.grade(item, result)
     assert provider.last_request is not None
     assert provider.calls == 1
+
+
+def test_an_unscored_criterion_does_not_count_as_a_zero(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """The score level has the same hole the criterion level had.
+
+    A criterion cut off mid-object carries no usable score -- no `score` key,
+    or a null one -- and coerced to 0.0, which `composer.compose` averages into
+    the SUT's composite exactly like a real score.
+    """
+    provider = _StubProvider(
+        {
+            "criteria": {
+                "completeness": {"score": 0.9, "justification": "good"},
+                "correctness": {"justification": "cut off"},
+            }
+        }
+    )
+    rubric_grader = HierarchicalRubricGrader(judge_cache=JudgeCache(provider=provider))
+    item = make_item(
+        metadata={
+            "rubric": {
+                "criteria": [
+                    {"name": "completeness", "description": "d"},
+                    {"name": "correctness", "description": "d"},
+                ]
+            }
+        }
+    )
+    result = make_result(output={"answer": "x"}, output_kind="answer")
+
+    verdicts = {verdict.criterion: verdict for verdict in rubric_grader.grade(item, result)}
+
+    assert verdicts["completeness"].value == 0.9
+    assert verdicts["correctness"].value is None

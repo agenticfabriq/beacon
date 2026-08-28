@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from beacon_graders.graders.judge_score import criterion_score
 from beacon_graders.llm.prompts import HIERARCHICAL_RUBRIC_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
 from beacon_graders.types import GraderKind, Verdict
@@ -55,22 +56,38 @@ class HierarchicalRubricGrader:
         for criterion in criteria:
             name = str(criterion["name"])
             payload = criteria_scores.get(name) if isinstance(criteria_scores, dict) else None
-            if not isinstance(payload, dict):
-                out.append(self._fail(name, "Missing criterion in judge output"))
+            # `_fail` said "missing" and scored it 0.0, which `composer.compose`
+            # averages into the SUT's composite exactly like a real score -- so
+            # the message reported an absence the number denied. The composer
+            # skips `value is None`; that is how a verdict declines to score.
+            scored = criterion_score(payload)
+            if scored is None:
+                out.append(
+                    Verdict(
+                        grader=self.name,
+                        grader_version=self.version,
+                        criterion=name,
+                        value=None,
+                        justification="Missing criterion in judge output",
+                        # The judge did answer; only this criterion is absent
+                        # from what it said, so the call's evidence stands --
+                        # same as the free-text grader does for this case.
+                        raw_output={
+                            "model_version": response.model_version,
+                            "tokens_input": response.tokens_input,
+                            "tokens_output": response.tokens_output,
+                        },
+                    )
+                )
                 continue
-
-            try:
-                value = float(payload.get("score", 0.0))
-            except (TypeError, ValueError):
-                value = 0.0
-            value = max(0.0, min(1.0, value))
+            value, justification = scored
             out.append(
                 Verdict(
                     grader=self.name,
                     grader_version=self.version,
                     criterion=name,
                     value=value,
-                    justification=str(payload.get("justification", "")),
+                    justification=justification,
                     raw_output={
                         "model_version": response.model_version,
                         "tokens_input": response.tokens_input,

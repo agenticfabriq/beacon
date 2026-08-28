@@ -215,11 +215,19 @@ class VerdictComposer:
                     VerdictOutcome.PASS if verdict.bool_value else VerdictOutcome.FAIL,
                 )
 
-        llm_values = [
-            verdict.value
-            for verdict in verdicts
-            if self._kind_of(verdict.grader) is GraderKind.LLM_JUDGE and verdict.value is not None
+        judged = [
+            verdict for verdict in verdicts if self._kind_of(verdict.grader) is GraderKind.LLM_JUDGE
         ]
+        # A judge verdict with no value declined to score that criterion -- the
+        # reply was cut off before it, or never carried it. Averaging only the
+        # criteria that survived hands the outcome to whichever ones did: 0.8
+        # alone composes PASS where 0.8 beside a zeroed sibling composed FAIL.
+        # A rubric half judged has not been judged, and ERROR is the label for
+        # that -- the same one the all-unscored case already reaches by falling
+        # through with nothing to average.
+        if judged and any(verdict.value is None for verdict in judged):
+            return verdicts, VerdictOutcome.ERROR
+        llm_values = [verdict.value for verdict in judged if verdict.value is not None]
         if llm_values:
             composite = sum(llm_values) / len(llm_values)
             return (

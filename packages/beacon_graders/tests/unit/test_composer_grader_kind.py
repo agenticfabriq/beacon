@@ -140,3 +140,47 @@ def test_renaming_after_construction_is_still_honoured() -> None:
     _, outcome = composer.compose(_item(), _result())
 
     assert outcome is VerdictOutcome.PASS
+
+
+class _PartialJudge:
+    """An LLM judge whose reply scored one criterion and not the other."""
+
+    name = "partial_judge"
+    version = "v1"
+    kind = GraderKind.LLM_JUDGE
+
+    def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:  # noqa: ARG002
+        return True
+
+    def grade(self, item: EvalItem, result: ExecutionResult) -> list[Verdict]:  # noqa: ARG002
+        return [
+            Verdict(grader=self.name, grader_version=self.version, criterion="a", value=0.8),
+            Verdict(
+                grader=self.name,
+                grader_version=self.version,
+                criterion="b",
+                value=None,
+                justification="Missing criterion in judge output",
+            ),
+        ]
+
+
+def test_a_half_judged_item_is_an_error_not_a_pass_on_the_scored_half() -> None:
+    """Unscored must not mean "excluded from the average".
+
+    Leaving an unscored criterion at 0.0 charged the model for the judge's
+    truncation. Dropping it instead hands the verdict to whichever criteria
+    happened to survive: 0.8 alone composes PASS where 0.8 with a zeroed
+    sibling composed FAIL. Both are wrong, in opposite directions, and the
+    second is worse -- it is an unearned pass on evidence the verdict itself
+    records as missing.
+
+    A rubric that was only half judged has not been judged. ERROR is the label
+    for that here, and it already is the one for the all-missing case, so this
+    makes partial and total agree instead of diverging at the boundary.
+    """
+    composer = VerdictComposer(graders=[_PartialJudge()])
+
+    _, outcome = composer.compose(_item(), _result())
+
+    assert outcome is VerdictOutcome.ERROR

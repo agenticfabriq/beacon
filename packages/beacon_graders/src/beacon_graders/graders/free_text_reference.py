@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from beacon_graders.graders.judge_score import criterion_score
 from beacon_graders.llm.prompts import FREE_TEXT_REFERENCE_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
 from beacon_graders.types import GraderKind, Verdict
@@ -51,25 +52,37 @@ class FreeTextReferenceGrader:
         except Exception as exc:
             return [self._fail(criterion, f"Judge call failed: {exc!r}") for criterion in _CRITERIA]
 
+        evidence = {
+            "model_version": response.model_version,
+            "tokens_input": response.tokens_input,
+            "tokens_output": response.tokens_output,
+        }
         out: list[Verdict] = []
         for criterion in _CRITERIA:
-            payload = parsed.get(criterion)
             # A criterion the judge never scored is not a criterion scored 0.0.
-            # `parsed.get(criterion) or {}` used to hand the default straight to
+            # `parsed.get(criterion) or {}` handed the default straight to
             # `payload.get("score", 0.0)`, so a judge that omitted one -- cut off
-            # mid-JSON, or simply not emitting it -- produced a zero with an
-            # empty justification, indistinguishable from a judge that read the
-            # answer and scored it zero. `hierarchical_rubric` already says so;
-            # this now matches it.
-            if not isinstance(payload, dict):
-                out.append(self._fail(criterion, "Missing criterion in judge output"))
+            # mid-JSON, or simply not emitting it -- produced a zero that
+            # `composer.compose` averages into the SUT's composite exactly like a
+            # real score. The composer skips `value is None`, which is how a
+            # verdict says "nobody scored this"; a justification string alone
+            # changes nothing, because no scoring path reads one.
+            scored = criterion_score(parsed.get(criterion))
+            if scored is None:
+                out.append(
+                    Verdict(
+                        grader=self.name,
+                        grader_version=self.version,
+                        criterion=criterion,
+                        value=None,
+                        justification="Missing criterion in judge output",
+                        # The judge did answer; only this criterion is absent
+                        # from what it said, so the call's evidence stands.
+                        raw_output=evidence,
+                    )
+                )
                 continue
-            try:
-                value = float(payload.get("score", 0.0))
-            except (TypeError, ValueError):
-                value = 0.0
-            value = max(0.0, min(1.0, value))
-            justification = str(payload.get("justification", ""))
+            value, justification = scored
             out.append(
                 Verdict(
                     grader=self.name,
@@ -77,11 +90,7 @@ class FreeTextReferenceGrader:
                     criterion=criterion,
                     value=value,
                     justification=justification,
-                    raw_output={
-                        "model_version": response.model_version,
-                        "tokens_input": response.tokens_input,
-                        "tokens_output": response.tokens_output,
-                    },
+                    raw_output=evidence,
                 )
             )
         return out
