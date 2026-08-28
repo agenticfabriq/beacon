@@ -35,8 +35,11 @@ def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
     ``float()`` is the throwing step and it throws two ways: ``ValueError`` on
     a string that is not a number, ``OverflowError`` on an int too large to
     convert. Both are reachable, because httpx parses bodies with stdlib json,
-    which accepts bare ``Infinity`` and ``NaN`` tokens and integers of any
-    length.
+    which accepts bare ``Infinity`` and ``NaN`` tokens and integers up to 4300
+    digits -- comfortably past the ~309 where ``float()`` starts overflowing.
+    Beyond 4300 digits ``json.loads`` raises first, one frame up in
+    ``generate``, and that parse is not yet inside the GraderJudgeError
+    contract; this guard covers the range that reaches it.
     """
     value = usage.get(key)
     if isinstance(value, bool) or not isinstance(value, int | float | str):
