@@ -369,15 +369,22 @@ def test_a_parse_that_exhausts_the_stack_is_a_judge_error(
 
 
 def test_httpx_still_lets_the_decoder_s_own_errors_through() -> None:
-    """The guard rests on a dependency guarantee, so assert the guarantee.
+    """The guard rests on a dependency guarantee, so name the guarantee.
 
     `except (ValueError, RecursionError)` is only the right clause while
-    `Response.json()` propagates stdlib json's exceptions unwrapped. It does
-    today, but httpx is a floor here (`httpx>=0.27`), not a pin: an httpx that
-    swapped decoders or wrapped parse failures in a type of its own would leave
-    every other test in this file green while the guard stopped matching what
-    the real path raises. This is the one assertion that crosses the library
-    boundary, which is why it does not go through a monkeypatched post.
+    `Response.json()` raises the decoder's own exception types. It does today,
+    but httpx is a floor here (`httpx>=0.27`), not a pin.
+
+    The tests above already exercise the real `Response.json()` -- they
+    monkeypatch `httpx.post` and hand back a genuine response -- so an httpx
+    that wrapped parse failures in a non-ValueError type would fail them too.
+    What this adds is the diagnosis: those would report a leaked exception from
+    somewhere in `generate`, while this names the type that moved.
+
+    It checks the ValueError leg only. A wrapper subclassing ValueError would
+    pass, and the RecursionError leg is not asserted against the real library
+    at all, because provoking it needs a literal body deep enough to be
+    interpreter-dependent -- which the test above it exists to avoid.
     """
-    with pytest.raises(ValueError):  # noqa: PT011 -- the type IS the assertion
+    with pytest.raises(ValueError):
         httpx.Response(200, content="not json at all").json()
