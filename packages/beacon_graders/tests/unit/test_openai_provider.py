@@ -371,20 +371,23 @@ def test_a_parse_that_exhausts_the_stack_is_a_judge_error(
 def test_httpx_still_lets_the_decoder_s_own_errors_through() -> None:
     """The guard rests on a dependency guarantee, so name the guarantee.
 
-    `except (ValueError, RecursionError)` is only the right clause while
-    `Response.json()` raises the decoder's own exception types. It does today,
-    but httpx is a floor here (`httpx>=0.27`), not a pin.
+    `except (ValueError, RecursionError)` needs exactly one thing to be true:
+    a parse failure arrives as a ValueError or a RecursionError. It does today,
+    but httpx is a floor here (`httpx>=0.27`), not a pin. Nothing more is
+    required -- an httpx that wrapped the decoder's error in a ValueError
+    subclass would still be caught and the guard would still be right, so
+    tightening this to `json.JSONDecodeError` would report a break that had not
+    happened.
 
     The tests above already exercise the real `Response.json()` -- they
     monkeypatch `httpx.post` and hand back a genuine response -- so an httpx
-    that wrapped parse failures in a non-ValueError type would fail them too.
-    What this adds is the diagnosis: those would report a leaked exception from
-    somewhere in `generate`, while this names the type that moved.
+    that broke this would fail them too. What this adds is localization: those
+    surface as an exception leaking out of `generate`, from anywhere inside it,
+    while this points at the library call.
 
-    It checks the ValueError leg only. A wrapper subclassing ValueError would
-    pass, and the RecursionError leg is not asserted against the real library
-    at all, because provoking it needs a literal body deep enough to be
-    interpreter-dependent -- which the test above it exists to avoid.
+    The RecursionError half is not asserted against the real library, because
+    provoking it needs a literal body deep enough to be interpreter-dependent
+    -- which the test above it exists to avoid.
     """
     with pytest.raises(ValueError):
         httpx.Response(200, content="not json at all").json()
