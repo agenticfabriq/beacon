@@ -295,3 +295,33 @@ def test_an_unscorable_criterion_does_not_report_itself_as_missing(
     assert verdicts["insight_recall"].value is None
     assert "missing" not in verdicts["insight_recall"].justification.lower()
     assert "no citations to check against" in verdicts["insight_recall"].justification
+
+
+def test_a_judge_failure_message_is_bounded_and_says_when_it_was_cut(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """The verdict text is the only record: neither grader logs or re-raises.
+
+    So it has to keep the upstream detail -- `openai_provider` preserves 200
+    characters of response body -- while still being bounded, because a
+    provider error whose repr embeds a whole HTTP body is written once per
+    criterion into an unbounded column.
+    """
+
+    class _VerboseErrorProvider:
+        name = "err"
+        model_version = "v"
+
+        def generate(self, request: JudgeRequest) -> JudgeResponse:  # noqa: ARG002
+            raise RuntimeError("HTTP 400: " + ("body " * 400))
+
+    grader = FreeTextReferenceGrader(judge_cache=JudgeCache(provider=_VerboseErrorProvider()))
+    item = make_item(ground_truth={"reference_insights": ["x"], "data_sources": []})
+    result = make_result(output={"narrative": "x"}, output_kind="narrative")
+
+    justification = grader.grade(item, result)[0].justification
+
+    assert "HTTP 400" in justification
+    assert "cut," in justification
+    assert len(justification) < 700

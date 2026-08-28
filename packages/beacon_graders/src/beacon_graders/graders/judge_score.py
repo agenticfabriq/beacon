@@ -8,17 +8,25 @@ from __future__ import annotations
 
 import math
 
-# Diagnostic echoes of malformed judge output are bounded; the judge's own
-# justification is NOT. An echo is a rendering we chose, reproducible from the
-# reply, and `hierarchical_rubric` repeats its container note across every
-# criterion in the rubric. A justification is the audit record itself, with no
-# other copy -- `raw_output` carries only the model version and token counts,
-# and `JudgeCache` is an in-process LRU that is never persisted -- so cutting
-# one destroys evidence to save column width, which is the wrong trade.
-_MAX_QUOTED = 120
+# Nothing quoted here has another copy. `raw_output` carries only the model
+# version and token counts, and `JudgeCache` is an in-process LRU that is never
+# persisted, so a stored verdict's text is the whole record -- of the judge's
+# reasoning, of a malformed reply, and of a failure alike. So the line is not
+# "reproducible or not", which was the earlier and wrong reading. It is how
+# fast the text stops telling you anything new:
+#
+#   * a malformed-shape ECHO saturates almost at once -- enough to see the
+#     shape is enough -- and `hierarchical_rubric` repeats its container note
+#     across every criterion in the rubric, so it is bounded tightly
+#   * a FAILURE message carries upstream detail that does not repeat, including
+#     the 200 characters of response body `openai_provider` deliberately keeps,
+#     so it is bounded well above that rather than at the echo's limit
+#   * a JUSTIFICATION is the judge's own reasoning and is not bounded at all
+_MAX_ECHO = 120
+_MAX_DIAGNOSTIC = 500
 
 
-def cut(rendered: str, limit: int = _MAX_QUOTED) -> str:
+def cut(rendered: str, limit: int = _MAX_DIAGNOSTIC) -> str:
     """Bound a quoted value and SAY when it was bounded.
 
     A silent cut is its own small overclaim: ``{'score': 12345678`` reads as a
@@ -32,7 +40,7 @@ def cut(rendered: str, limit: int = _MAX_QUOTED) -> str:
 
 def quote_judge_value(value: object) -> str:
     """Render a malformed judge value for an operator, bounded and marked."""
-    return cut(repr(value))
+    return cut(repr(value), _MAX_ECHO)
 
 
 def _as_words(value: object) -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from beacon_graders.graders.judge_score import (
     criterion_score,
+    cut,
     quote_judge_value,
     unscored_reason,
 )
@@ -170,16 +171,23 @@ def test_a_long_justification_is_kept_whole_because_it_is_the_audit_record() -> 
     assert scored[1] == long_words.strip()
 
 
-def test_a_malformed_value_echo_is_bounded_because_it_is_a_diagnostic() -> None:
-    """This one we chose to render, and it is reproducible from the reply."""
-    quoted = quote_judge_value(["x" * 50] * 20)
-
-    assert "cut," in quoted
-    assert len(quoted) < 200
-
-
 def test_whitespace_is_emptied_by_the_strip_not_by_falsiness() -> None:
     """`"   "` is truthy, so the guard cannot be what empties it."""
     assert unscored_reason({"score": None, "justification": "   "}) == (
         "Criterion present in judge output but carries no usable score"
     )
+
+
+def test_a_failure_message_keeps_the_upstream_body_the_provider_preserved() -> None:
+    """`openai_provider` deliberately keeps 200 characters of response body.
+
+    Bounding the failure diagnostic at the echo's limit threw most of that
+    away, on the path where the operator most needs it and where the verdict
+    text is the only surviving record -- neither grader logs or re-raises.
+    """
+    upstream = "Judge call failed: HTTP 400: " + ("body " * 40)
+
+    quoted = cut(repr(RuntimeError(upstream)))
+
+    assert "HTTP 400" in quoted
+    assert len(quoted) > 200
