@@ -50,15 +50,8 @@ def _object(value: object) -> dict[str, Any]:
     the key absent -- is deliberately NOT that case and still grades FAIL: the
     server did its job and said the model produced nothing.
 
-    Shape-versus-payload is the line drawn TODAY, and it is not the only line
-    there could be. ``finish_reason`` says why the text is missing, and two of
-    its values argue against the model: ``length`` means we truncated the reply
-    at ``max_completion_tokens``, and ``content_filter`` means the server
-    refused. Neither is the model answering nothing, and this tracker has
-    opinions about exactly that -- a deferral is not a failure, an outage is
-    not a wrong answer. ``generate`` puts ``finish_reason`` in ``raw`` and
-    nothing downstream reads it, so the distinction is currently unrecoverable.
-    Unexamined, not settled.
+    Shape-versus-payload is the line drawn TODAY; see ``generate`` for the one
+    that is still open.
 
     Used only where absent is a real reading -- ``usage``, because cost nobody
     reported is the case the nullable columns exist to express, and losing a
@@ -152,7 +145,22 @@ class OpenAICompatibleProvider:
         return self._model
 
     def generate(self, request: JudgeRequest) -> JudgeResponse:
-        """Issue one chat completion and return the concatenated text response."""
+        """Issue one chat completion and return the concatenated text response.
+
+        A malformed SHAPE raises; a well-formed body carrying no text returns
+        ``""``, which downstream grades against the model. That line is drawn
+        today and is not the only one there could be.
+
+        ``finish_reason`` says WHY the text is missing, and two of its values
+        say it was not the model declining to answer: ``length`` means we
+        truncated the reply at our own ``max_completion_tokens``, and
+        ``content_filter`` means the server refused. Both currently land as a
+        wrong answer counted against the model, and this tracker has opinions
+        about exactly that shape of mistake -- a deferral is not a failure, an
+        outage is not a wrong answer. ``finish_reason`` goes into ``raw`` and
+        nothing in the repo reads it, so the distinction is unrecoverable
+        downstream as things stand. Unexamined, not settled.
+        """
         messages: list[dict[str, str]] = []
         if request.system:
             messages.append({"role": "system", "content": request.system})
