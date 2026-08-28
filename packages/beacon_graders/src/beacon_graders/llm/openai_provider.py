@@ -67,8 +67,7 @@ def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
     Numeric strings count: some servers send ``"prompt_tokens": "12"`` and the
     reading it stands for is a measurement either way. Anything that is not a
     finite, non-negative number is not a count -- and it has to fail to None
-    here rather than out of ``generate``, where it would lose the judge's
-    answer over its accounting.
+    here rather than out of ``generate``, for the reason ``_object`` gives.
 
     ``float()`` is the throwing step and it throws two ways: ``ValueError`` on
     a string that is not a number, ``OverflowError`` on an int past the ~309
@@ -148,16 +147,17 @@ class OpenAICompatibleProvider:
         """Issue one chat completion and return the concatenated text response.
 
         A malformed shape on the PAYLOAD path -- ``choices``, ``message``,
-        ``content`` -- raises. A malformed ``usage`` does not: cost that cannot
-        be read is unrecorded cost, and losing a good answer over its accounting
-        would be perverse. A well-formed body carrying no text returns ``""``,
-        which downstream grades against the model.
+        ``content`` -- raises. A malformed ``usage`` does not; see ``_object``
+        for why cost is the one level that degrades. A well-formed body carrying
+        no text returns ``""``, which downstream grades against the model.
 
         That last line is drawn today and is not the only one there could be.
         ``finish_reason`` says why a reply ended, and two of its values say the
-        ending was not the model's doing: ``length`` means the reply hit the
-        token budget we set (``max_completion_tokens``, or ``max_tokens`` on the
-        legacy retry below), and ``content_filter`` means the server refused.
+        ending was not the model's doing: ``length`` means a token ceiling was
+        hit -- either the budget we set (``max_completion_tokens``, or
+        ``max_tokens`` on the legacy retry below) or the model's context window,
+        which no request field controls, so do not read it as "raise our budget"
+        -- and ``content_filter`` means the server refused.
         Both are counted against the model today, and this tracker has opinions
         about that shape of mistake -- a deferral is not a failure, an outage is
         not a wrong answer.
