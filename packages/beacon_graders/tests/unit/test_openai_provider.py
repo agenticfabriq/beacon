@@ -158,3 +158,66 @@ def test_a_partial_usage_block_keeps_the_half_it_reported(
 
     assert response.tokens_input is None
     assert response.tokens_output == 7
+
+
+def test_a_zeroed_usage_block_is_a_server_filling_in_a_field_it_did_not_measure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An LLM call cannot consume zero prompt tokens.
+
+    The same reading migration 0020 applies to stored zeros: a 0 in the prompt
+    half is a writer that had nothing to write. A server that sends the block
+    zeroed rather than omitting it must not land a believed 0 in the tokens
+    column -- and unlike the pre-migration rows, nothing would clean it up.
+    """
+    body = {
+        "id": "r",
+        "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+    }
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input is None
+    assert response.tokens_output is None
+
+
+def test_an_empty_reply_against_a_measured_prompt_keeps_its_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero completion tokens is a real outcome when the prompt was counted."""
+    body = {
+        "id": "r",
+        "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 12, "completion_tokens": 0},
+    }
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input == 12
+    assert response.tokens_output == 0
+
+
+def test_a_usage_counter_sent_as_a_string_is_still_a_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`int(... or 0)` parsed these; the isinstance guard must not lose them."""
+    body = {
+        "id": "r",
+        "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": "12", "completion_tokens": "3"},
+    }
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input == 12
+    assert response.tokens_output == 3

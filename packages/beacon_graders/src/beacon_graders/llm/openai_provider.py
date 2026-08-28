@@ -25,12 +25,41 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
     """Return one usage counter, or None where the server reported none.
 
-    A server that omits ``usage`` has not told us the call was free, and the
-    reference SUTs persist this value -- so the absence has to survive rather
-    than coerce to 0.
+    Numeric strings count: some servers send ``"prompt_tokens": "12"`` and the
+    reading it stands for is a measurement either way.
     """
     value = usage.get(key)
-    return int(value) if isinstance(value, int | float) else None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return None
+    return None
+
+
+def _usage_counts(usage: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    """Split a usage block into (prompt, completion), absences preserved.
+
+    A server that omits ``usage`` has not told us the call was free, and the
+    reference SUTs persist these values -- so the absence has to survive rather
+    than coerce to 0.
+
+    A zeroed block is the same absence wearing a number. An LLM call cannot
+    consume zero prompt tokens, so a 0 there is a server filling in a field it
+    did not measure -- the reading migration 0020 applies to stored zeros, and
+    unlike those rows nothing would come along later to clean this one up. A
+    zero completion count is only unmeasured when the prompt half is missing
+    too; on its own it can be a real empty reply.
+    """
+    prompt = _usage_count(usage, "prompt_tokens")
+    completion = _usage_count(usage, "completion_tokens")
+    if prompt == 0:
+        return None, (None if completion == 0 else completion)
+    return prompt, completion
 
 
 class OpenAICompatibleProvider:
@@ -86,10 +115,11 @@ class OpenAICompatibleProvider:
             raise GraderJudgeError("Empty response from judge endpoint")
         text = str((choices[0].get("message") or {}).get("content") or "")
         usage = body.get("usage") or {}
+        tokens_input, tokens_output = _usage_counts(usage)
         return JudgeResponse(
             text=text,
-            tokens_input=_usage_count(usage, "prompt_tokens"),
-            tokens_output=_usage_count(usage, "completion_tokens"),
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
             model_version=self._model,
             raw={
                 "id": body.get("id"),

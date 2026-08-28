@@ -64,6 +64,13 @@ def _page() -> str:
     return (files("beacon_ui.webui") / "index.html").read_text(encoding="utf-8")
 
 
+def _runner_recipe(page: str) -> str:
+    """The push half of the cheat sheet -- the curl an operator copies."""
+    recipe = re.search(r"# push one result:(.*?)# close the run", page, re.S)
+    assert recipe, "the cheat sheet must carry a push recipe"
+    return recipe.group(1)
+
+
 def _matrix_column_count(page: str) -> int:
     """Columns in the results-matrix header, counting colspans."""
     thead = re.search(r"<thead>(.*?)</thead>", page, re.S)
@@ -142,30 +149,54 @@ def test_the_drilldown_does_not_add_two_token_fields_that_may_be_null() -> None:
     assert "const tokenTotal =" in page, "the guard is expected to be a named helper"
 
 
-def test_the_runner_recipe_does_not_teach_a_runner_to_claim_zero_cost() -> None:
+@pytest.mark.parametrize("field", ["tokens_input", "tokens_output"])
+def test_the_runner_recipe_does_not_teach_a_runner_to_claim_a_cost(field: str) -> None:
     """The cheat sheet is the onboarding path an external operator pastes.
 
     While tokens defaulted to 0 the sample's `"tokens_input": 0` was a harmless
-    echo of the default. Now that omitted means unmeasured, sending it is an
-    explicit claim that the attempt was free -- and a runner following the
-    recipe lands a believed zero in the tokens column, which is the reading
-    this contract exists to keep out.
-    """
-    page = _page()
+    echo of the default. Now that omitted means unmeasured, sending a number is
+    a claim about cost the runner following the recipe did not measure -- and a
+    zero lands in the tokens column as a configuration that is free.
 
-    assert '"tokens_input": 0' not in page, (
-        "the runner recipe must omit token fields rather than send zeros"
+    Matched as a pattern rather than one literal: the previous version of this
+    test pinned the exact string `"tokens_input": 0`, which a re-added output
+    half or a different spacing would have walked straight past.
+    """
+    recipe = _runner_recipe(_page())
+
+    assert not re.search(rf'"{field}"\s*:\s*\d', recipe), (
+        f"the runner recipe must omit {field} rather than send a number"
     )
 
 
-def test_half_a_measurement_is_not_reported_as_nothing_recorded() -> None:
+def test_the_recipe_says_omitting_cost_is_how_you_report_not_measuring_it() -> None:
+    """Silence in a sample reads as an oversight unless the sample says why."""
+    recipe = _runner_recipe(_page())
+
+    assert "only if you" in recipe and "unrecorded" in recipe
+
+
+@pytest.mark.parametrize(
+    "branch",
+    [
+        'return output + " output tokens, prompt not recorded"',
+        'return input + " prompt tokens, output not recorded"',
+    ],
+)
+def test_half_a_measurement_is_not_reported_as_nothing_recorded(branch: str) -> None:
     """The in-process SUT records output tokens and never the prompt.
 
     Refusing to total half a measurement is deliberate, but telling the
     operator nothing was recorded contradicts the row they are looking at.
-    """
-    page = _page()
 
-    assert "prompt not recorded" in page, (
-        "a row with one half measured must say which half is missing"
-    )
+    Pinned as the return statement rather than the wording: scoping to the
+    helper is not enough on its own, because deleting the branch and leaving
+    its text in a comment inside the same helper still matched.
+    """
+    body = re.search(r"const tokenTotal = \(input, output\) => \{(.*?)\n\};", _page(), re.S)
+    assert body, "tokenTotal must be one arrow block"
+    # Comments stripped: matching the raw text passed when the branch was
+    # deleted and its return statement left behind as a comment.
+    code = re.sub(r"//[^\n]*", "", body.group(1))
+
+    assert branch in code
