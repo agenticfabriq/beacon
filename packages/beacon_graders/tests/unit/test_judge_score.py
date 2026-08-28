@@ -201,7 +201,7 @@ def test_a_failure_message_keeps_the_upstream_body_the_provider_preserved() -> N
     "text",
     ["0.8", "1", "80%", "8/10", "0.8 (good)", "no evidence to score against", "  padded  "],
 )
-def test_a_bare_string_is_reported_as_a_bare_string_and_shown_whole(text: str) -> None:
+def test_a_bare_string_is_reported_as_a_bare_string_with_its_words(text: str) -> None:
     """Classifying it would have to pick a side, and get one of them wrong.
 
     `"0.8"` is a value in the wrong place and `"no evidence"` is the judge
@@ -226,11 +226,16 @@ def test_a_bare_string_justification_is_not_bounded() -> None:
 
 
 @pytest.mark.parametrize("blank", ["", "   "])
-def test_an_empty_bare_string_still_names_its_shape(blank: str) -> None:
+def test_a_wordless_bare_string_names_its_shape_without_claiming_which(blank: str) -> None:
     """Otherwise it is byte-identical to the message for `{"score": null}`.
 
     The operator would get neither signal: not the words, since there are
     none, and not the shape either, so a bare string and an object read the
-    same.
+    same. Calling it "empty" would be a claim -- `"   "` is not empty, it is
+    whitespace, which this module is careful about everywhere else -- so the
+    message echoes what arrived instead of naming it.
     """
-    assert unscored_reason(blank) == ("Criterion in judge output is an empty string, not an object")
+    reason = unscored_reason(blank)
+
+    assert reason.startswith("Criterion in judge output is a bare string with no words:")
+    assert repr(blank) in reason
