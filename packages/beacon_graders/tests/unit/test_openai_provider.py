@@ -421,13 +421,14 @@ def test_a_body_of_the_wrong_shape_is_a_judge_error(
     the wrong type. Reading through them with `.get` turned that into an
     AttributeError -- the same hole the parse frame had, one level in.
 
-    These raise rather than degrade because they carry the payload. The outcome
-    is a zero either way -- the LLM graders' `extract_json` raises on an empty
-    text, and the reference SUT turns one into empty SQL that grades "No SQL
-    produced by SUT". That second route is the reason: a judge endpoint sending
-    the wrong shape must not be recorded as the system under test producing
-    nothing. That includes an absent message, which the first version of this
-    guard let through while its own docstring said it must not.
+    These raise rather than degrade because they carry the payload. For the LLM
+    graders that only sharpens the message -- an empty text raises inside
+    `extract_json` regardless. For a reference SUT built on this provider it
+    changes FAIL into ERROR: a degraded empty string becomes a COMPLETED result
+    with empty SQL, counted against the model, where an endpoint returning an
+    unusable shape means the attempt never answered. That includes an absent
+    message, which the first version of this guard let through while its own
+    docstring said it must not.
 
     Each case asserts its message. Without that they are indistinguishable
     from each other, which is how `{"choices": "abc"}` came to be reported as
