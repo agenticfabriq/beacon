@@ -379,17 +379,16 @@ def test_a_parse_failure_still_arrives_as_a_valueerror() -> None:
     tightening this to `json.JSONDecodeError` would report a break that had not
     happened.
 
-    The tests above already exercise the real `Response.json()` -- they
-    monkeypatch `httpx.post` and hand back a genuine response -- so an httpx
-    that started raising a non-ValueError on a bad parse would fail them too.
-    What this adds is localization: those surface as an exception leaking out
-    of `generate`, from anywhere inside it, while this points at the library
-    call.
+    `test_an_unparseable_200_body_is_a_judge_error` already exercises the real
+    `Response.json()` -- it monkeypatches `httpx.post` and hands back a genuine
+    response -- so an httpx that started raising a non-ValueError on a bad
+    parse would fail it too. What this adds is localization: that one surfaces
+    as an exception leaking out of `generate`, from anywhere inside it, while
+    this points at the library call.
 
-    The RecursionError half is asserted by no test here against the real
-    library -- the one that covers it injects the error -- because provoking it
-    needs a literal body deep enough to be interpreter-dependent, which the
-    test above exists to avoid.
+    Nothing here watches the real library for the RecursionError half:
+    `test_a_parse_that_exhausts_the_stack_is_a_judge_error` injects it, because
+    provoking it needs a literal body deep enough to be interpreter-dependent.
     """
     with pytest.raises(ValueError):
         httpx.Response(200, content="not json at all").json()
