@@ -311,7 +311,6 @@ def test_a_bare_infinity_token_in_the_body_does_not_escape_as_overflow(
     [
         pytest.param("not json at all", id="not json"),
         pytest.param('{"a": ' + "1" * 4400 + "}", id="int past json digit limit"),
-        pytest.param("[" * 20000 + "]" * 20000, id="nested past the recursion limit"),
     ],
 )
 def test_an_unparseable_200_body_is_a_judge_error(
@@ -320,9 +319,10 @@ def test_an_unparseable_200_body_is_a_judge_error(
     """Callers discriminate on GraderJudgeError, so the parse must raise it.
 
     `response.json()` raised whatever stdlib json raised -- JSONDecodeError for
-    a non-JSON body, a bare ValueError for an integer literal over 4300 digits
-    -- straight past every caller's except clause. Guarding the counters was
-    only half of it while the frame that produces the body was still open.
+    a non-JSON body, a bare ValueError for an integer literal over the digit
+    limit, RecursionError for one nested deeply enough -- straight past every
+    caller's except clause. Guarding the counters was only half of it while the
+    frame that produces the body was still open.
 
     `match` is not decoration: with the int-string-digit limit disabled the
     4400-digit body parses fine, `generate` raises a different GraderJudgeError
@@ -336,6 +336,32 @@ def test_an_unparseable_200_body_is_a_judge_error(
             200, content=body, headers={"content-type": "application/json"}
         ),
     )
+
+    with pytest.raises(GraderJudgeError, match="unparseable body"):
+        _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+
+def test_a_parse_that_exhausts_the_stack_is_a_judge_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RecursionError is not a ValueError, so it needs naming separately.
+
+    Injected rather than provoked with a deeply nested body: how much nesting
+    it takes is interpreter-dependent -- 3.14 checks real stack headroom rather
+    than counting to a fixed limit, and needs an order of magnitude more before
+    it raises at all. A literal body would pass here and fail on another Python
+    this project supports, testing the interpreter rather than the guard.
+    """
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, *, json, headers, timeout: httpx.Response(200, json={"ok": True}),
+    )
+
+    def _blow_the_stack(self: httpx.Response) -> Any:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(httpx.Response, "json", _blow_the_stack)
 
     with pytest.raises(GraderJudgeError, match="unparseable body"):
         _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
