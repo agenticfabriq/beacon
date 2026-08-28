@@ -8,6 +8,23 @@ from __future__ import annotations
 
 import math
 
+# Judge output is quoted into `Verdict.justification`, an unbounded text column,
+# and the container note below is repeated once per criterion in the rubric.
+_MAX_QUOTED = 120
+
+
+def quote_judge_value(value: object) -> str:
+    """Render a judge value for an operator, cut to a length, and SAY it was cut.
+
+    A silent cut is its own small overclaim: ``{'score': 12345678`` reads as a
+    complete value the judge never sent. The marker is the difference between
+    showing less and showing something else.
+    """
+    rendered = repr(value)
+    if len(rendered) <= _MAX_QUOTED:
+        return rendered
+    return f"{rendered[:_MAX_QUOTED]}... (cut, {len(rendered)} chars)"
+
 
 def _as_words(value: object) -> str:
     """Render a judge's justification without inventing one.
@@ -17,10 +34,10 @@ def _as_words(value: object) -> str:
     instead loses the ones it did say in another shape -- a list of bullet
     points is still an explanation, and the drill-down used to show it.
 
-    So the line is emptiness, not type. ``None``, ``""``, ``[]``, ``{}`` and
-    ``false`` all carry no words and render as nothing; anything else renders
-    as itself. Quoting the judge an empty list is the same overclaim as
-    quoting it the literal "None".
+    So the line is emptiness, not type: anything falsy carries no words and
+    renders as nothing -- ``None``, ``""``, whitespace, ``[]``, ``{}``,
+    ``false``, ``0``. Anything else renders as itself. Quoting the judge an
+    empty list is the same overclaim as quoting it the literal "None".
     """
     if not value:
         return ""
@@ -79,7 +96,7 @@ def unscored_reason(payload: object) -> str:
         # The judge emitted something for this criterion, just not the object
         # the prompt asked for -- a bare `0.8`, a string. Calling that missing
         # denies a value sitting in the reply the operator is looking at.
-        return f"Criterion in judge output is not an object: {payload!r}"
+        return f"Criterion in judge output is not an object: {quote_judge_value(payload)}"
     explanation = _as_words(payload.get("justification"))
     if explanation:
         return f"Not scored by the judge: {explanation}"

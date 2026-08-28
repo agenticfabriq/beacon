@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from beacon_graders.graders.judge_score import criterion_score, unscored_reason
+from beacon_graders.graders.judge_score import (
+    criterion_score,
+    quote_judge_value,
+    unscored_reason,
+)
 from beacon_graders.llm.prompts import HIERARCHICAL_RUBRIC_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
 from beacon_graders.types import GraderKind, Verdict
@@ -60,10 +64,7 @@ class HierarchicalRubricGrader:
         container_note = (
             None
             if raw_scores is None or isinstance(raw_scores, dict)
-            # Truncated: this one note is repeated on EVERY criterion in the
-            # rubric, so a verbose judge would store the whole malformed
-            # container once per criterion.
-            else f"Judge output's 'criteria' is not an object: {raw_scores!r:.120}"
+            else f"Judge output's 'criteria' is not an object: {quote_judge_value(raw_scores)}"
         )
         out: list[Verdict] = []
         for criterion in criteria:
