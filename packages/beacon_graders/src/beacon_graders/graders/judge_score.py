@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import math
 
-# Everything here is quoted into `Verdict.justification`, an unbounded text
-# column, once per criterion -- and `hierarchical_rubric` repeats its
-# malformed-container note across every criterion in the rubric.
-_MAX_QUOTED = 500
+# Diagnostic echoes of malformed judge output are bounded; the judge's own
+# justification is NOT. An echo is a rendering we chose, reproducible from the
+# reply, and `hierarchical_rubric` repeats its container note across every
+# criterion in the rubric. A justification is the audit record itself, with no
+# other copy -- `raw_output` carries only the model version and token counts,
+# and `JudgeCache` is an in-process LRU that is never persisted -- so cutting
+# one destroys evidence to save column width, which is the wrong trade.
+_MAX_QUOTED = 120
 
 
-def _cut(rendered: str, limit: int = _MAX_QUOTED) -> str:
+def cut(rendered: str, limit: int = _MAX_QUOTED) -> str:
     """Bound a quoted value and SAY when it was bounded.
 
     A silent cut is its own small overclaim: ``{'score': 12345678`` reads as a
@@ -27,8 +31,8 @@ def _cut(rendered: str, limit: int = _MAX_QUOTED) -> str:
 
 
 def quote_judge_value(value: object) -> str:
-    """Render a judge value for an operator, bounded and marked when cut."""
-    return _cut(repr(value), 120)
+    """Render a malformed judge value for an operator, bounded and marked."""
+    return cut(repr(value))
 
 
 def _as_words(value: object) -> str:
@@ -42,14 +46,13 @@ def _as_words(value: object) -> str:
     So the line is emptiness, not type. Anything falsy carries no words --
     ``None``, ``""``, ``[]``, ``{}``, ``false``, ``0`` -- and so does a string
     that is only whitespace, which is not falsy and is emptied by the strip
-    rather than by the guard. Everything else renders as itself, bounded,
-    because a judge's justification is the largest thing quoted here and it
-    lands in an unbounded column once per criterion.
+    rather than by the guard. Everything else renders as itself, WHOLE: this is
+    the judge's own explanation and the only copy that survives, so it is not
+    the place to save column width.
     """
     if not value:
         return ""
-    rendered = value.strip() if isinstance(value, str) else str(value)
-    return _cut(rendered)
+    return value.strip() if isinstance(value, str) else str(value)
 
 
 def criterion_score(payload: object) -> tuple[float, str] | None:

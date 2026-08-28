@@ -153,29 +153,33 @@ def test_the_cut_reports_the_real_length() -> None:
     assert f"{len(repr(value))} chars" in quoted
 
 
-def test_a_huge_justification_is_bounded_before_it_reaches_the_column() -> None:
-    """The judge's own words are the largest thing quoted here.
+def test_a_long_justification_is_kept_whole_because_it_is_the_audit_record() -> None:
+    """Bounding this would destroy evidence to save column width.
 
-    `Verdict.justification` is an unbounded text column and this is written to
-    it once per criterion, so a judge replying with a megabyte of prose would
-    store it per criterion. The two malformed-shape echoes were capped first;
-    this is the path an actual judge is most likely to blow up.
+    `raw_output` carries only the model version and token counts, and the
+    judge cache is an in-process LRU that is never persisted, so the
+    justification is the only surviving copy of what the judge said. The
+    free-text prompt sets no length limit at all, so a multi-insight
+    explanation running long is ordinary, not pathological.
     """
-    huge = "why " * 5000
+    long_words = "why " * 500
 
-    scored = criterion_score({"score": 0.5, "justification": huge})
-    reason = unscored_reason({"score": None, "justification": huge})
+    scored = criterion_score({"score": 0.5, "justification": long_words})
 
     assert scored is not None
-    assert len(scored[1]) < 700
-    assert "cut," in scored[1]
-    assert len(reason) < 700
-    assert "cut," in reason
+    assert scored[1] == long_words.strip()
+
+
+def test_a_malformed_value_echo_is_bounded_because_it_is_a_diagnostic() -> None:
+    """This one we chose to render, and it is reproducible from the reply."""
+    quoted = quote_judge_value(["x" * 50] * 20)
+
+    assert "cut," in quoted
+    assert len(quoted) < 200
 
 
 def test_whitespace_is_emptied_by_the_strip_not_by_falsiness() -> None:
-    """`not "   "` is False, so the docstring's mechanism has to say which."""
-    assert bool("   ") is True
+    """`"   "` is truthy, so the guard cannot be what empties it."""
     assert unscored_reason({"score": None, "justification": "   "}) == (
         "Criterion present in judge output but carries no usable score"
     )

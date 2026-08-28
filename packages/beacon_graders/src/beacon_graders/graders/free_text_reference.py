@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from beacon_graders.graders.judge_score import criterion_score, unscored_reason
+from beacon_graders.graders.judge_score import criterion_score, cut, unscored_reason
 from beacon_graders.llm.prompts import FREE_TEXT_REFERENCE_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
 from beacon_graders.types import GraderKind, Verdict
@@ -50,7 +50,10 @@ class FreeTextReferenceGrader:
             response = self.cache.get_or_call(request)
             parsed = extract_json(response.text)
         except Exception as exc:
-            return [self._fail(criterion, f"Judge call failed: {exc!r}") for criterion in _CRITERIA]
+            return [
+                self._fail(criterion, f"Judge call failed: {cut(repr(exc))}")
+                for criterion in _CRITERIA
+            ]
 
         evidence = {
             "model_version": response.model_version,

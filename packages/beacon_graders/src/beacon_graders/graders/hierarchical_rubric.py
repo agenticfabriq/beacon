@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from beacon_graders.graders.judge_score import (
     criterion_score,
+    cut,
     quote_judge_value,
     unscored_reason,
 )
@@ -51,7 +52,7 @@ class HierarchicalRubricGrader:
             parsed = extract_json(response.text)
         except Exception as exc:
             return [
-                self._fail(str(criterion["name"]), f"Judge call failed: {exc!r}")
+                self._fail(str(criterion["name"]), f"Judge call failed: {cut(repr(exc))}")
                 for criterion in criteria
             ]
 
