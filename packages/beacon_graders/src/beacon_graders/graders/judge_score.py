@@ -17,13 +17,21 @@ def criterion_score(payload: object) -> tuple[float, str] | None:
     no ``score`` key, ``{"score": null}``, ``{"score": "n/a"}``. Note this is
     reached by a WELL-FORMED reply that is incomplete, not by a truncated one:
     ``extract_json`` decodes with ``raw_decode``, so a cut-off reply raises
-    there and the grader's ``except Exception`` turns it into a 0.0 instead. Every one of
+    there and the grader's ``except Exception`` turns it into a 0.0 instead.
+
+    That 0.0 is the same absence-as-measurement this function removes from the
+    well-formed path, and it is still there -- averaged into the composite
+    exactly like a real score. Noted as an asymmetry to close, not a design:
+    the judge-outage path is tracked with the rest of it. Every one of
     those used to coerce to 0.0 and become indistinguishable from a judge that
     read the answer and scored it zero.
     """
     if not isinstance(payload, dict) or "score" not in payload:
         return None
-    justification = str(payload.get("justification", ""))
+    # Same rule as `unscored_reason` below: `str()` on a JSON null yields the
+    # literal "None" and shows it to the operator as the judge's words.
+    raw_justification = payload.get("justification")
+    justification = raw_justification.strip() if isinstance(raw_justification, str) else ""
     raw = payload["score"]
     # `True` is an int in Python and would score 1.0; a bool is not a score.
     if isinstance(raw, bool):
@@ -50,8 +58,13 @@ def unscored_reason(payload: object) -> str:
     and that explanation is worth more to whoever opens the drill-down than a
     message contradicted by the reply sitting next to it.
     """
-    if not isinstance(payload, dict):
+    if payload is None:
         return "Missing criterion in judge output"
+    if not isinstance(payload, dict):
+        # The judge emitted something for this criterion, just not the object
+        # the prompt asked for -- a bare `0.8`, a string. Calling that missing
+        # denies a value sitting in the reply the operator is looking at.
+        return f"Criterion in judge output is not an object: {payload!r}"
     # `str()` first would turn a JSON null into the truthy literal "None" and
     # quote the judge an explanation it never gave -- the exact overclaim this
     # function exists to avoid, one line in.

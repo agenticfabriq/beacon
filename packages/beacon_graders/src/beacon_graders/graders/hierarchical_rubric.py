@@ -60,8 +60,9 @@ class HierarchicalRubricGrader:
             # averages into the SUT's composite exactly like a real score -- so
             # the message reported an absence the number denied. `value=None`
             # declines to score, and the composer makes the item ERROR rather
-            # than averaging whichever criteria survived -- unless an execution
-            # grader already decided it, which short-circuits earlier.
+            # than averaging whichever criteria survived -- unless something
+            # decided it earlier: an execution verdict, a deferral, or an item
+            # declared unanswerable all short-circuit first.
             scored = criterion_score(payload)
             if scored is None:
                 out.append(

@@ -69,8 +69,9 @@ class FreeTextReferenceGrader:
             # the composer treats any of them as making the item ungradeable --
             # ERROR rather than a quiet exclusion from the average, since
             # averaging the survivors hands the outcome to whichever criteria
-            # happened to make it. Only where no execution grader decided the
-            # item first: those short-circuit on `bool_value` before the judge
+            # happened to make it. Only where nothing decided the item
+            # earlier: an execution verdict's `bool_value`, a deferral, and an
+            # item declared unanswerable all short-circuit before the judge
             # values are read at all.
             scored = criterion_score(parsed.get(criterion))
             if scored is None:

@@ -40,8 +40,22 @@ def test_anything_that_is_not_a_number_is_not_a_score(payload: object) -> None:
 
 
 def test_only_an_absent_criterion_is_called_missing() -> None:
+    """A judge that emitted the wrong SHAPE still emitted something.
+
+    Routing every non-dict to "Missing" told the drill-down a criterion was
+    absent while its value sat in the reply -- `{"insight_recall": 0.8}` from a
+    judge that ignored the prompted object shape.
+    """
     assert unscored_reason(None) == "Missing criterion in judge output"
     assert "Missing" not in unscored_reason({"score": None})
+    assert "Missing" not in unscored_reason(0.8)
+    assert "0.8" in unscored_reason(0.8)
+    assert "Missing" not in unscored_reason("0.8")
+
+
+def test_a_non_string_justification_is_not_quoted_on_the_scored_path_either() -> None:
+    """The same `str()` coercion lived one function up, on a scored criterion."""
+    assert criterion_score({"score": 0.5, "justification": None}) == (0.5, "")
 
 
 def test_the_judges_own_words_are_carried_through() -> None:
