@@ -47,10 +47,18 @@ def _object(value: object) -> dict[str, Any]:
     and an error leaves the denominator rather than counting against the model.
 
     A well-formed body reporting no text -- ``"content": null``, or ``""``, or
-    the key absent -- is deliberately NOT that case and still grades FAIL. The
-    server did its job and said the model produced nothing, which is the
-    model's answer and belongs against it. The line is the response's shape,
-    not whether it happened to carry an answer.
+    the key absent -- is deliberately NOT that case and still grades FAIL: the
+    server did its job and said the model produced nothing.
+
+    Shape-versus-payload is the line drawn TODAY, and it is not the only line
+    there could be. ``finish_reason`` says why the text is missing, and two of
+    its values argue against the model: ``length`` means we truncated the reply
+    at ``max_completion_tokens``, and ``content_filter`` means the server
+    refused. Neither is the model answering nothing, and this tracker has
+    opinions about exactly that -- a deferral is not a failure, an outage is
+    not a wrong answer. ``generate`` puts ``finish_reason`` in ``raw`` and
+    nothing downstream reads it, so the distinction is currently unrecoverable.
+    Unexamined, not settled.
 
     Used only where absent is a real reading -- ``usage``, because cost nobody
     reported is the case the nullable columns exist to express, and losing a
