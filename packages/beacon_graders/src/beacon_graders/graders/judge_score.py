@@ -21,7 +21,9 @@ import math
 #   * a FAILURE message carries upstream detail that does not repeat, including
 #     the 200 characters of response body `openai_provider` deliberately keeps,
 #     so it is bounded well above that rather than at the echo's limit
-#   * a JUSTIFICATION is the judge's own reasoning and is not bounded at all
+#   * a JUSTIFICATION is the judge's own reasoning and is not bounded at all,
+#     including when it arrives as a bare string where an object was asked for
+#     -- that is a wrong shape AND the judge's words, and the words win
 _MAX_ECHO = 120
 _MAX_DIAGNOSTIC = 500
 
@@ -111,9 +113,14 @@ def unscored_reason(payload: object) -> str:
     """
     if payload is None:
         return "Missing criterion in judge output"
+    if isinstance(payload, str):
+        # A bare string for a criterion is the judge explaining itself without
+        # scoring -- its own words, not a shape to echo, so it takes the
+        # justification path and its bound, not the echo's tight one.
+        return unscored_reason({"justification": payload})
     if not isinstance(payload, dict):
         # The judge emitted something for this criterion, just not the object
-        # the prompt asked for -- a bare `0.8`, a string. Calling that missing
+        # the prompt asked for -- a bare `0.8`, a list. Calling that missing
         # denies a value sitting in the reply the operator is looking at.
         return f"Criterion in judge output is not an object: {quote_judge_value(payload)}"
     explanation = _as_words(payload.get("justification"))

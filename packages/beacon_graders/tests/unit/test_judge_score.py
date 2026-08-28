@@ -185,9 +185,28 @@ def test_a_failure_message_keeps_the_upstream_body_the_provider_preserved() -> N
     away, on the path where the operator most needs it and where the verdict
     text is the only surviving record -- neither grader logs or re-raises.
     """
-    upstream = "Judge call failed: HTTP 400: " + ("body " * 40)
+    upstream = "Judge call failed: HTTP 400: " + ("body " * 39) + "LAST"
 
     quoted = cut(repr(RuntimeError(upstream)))
 
+    # `len(quoted) > 200` would pass at any limit from 181 up, discarding body
+    # while looking green. The claim is that the WHOLE body survived, so the
+    # far end of it is what to assert.
     assert "HTTP 400" in quoted
-    assert len(quoted) > 200
+    assert "LAST" in quoted
+    assert "cut," not in quoted
+
+
+def test_a_bare_string_criterion_is_the_judges_words_not_a_shape_to_echo() -> None:
+    """It is both a wrong shape and the judge explaining itself.
+
+    Routing it through the echo's tight bound cut the judge's reasoning at 120
+    characters and stored that as the only record -- the loss the split exists
+    to prevent, arriving through the branch meant for `0.8` and `[]`.
+    """
+    words = "no citations were present, so " * 20
+
+    reason = unscored_reason(words)
+
+    assert "cut," not in reason
+    assert reason == f"Not scored by the judge: {words.strip()}"
