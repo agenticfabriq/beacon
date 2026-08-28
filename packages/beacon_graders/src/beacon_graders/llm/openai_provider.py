@@ -30,8 +30,8 @@ def _object(value: object) -> dict[str, Any]:
     back the wrong type. Reading through them with ``.get`` turns that into an
     AttributeError.
 
-    Two consumers read what this parses, and raising is right for different
-    reasons in each.
+    Two consumers read what this parses, and the guards around it raise for
+    different reasons in each.
 
     For the LLM graders it buys diagnosis only: they catch bare ``Exception``,
     an empty ``text`` raises inside ``extract_json`` anyway, and both roads end
@@ -41,7 +41,7 @@ def _object(value: object) -> dict[str, Any]:
     For a reference SUT built on this provider it changes the outcome, and to
     the right one. That SUT hands ``text`` straight to ``_parse_output``, so a
     degraded empty string becomes a COMPLETED result with empty SQL and grades
-    FAIL -- the model counted wrong. Raising makes it ERROR instead, which is
+    FAIL, counted against the model. Raising makes it ERROR instead, which is
     this tracker's founding distinction: an endpoint that returned an unusable
     shape means the attempt never produced an answer, and an error leaves the
     denominator rather than counting against the model.
