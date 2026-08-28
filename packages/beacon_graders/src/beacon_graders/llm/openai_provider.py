@@ -155,25 +155,15 @@ class OpenAICompatibleProvider:
         no text returns ``""``, which downstream grades against the model.
 
         That last line is drawn today and is not the only one there could be.
-        ``finish_reason`` reports why a reply ended, and two of its values --
-        ``length``, some token ceiling, and ``content_filter``, the server
-        refusing -- say the ending did not come from the model answering badly.
-        Both are counted against the model today, and this tracker has opinions
-        about that shape of mistake: a deferral is not a failure, an outage is
-        not a wrong answer.
+        ``finish_reason`` separates a model that answered badly from one whose
+        reply was capped (``length``) or refused (``content_filter``), and
+        nothing reads it: this method puts it in ``raw`` and no caller touches
+        it. Nor can the text stand in for it, since ``length`` arrives both
+        with content and without.
 
-        Unexamined, not settled, and not prejudged here, because deciding it
-        needs facts this repo does not hold. ``length`` alone does not say
-        WHICH ceiling -- the budget we send, the model's context window, a
-        reasoning budget spent before any content, a cap the server or gateway
-        imposes -- and those want different responses. Separating them is an
-        experiment against a live endpoint, not a docstring.
-
-        Two things that are true from here. Nothing reads ``finish_reason``:
-        ``generate`` puts it in ``raw`` and no caller touches it, so the
-        distinction is unrecoverable downstream as things stand. And it cannot
-        be reconstructed from the text, because ``length`` arrives both with
-        content and without.
+        So both still grade against the model, in a tracker built on "a
+        deferral is not a failure". Whether they should is open, and settling
+        it needs experiments against a live endpoint rather than a docstring.
         """
         messages: list[dict[str, str]] = []
         if request.system:
