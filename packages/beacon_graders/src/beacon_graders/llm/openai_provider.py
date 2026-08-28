@@ -28,17 +28,18 @@ def _object(value: object) -> dict[str, Any]:
 
     Every level of a judge response is server-supplied and any of them can come
     back the wrong type. Reading through them with ``.get`` turns that into an
-    AttributeError. The graders above this catch bare ``Exception`` and turn
-    whatever arrives into a failed verdict carrying its message, so the cost of
-    the untyped error is the diagnostic: "'NoneType' object has no attribute
-    'get'" in a verdict justification says nothing about which field the judge
-    server got wrong.
+    AttributeError.
 
-    Used only where absent is a reading the caller already handles, which is
-    ``usage``: cost nobody reported is the case this whole column exists to
-    express. Not used for ``choices`` or ``message``, where degrading would
-    hand the grader an empty verdict it would score as if the judge had
-    answered; those raise.
+    What the guards around it buy is diagnosis, not a different outcome. Every
+    path here already ends in a failed verdict: the graders catch bare
+    ``Exception``, and an empty ``text`` would reach ``extract_json`` and raise
+    there anyway. What changes is whether the justification names the field the
+    judge server got wrong, or reads "'NoneType' object has no attribute 'get'".
+
+    Used only where absent is a real reading -- ``usage``, because cost nobody
+    reported is the case the nullable columns exist to express, and losing a
+    good verdict over unreadable accounting would be perverse. Not used for
+    ``choices`` or ``message``, which carry the payload and raise.
     """
     return value if isinstance(value, dict) else {}
 
@@ -164,7 +165,16 @@ class OpenAICompatibleProvider:
             raise GraderJudgeError(
                 f"Judge endpoint returned a {type(message).__name__} message, expected an object"
             )
-        text = str(message.get("content") or "")
+        content = message.get("content")
+        if content is not None and not isinstance(content, str):
+            # The content-parts form some compatible servers return. `str()` on
+            # it yields a Python repr that reaches extract_json and fails there
+            # on the quoting -- true, but it reports malformed JSON instead of
+            # the shape the server actually sent.
+            raise GraderJudgeError(
+                f"Judge endpoint returned {type(content).__name__} content, expected a string"
+            )
+        text = content or ""
         tokens_input, tokens_output = _usage_counts(_object(body.get("usage")))
         return JudgeResponse(
             text=text,
@@ -188,12 +198,13 @@ class OpenAICompatibleProvider:
                 last_error = exc
             else:
                 if response.status_code == 200:
-                    # Nothing stdlib json raises here is something a caller
-                    # discriminating on GraderJudgeError can catch: a
-                    # JSONDecodeError for a non-JSON 200, a bare ValueError for
-                    # an integer literal over the interpreter's digit limit, and
-                    # a RecursionError -- not a ValueError at all -- for a body
-                    # nested deeply enough.
+                    # stdlib json raises three different things here and none
+                    # of them says "judge": a JSONDecodeError for a non-JSON
+                    # 200, a bare ValueError for an integer literal over the
+                    # interpreter's digit limit, and a RecursionError -- not a
+                    # ValueError at all -- for a body nested deeply enough.
+                    # Callers catch bare Exception, so what this converts is the
+                    # message they end up recording, not whether they catch.
                     try:
                         parsed = response.json()
                     except (ValueError, RecursionError) as exc:

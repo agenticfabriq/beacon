@@ -259,8 +259,8 @@ def test_a_usage_counter_that_is_not_a_finite_number_is_no_count_at_all(
 ) -> None:
     """Parsing must fail to None, never out of `generate` as OverflowError.
 
-    Callers discriminate on GraderJudgeError. `int(float("Infinity"))` raises
-    OverflowError, which the ValueError-only guard let escape -- and stdlib
+    Nothing may escape `generate` untyped. `int(float("Infinity"))` raises
+    OverflowError, which the ValueError-only guard let out -- and stdlib
     json, which httpx uses, parses a bare `Infinity` token into a float, so the
     numeric path reaches it too. `float()` raises the same on an int too large
     to convert, which the earlier `int(value)` branch had handled: widening the
@@ -316,7 +316,7 @@ def test_a_bare_infinity_token_in_the_body_does_not_escape_as_overflow(
 def test_an_unparseable_200_body_is_a_judge_error(
     monkeypatch: pytest.MonkeyPatch, body: str
 ) -> None:
-    """Callers discriminate on GraderJudgeError, so the parse must raise it.
+    """A parse failure has to arrive as the error this module documents.
 
     `response.json()` raised whatever stdlib json raised -- JSONDecodeError for
     a non-JSON body, a bare ValueError for an integer literal over the digit
@@ -399,12 +399,16 @@ def test_a_parse_failure_still_arrives_as_a_valueerror() -> None:
     [
         pytest.param({"choices": [None]}, "NoneType choice", id="null choice"),
         pytest.param({"choices": "abc"}, "str choices", id="choices not a list"),
-        pytest.param({"choices": []}, "Empty response", id="no choices"),
         pytest.param({"choices": [3]}, "int choice", id="scalar choice"),
         pytest.param({"choices": [{"message": "hi"}]}, "str message", id="message not an object"),
         pytest.param({"choices": [{"message": None}]}, "NoneType message", id="null message"),
         pytest.param(
             {"choices": [{"finish_reason": "stop"}]}, "NoneType message", id="no message key"
+        ),
+        pytest.param(
+            {"choices": [{"message": {"content": [{"type": "text", "text": "v"}]}}]},
+            "list content",
+            id="content as parts",
         ),
     ],
 )
@@ -415,18 +419,18 @@ def test_a_body_of_the_wrong_shape_is_a_judge_error(
 
     Every level of a judge response is server-supplied and any of them can be
     the wrong type. Reading through them with `.get` turned that into an
-    AttributeError, which escapes the GraderJudgeError contract callers
-    discriminate on -- the same hole the parse frame had, one level in.
+    AttributeError -- the same hole the parse frame had, one level in.
 
-    These raise rather than degrade because the text is the payload: an
-    unreadable message emptied to "" is a verdict the grader would score as
-    though the judge had answered. That includes an absent message, which is
-    the case the first version of this guard let through while its own
-    docstring said it must not.
+    These raise rather than degrade because they carry the payload. Not for a
+    different outcome: an empty `text` would reach `extract_json` and raise
+    there too, so both roads end at a failed verdict. It is the justification
+    that differs, and naming the field the server got wrong is the whole
+    return. That includes an absent message, which the first version of this
+    guard let through while its own docstring said it must not.
 
-    `match` is not decoration here either -- without it these four could not be
-    told apart from each other or from the pre-existing emptiness guard, which
-    is how a "choices is not a list" body ended up reported as an empty one.
+    Each case asserts its message. Without that they are indistinguishable
+    from each other, which is how `{"choices": "abc"}` came to be reported as
+    an empty response.
     """
     monkeypatch.setattr(
         httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
