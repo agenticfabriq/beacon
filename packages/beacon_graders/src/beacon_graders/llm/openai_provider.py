@@ -153,19 +153,23 @@ class OpenAICompatibleProvider:
 
         That last line is drawn today and is not the only one there could be.
         ``finish_reason`` says why a reply ended, and two of its values say the
-        ending was not the model's doing: ``length`` means a token ceiling was
-        hit -- either the budget we set (``max_completion_tokens``, or
-        ``max_tokens`` on the legacy retry below) or the model's context window,
-        which no request field controls, so do not read it as "raise our budget"
-        -- and ``content_filter`` means the server refused.
+        ending was not the model's doing: ``length`` means some token ceiling
+        was hit, and ``content_filter`` means the server refused. Which ceiling
+        is not knowable from the field -- the budget we set
+        (``max_completion_tokens``, or ``max_tokens`` on the legacy retry
+        below), the model's context window, or, on reasoning models, the same
+        budget consumed entirely by hidden reasoning tokens. So do not read
+        ``length`` as "raise our budget"; for the context-window case that
+        makes the call fail harder.
         Both are counted against the model today, and this tracker has opinions
         about that shape of mistake -- a deferral is not a failure, an outage is
         not a wrong answer.
 
-        Note for whoever takes it up: this is NOT only about empty text.
-        ``length`` usually arrives WITH content, just cut short, so a fix that
-        triggers on an empty answer would still score truncated replies as
-        wrong ones -- which is the mistake being tracked, not the fix for it.
+        Note for whoever takes it up: do not build this on the presence or
+        absence of text. ``length`` arrives BOTH ways -- with content, cut
+        short, and with none at all when reasoning consumed the budget -- so
+        neither an empty-answer trigger nor a non-empty one separates the
+        cases. ``finish_reason`` is the only field that does.
         ``finish_reason`` goes into ``raw`` and nothing in the repo reads it, so
         neither case is recoverable downstream as things stand. Unexamined, not
         settled.
