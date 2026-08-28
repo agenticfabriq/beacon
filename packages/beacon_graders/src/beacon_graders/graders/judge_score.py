@@ -22,8 +22,9 @@ import math
 #     the 200 characters of response body `openai_provider` deliberately keeps,
 #     so it is bounded well above that rather than at the echo's limit
 #   * a JUSTIFICATION is the judge's own reasoning and is not bounded at all,
-#     including when it arrives as a bare string where an object was asked for
-#     -- that is a wrong shape AND the judge's words, and the words win
+#     including a bare string where an object was asked for -- that is a wrong
+#     shape AND the judge's words, so the message names the shape and shows
+#     the words whole rather than choosing between them
 _MAX_ECHO = 120
 _MAX_DIAGNOSTIC = 500
 
@@ -102,15 +103,6 @@ def criterion_score(payload: object) -> tuple[float, str] | None:
     return max(0.0, min(1.0, value)), justification
 
 
-def _looks_like_a_number(text: str) -> bool:
-    """True when a bare string is a stringified score rather than prose."""
-    try:
-        float(text)
-    except ValueError:
-        return False
-    return True
-
-
 def unscored_reason(payload: object) -> str:
     """Say WHY a criterion has no score, without claiming more than is true.
 
@@ -122,15 +114,17 @@ def unscored_reason(payload: object) -> str:
     """
     if payload is None:
         return "Missing criterion in judge output"
-    if isinstance(payload, str) and not _looks_like_a_number(payload):
-        # A bare string for a criterion is usually the judge explaining itself
-        # without scoring -- its own words, not a shape to echo, so it takes
-        # the justification path and its bound, not the echo's tight one.
-        #
-        # Unless it is a stringified score. `"0.8"` is a VALUE in the wrong
-        # shape, and reporting it as "Not scored by the judge: 0.8" would read
-        # as the judge's reasoning -- the same overclaim from the other side.
-        return unscored_reason({"justification": payload})
+    if isinstance(payload, str):
+        # A bare string is ambiguous by nature: `"no evidence to score"` is the
+        # judge explaining itself, `"0.8"` is a score in the wrong place, and
+        # `"80%"`, `"8/10"`, `"0.8 (good)"` sit between them. Classifying it
+        # picks a side and gets one of them wrong -- calling a value prose, or
+        # a justification a value. So say the shape and show the words: the
+        # operator gets both signals and nothing is thrown away or dressed up.
+        words = _as_words(payload)
+        if not words:
+            return "Criterion present in judge output but carries no usable score"
+        return f"Criterion in judge output is a bare string, not an object: {words}"
     if not isinstance(payload, dict):
         # The judge emitted something for this criterion, just not the object
         # the prompt asked for -- a bare `0.8`, a list. Calling that missing

@@ -197,39 +197,31 @@ def test_a_failure_message_keeps_the_upstream_body_the_provider_preserved() -> N
     assert "cut," not in quoted
 
 
-def test_a_bare_string_criterion_is_the_judges_words_not_a_shape_to_echo() -> None:
-    """It is both a wrong shape and the judge explaining itself.
+@pytest.mark.parametrize(
+    "text", ["0.8", "1", "80%", "8/10", "0.8 (good)", "no evidence to score against"]
+)
+def test_a_bare_string_is_reported_as_a_bare_string_and_shown_whole(text: str) -> None:
+    """Classifying it would have to pick a side, and get one of them wrong.
 
-    Routing it through the echo's tight bound cut the judge's reasoning at 120
-    characters and stored that as the only record -- the loss the split exists
-    to prevent, arriving through the branch meant for `0.8` and `[]`.
+    `"0.8"` is a value in the wrong place and `"no evidence"` is the judge
+    explaining itself; `"80%"` and `"8/10"` sit between. A `float()` test drew
+    the line through the middle of that and called `"80%"` prose. Naming the
+    shape and showing the words needs no line at all.
     """
+    reason = unscored_reason(text)
+
+    assert reason.startswith("Criterion in judge output is a bare string, not an object:")
+    assert text.strip() in reason
+
+
+def test_a_bare_string_justification_is_not_bounded() -> None:
+    """It is the judge's words, however it arrived, so it is not cut."""
     words = "no citations were present, so " * 20
 
     reason = unscored_reason(words)
 
     assert "cut," not in reason
-    assert reason == f"Not scored by the judge: {words.strip()}"
-
-
-@pytest.mark.parametrize("scalar", ["0.8", "1", " 0.5 ", "-2"])
-def test_a_stringified_score_is_an_off_shape_value_not_the_judges_reasoning(
-    scalar: str,
-) -> None:
-    """ "Not scored by the judge: 0.8" would read as prose the judge wrote.
-
-    It is a value in the wrong shape. Reporting it as reasoning is the same
-    overclaim the echo path exists to avoid, arriving from the other side, and
-    the repr quoting is what marks it as raw text rather than an explanation.
-    """
-    reason = unscored_reason(scalar)
-
-    assert reason.startswith("Criterion in judge output is not an object:")
-    assert repr(scalar) in reason
-
-
-def test_prose_is_still_routed_to_the_judges_words() -> None:
-    assert unscored_reason("no evidence to score against").startswith("Not scored by the judge:")
+    assert words.strip() in reason
 
 
 @pytest.mark.parametrize("blank", ["", "   "])
