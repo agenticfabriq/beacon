@@ -320,9 +320,10 @@ def test_an_unparseable_200_body_is_a_judge_error(
 
     `response.json()` raised whatever stdlib json raised -- JSONDecodeError for
     a non-JSON body, a bare ValueError for an integer literal over the digit
-    limit, RecursionError for one nested deeply enough -- straight past every
-    caller's except clause. Guarding the counters was only half of it while the
-    frame that produces the body was still open.
+    limit -- straight past every caller's except clause. Guarding the counters
+    was only half of it while the frame that produces the body was still open.
+    (RecursionError is the third of these and has its own test below, because
+    provoking it from a literal body is interpreter-dependent.)
 
     `match` is not decoration: with the int-string-digit limit disabled the
     4400-digit body parses fine, `generate` raises a different GraderJudgeError
@@ -365,3 +366,18 @@ def test_a_parse_that_exhausts_the_stack_is_a_judge_error(
 
     with pytest.raises(GraderJudgeError, match="unparseable body"):
         _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+
+def test_httpx_still_lets_the_decoder_s_own_errors_through() -> None:
+    """The guard rests on a dependency guarantee, so assert the guarantee.
+
+    `except (ValueError, RecursionError)` is only the right clause while
+    `Response.json()` propagates stdlib json's exceptions unwrapped. It does
+    today, but httpx is a floor here (`httpx>=0.27`), not a pin: an httpx that
+    swapped decoders or wrapped parse failures in a type of its own would leave
+    every other test in this file green while the guard stopped matching what
+    the real path raises. This is the one assertion that crosses the library
+    boundary, which is why it does not go through a monkeypatched post.
+    """
+    with pytest.raises(ValueError):  # noqa: PT011 -- the type IS the assertion
+        httpx.Response(200, content="not json at all").json()
