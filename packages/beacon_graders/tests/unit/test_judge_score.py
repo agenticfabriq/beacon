@@ -227,8 +227,18 @@ def test_a_bare_string_justification_is_not_bounded() -> None:
     assert words.strip() in reason
 
 
-@pytest.mark.parametrize("blank", ["", "   ", " " * 200])
-def test_a_wordless_bare_string_names_its_shape_without_claiming_which(blank: str) -> None:
+@pytest.mark.parametrize(
+    ("blank", "expected_echo"),
+    [
+        pytest.param("", "''", id="empty"),
+        pytest.param("   ", "'   '", id="spaces"),
+        pytest.param(" " * 118, "'" + " " * 118 + "'", id="just inside the bound"),
+        pytest.param(" " * 200, "'" + " " * 119 + "... (cut, 202 chars)", id="past the bound"),
+    ],
+)
+def test_a_wordless_bare_string_names_its_shape_without_claiming_which(
+    blank: str, expected_echo: str
+) -> None:
     """Otherwise it is byte-identical to the message for `{"score": null}`.
 
     The operator would get neither signal: not the words, since there are
@@ -237,12 +247,16 @@ def test_a_wordless_bare_string_names_its_shape_without_claiming_which(blank: st
     whitespace, which this module is careful about everywhere else -- so the
     message echoes what arrived instead of naming it.
     """
-    prefix = "Criterion in judge output is a bare string, not an object, with no words: "
-    reason = unscored_reason(blank)
-
-    assert reason == prefix + quote_judge_value(blank)
-    # A wordless string is an ECHO -- there are no judge's words in it to
-    # preserve -- so it takes the echo's bound, unlike a 500-word one, which
-    # is the judge's reasoning and is kept whole. The 200-space case is what
-    # makes that asymmetry visible rather than accidental.
-    assert ("cut," in reason) is (len(repr(blank)) > 120)
+    # Spelled out rather than computed with `quote_judge_value`, which is the
+    # function under test: calling it here would make this equality unable to
+    # fail for any change to how the echo renders, including one that dropped
+    # the repr and made `""` and `"   "` read identically -- the exact property
+    # the docstring above claims.
+    #
+    # A wordless string is an ECHO -- no judge's words in it to preserve -- so
+    # it takes the echo's 120 bound, unlike a 500-word one, which is the
+    # judge's reasoning and is kept whole. The two cases either side of the
+    # bound are what make that a pin rather than an is-it-bounded-at-all check.
+    assert unscored_reason(blank) == (
+        f"Criterion in judge output is a bare string, not an object, with no words: {expected_echo}"
+    )
