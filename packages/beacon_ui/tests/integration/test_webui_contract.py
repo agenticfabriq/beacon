@@ -158,22 +158,37 @@ def test_the_runner_recipe_does_not_teach_a_runner_to_claim_a_cost(field: str) -
     a claim about cost the runner following the recipe did not measure -- and a
     zero lands in the tokens column as a configuration that is free.
 
-    Matched as a pattern rather than one literal: the previous version of this
+    Matched as a pattern rather than one literal: an earlier version of this
     test pinned the exact string `"tokens_input": 0`, which a re-added output
     half or a different spacing would have walked straight past.
-    """
-    recipe = _runner_recipe(_page())
 
-    assert not re.search(rf'"{field}"\s*:\s*\d', recipe), (
-        f"the runner recipe must omit {field} rather than send a number"
+    Scanned over the whole page rather than the push recipe alone. Scoping it
+    to the recipe traded one weakness for another -- a sample payload added to
+    the CLI block, or to a second `<pre>`, would teach the same fabricated zero
+    with this green. The page has no other JSON literal for these fields; the
+    drill-down reads them as `detail.tokens_input`, which this does not match.
+
+    It matches a quoted JSON key only, so an unquoted `tokens_input: 0` or a
+    `--tokens-input 0` flag would still slip past. That is the shape the page
+    actually uses today, and pinning it is worth more than a looser pattern
+    that would fire on the drill-down's reads.
+    """
+    assert not re.search(rf'"{field}"\s*:\s*\d', _page()), (
+        f"no sample on the page may send {field} as a number"
     )
 
 
 def test_the_recipe_says_omitting_cost_is_how_you_report_not_measuring_it() -> None:
-    """Silence in a sample reads as an oversight unless the sample says why."""
+    """Silence in a sample reads as an oversight unless the sample says why.
+
+    Pinned as the contrast the operator has to come away with -- omitted and 0
+    are different claims -- rather than as fragments unrelated prose could
+    satisfy while the explanation itself went missing.
+    """
     recipe = _runner_recipe(_page())
 
-    assert "only if you" in recipe and "unrecorded" in recipe
+    assert "Omitted reads as unrecorded" in recipe
+    assert "0 reads as free" in recipe
 
 
 @pytest.mark.parametrize(

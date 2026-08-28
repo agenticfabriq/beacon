@@ -24,6 +24,12 @@ class ResultIngestIn(BaseModel):
     output_kind: str = "json"
     # Omitted means unmeasured, not free. A runner whose format carries no
     # per-item cost must not be made to assert zero.
+    #
+    # A zero that IS sent is believed. That differs on purpose from
+    # `_usage_counts` in the judge provider, which distrusts a zeroed usage
+    # block: there we are reading a third-party server that may auto-fill a
+    # field it never measured, here a caller is asserting a number over our own
+    # documented contract. Same value, different writer, different reading.
     tokens_input: int | None = Field(default=None, ge=0)
     tokens_output: int | None = Field(default=None, ge=0)
     runtime_ms: int = Field(default=0, ge=0)

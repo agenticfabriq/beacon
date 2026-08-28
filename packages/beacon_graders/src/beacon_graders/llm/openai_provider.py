@@ -8,6 +8,7 @@ endpoint is deployment configuration, not source).
 
 from __future__ import annotations
 
+import math
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -23,22 +24,30 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
-    """Return one usage counter, or None where the server reported none.
+    """Return one usage counter, or None where the server reported no number.
 
     Numeric strings count: some servers send ``"prompt_tokens": "12"`` and the
-    reading it stands for is a measurement either way.
+    reading it stands for is a measurement either way. Anything that is not a
+    finite, non-negative number is not a count -- and it has to fail to None
+    here rather than out of ``generate``, which callers discriminate on
+    ``GraderJudgeError``.
+
+    ``float()`` is the throwing step and it throws two ways: ``ValueError`` on
+    a string that is not a number, ``OverflowError`` on an int too large to
+    convert. Both are reachable, because httpx parses bodies with stdlib json,
+    which accepts bare ``Infinity`` and ``NaN`` tokens and integers of any
+    length.
     """
     value = usage.get(key)
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
         return None
-    if isinstance(value, int | float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(float(value))
-        except ValueError:
-            return None
-    return None
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    return int(number)
 
 
 def _usage_counts(usage: Mapping[str, Any]) -> tuple[int | None, int | None]:
@@ -51,14 +60,22 @@ def _usage_counts(usage: Mapping[str, Any]) -> tuple[int | None, int | None]:
     A zeroed block is the same absence wearing a number. An LLM call cannot
     consume zero prompt tokens, so a 0 there is a server filling in a field it
     did not measure -- the reading migration 0020 applies to stored zeros, and
-    unlike those rows nothing would come along later to clean this one up. A
-    zero completion count is only unmeasured when the prompt half is missing
-    too; on its own it can be a real empty reply.
+    unlike those rows nothing would come along later to clean this one up. An
+    omitted ``prompt_tokens`` is that same missing half, so both cases have to
+    take the branch. A zero completion count survives only when the prompt half
+    was actually counted; on its own an empty reply is a real outcome.
+
+    This distrust is specific to a third-party server auto-filling a field it
+    did not measure. It is NOT the rule at the ingest boundary, where a runner
+    that sends 0 is a caller asserting a number and is believed -- see
+    ``schemas/ingest.py``. Same value, different writer, different reading.
     """
     prompt = _usage_count(usage, "prompt_tokens")
     completion = _usage_count(usage, "completion_tokens")
     if prompt == 0:
-        return None, (None if completion == 0 else completion)
+        prompt = None
+    if completion == 0 and prompt is None:
+        completion = None
     return prompt, completion
 
 

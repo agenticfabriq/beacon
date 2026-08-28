@@ -221,3 +221,86 @@ def test_a_usage_counter_sent_as_a_string_is_still_a_count(
 
     assert response.tokens_input == 12
     assert response.tokens_output == 3
+
+
+def test_a_zero_completion_count_with_no_prompt_count_is_not_a_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitting `prompt_tokens` is the prompt half missing, same as sending 0.
+
+    The zero-is-absence rule keyed on `prompt == 0` and let an omitted prompt
+    fall straight through, so `{"completion_tokens": 0}` -- the block these
+    servers already send, carrying the one value the rule exists to distrust --
+    came back as a measured zero output.
+    """
+    body = {
+        "id": "r",
+        "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}],
+        "usage": {"completion_tokens": 0},
+    }
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input is None
+    assert response.tokens_output is None
+
+
+@pytest.mark.parametrize(
+    # float("inf") is absent on purpose: it cannot be JSON-encoded to build the
+    # body. The unquoted-Infinity path has its own test below, over raw content.
+    "value",
+    ["Infinity", "inf", "1e400", "nan", "NaN", "twelve", 10**400, -5],
+)
+def test_a_usage_counter_that_is_not_a_finite_number_is_no_count_at_all(
+    monkeypatch: pytest.MonkeyPatch, value: object
+) -> None:
+    """Parsing must fail to None, never out of `generate` as OverflowError.
+
+    Callers discriminate on GraderJudgeError. `int(float("Infinity"))` raises
+    OverflowError, which the ValueError-only guard let escape -- and stdlib
+    json, which httpx uses, parses a bare `Infinity` token into a float, so the
+    numeric path reaches it too. `float()` raises the same on an int too large
+    to convert, which the earlier `int(value)` branch had handled: widening the
+    parse to strings is what put every int through `float()`.
+
+    A negative count is not a count either. `JudgeResponse` carries no `ge=0`
+    the way the ingest boundary does, and the value lands in the verdict
+    details a grader writes.
+    """
+    body = {
+        "id": "r",
+        "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": value, "completion_tokens": 3},
+    }
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input is None
+    assert response.tokens_output == 3
+
+
+def test_a_bare_infinity_token_in_the_body_does_not_escape_as_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stdlib json parses `Infinity` unquoted; it must not reach int()."""
+    raw = (
+        '{"id": "r", "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}], '
+        '"usage": {"prompt_tokens": Infinity, "completion_tokens": 3}}'
+    )
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, *, json, headers, timeout: httpx.Response(
+            200, content=raw, headers={"content-type": "application/json"}
+        ),
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input is None
