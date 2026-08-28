@@ -392,3 +392,69 @@ def test_a_parse_failure_still_arrives_as_a_valueerror() -> None:
     """
     with pytest.raises(ValueError):
         httpx.Response(200, content="not json at all").json()
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        pytest.param({"choices": [None]}, "a null choice", id="null choice"),
+        pytest.param({"choices": "abc"}, "choices as a string", id="choices not a list"),
+        pytest.param({"choices": [3]}, "a choice that is not an object", id="scalar choice"),
+        pytest.param(
+            {"choices": [{"message": "hi"}]}, "message as a string", id="message not an object"
+        ),
+    ],
+)
+def test_a_body_of_the_wrong_shape_is_a_judge_error(
+    monkeypatch: pytest.MonkeyPatch, body: dict[str, Any], why: str
+) -> None:
+    """Parsing as JSON is not the same as being the response we expect.
+
+    Every level of a judge response is server-supplied and any of them can be
+    the wrong type. Reading through them with `.get` turned that into an
+    AttributeError, which escapes the GraderJudgeError contract callers
+    discriminate on -- the same hole the parse frame had, one level in.
+
+    These raise rather than degrade because the text is the payload: an
+    unreadable message emptied to "" is a verdict the grader would score as
+    though the judge had answered.
+    """
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    with pytest.raises(GraderJudgeError):
+        _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+
+def test_a_missing_usage_block_is_still_not_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Absent cost is a reading, not a malformed response."""
+    body = {"id": "r", "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}]}
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.text == "v"
+
+
+def test_a_malformed_usage_block_is_unrecorded_cost_not_a_failed_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cost is the one level where degrading is the right reading.
+
+    The judge answered; only its accounting is unreadable. Absent cost is
+    exactly what the nullable columns exist to express, so this reports the
+    verdict with no token count rather than discarding a usable response.
+    """
+    body = {"choices": [{"message": {"content": "v"}, "finish_reason": "stop"}], "usage": [1, 2]}
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.text == "v"
+    assert response.tokens_input is None
+    assert response.tokens_output is None

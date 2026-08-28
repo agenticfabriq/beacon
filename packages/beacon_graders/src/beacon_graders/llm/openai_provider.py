@@ -23,6 +23,23 @@ if TYPE_CHECKING:
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
+def _object(value: object) -> dict[str, Any]:
+    """Return ``value`` when it is a JSON object, an empty one otherwise.
+
+    Every level of a judge response is server-supplied and any of them can come
+    back the wrong type. Reading through them with ``.get`` turns that into an
+    AttributeError, which escapes the GraderJudgeError contract callers
+    discriminate on -- the same hole the parse frame had, one level in.
+
+    Used only where absent is a reading the caller already handles, which is
+    ``usage``: cost nobody reported is the case this whole column exists to
+    express. It is NOT used for ``choices`` or ``message``, where degrading
+    would hand the grader an empty verdict it would score as if the judge had
+    answered; those raise.
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
     """Return one usage counter, or None where the server reported no number.
 
@@ -129,12 +146,17 @@ class OpenAICompatibleProvider:
             payload["max_tokens"] = request.max_tokens
             body = self._post_with_retries(payload)
 
-        choices = body.get("choices") or []
-        if not choices:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
             raise GraderJudgeError("Empty response from judge endpoint")
-        text = str((choices[0].get("message") or {}).get("content") or "")
-        usage = body.get("usage") or {}
-        tokens_input, tokens_output = _usage_counts(usage)
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            raise GraderJudgeError(f"Judge endpoint returned a {type(choice).__name__} choice")
+        message = choice.get("message")
+        if message is not None and not isinstance(message, dict):
+            raise GraderJudgeError(f"Judge endpoint returned a {type(message).__name__} message")
+        text = str(_object(message).get("content") or "")
+        tokens_input, tokens_output = _usage_counts(_object(body.get("usage")))
         return JudgeResponse(
             text=text,
             tokens_input=tokens_input,
@@ -142,7 +164,7 @@ class OpenAICompatibleProvider:
             model_version=self._model,
             raw={
                 "id": body.get("id"),
-                "finish_reason": choices[0].get("finish_reason"),
+                "finish_reason": choice.get("finish_reason"),
             },
         )
 
