@@ -47,8 +47,10 @@ def _object(value: object) -> dict[str, Any]:
     and an error leaves the denominator rather than counting against the model.
 
     A well-formed body reporting no text -- ``"content": null``, or ``""``, or
-    the key absent -- is deliberately NOT that case and still grades FAIL: the
-    server did its job and said the model produced nothing.
+    the key absent -- is deliberately NOT that case and still grades FAIL. All
+    that is known at this level is that the response was well formed and
+    carried no text; whether the model answered with nothing or was cut off is
+    the open question ``generate`` describes.
 
     Shape-versus-payload is the line drawn TODAY; see ``generate`` for the one
     that is still open.
@@ -152,27 +154,20 @@ class OpenAICompatibleProvider:
         no text returns ``""``, which downstream grades against the model.
 
         That last line is drawn today and is not the only one there could be.
-        ``finish_reason`` says why a reply ended, and two of its values say the
-        ending was not the model's doing: ``length`` means some token ceiling
-        was hit, and ``content_filter`` means the server refused. Which ceiling
-        is not knowable from the field -- the budget we set
-        (``max_completion_tokens``, or ``max_tokens`` on the legacy retry
-        below), the model's context window, or, on reasoning models, the same
-        budget consumed entirely by hidden reasoning tokens. So do not read
-        ``length`` as "raise our budget"; for the context-window case that
-        makes the call fail harder.
-        Both are counted against the model today, and this tracker has opinions
-        about that shape of mistake -- a deferral is not a failure, an outage is
-        not a wrong answer.
+        ``finish_reason`` reports why a reply ended, and two of its values --
+        ``length`` and ``content_filter`` -- say the ending came from a ceiling
+        or a refusal rather than from the model answering badly. Both are
+        counted against the model today, and this tracker has opinions about
+        that shape of mistake: a deferral is not a failure, an outage is not a
+        wrong answer.
 
-        Note for whoever takes it up: do not build this on the presence or
-        absence of text. ``length`` arrives BOTH ways -- with content, cut
-        short, and with none at all when reasoning consumed the budget -- so
-        neither an empty-answer trigger nor a non-empty one separates the
-        cases. ``finish_reason`` is the only field that does.
-        ``finish_reason`` goes into ``raw`` and nothing in the repo reads it, so
-        neither case is recoverable downstream as things stand. Unexamined, not
-        settled.
+        Unexamined, not settled, and deliberately not prejudged here -- what
+        each value should grade as depends on the endpoint and the model, which
+        this repo does not know. Two things that are true from here: nothing
+        reads ``finish_reason`` (``generate`` puts it in ``raw`` and no caller
+        touches it), so the distinction is unrecoverable downstream as things
+        stand; and it cannot be reconstructed from the text, because ``length``
+        arrives both with content and without.
         """
         messages: list[dict[str, str]] = []
         if request.system:
