@@ -8,22 +8,27 @@ from __future__ import annotations
 
 import math
 
-# Judge output is quoted into `Verdict.justification`, an unbounded text column,
-# and the container note below is repeated once per criterion in the rubric.
-_MAX_QUOTED = 120
+# Everything here is quoted into `Verdict.justification`, an unbounded text
+# column, once per criterion -- and `hierarchical_rubric` repeats its
+# malformed-container note across every criterion in the rubric.
+_MAX_QUOTED = 500
 
 
-def quote_judge_value(value: object) -> str:
-    """Render a judge value for an operator, cut to a length, and SAY it was cut.
+def _cut(rendered: str, limit: int = _MAX_QUOTED) -> str:
+    """Bound a quoted value and SAY when it was bounded.
 
     A silent cut is its own small overclaim: ``{'score': 12345678`` reads as a
     complete value the judge never sent. The marker is the difference between
     showing less and showing something else.
     """
-    rendered = repr(value)
-    if len(rendered) <= _MAX_QUOTED:
+    if len(rendered) <= limit:
         return rendered
-    return f"{rendered[:_MAX_QUOTED]}... (cut, {len(rendered)} chars)"
+    return f"{rendered[:limit]}... (cut, {len(rendered)} chars)"
+
+
+def quote_judge_value(value: object) -> str:
+    """Render a judge value for an operator, bounded and marked when cut."""
+    return _cut(repr(value), 120)
 
 
 def _as_words(value: object) -> str:
@@ -34,14 +39,17 @@ def _as_words(value: object) -> str:
     instead loses the ones it did say in another shape -- a list of bullet
     points is still an explanation, and the drill-down used to show it.
 
-    So the line is emptiness, not type: anything falsy carries no words and
-    renders as nothing -- ``None``, ``""``, whitespace, ``[]``, ``{}``,
-    ``false``, ``0``. Anything else renders as itself. Quoting the judge an
-    empty list is the same overclaim as quoting it the literal "None".
+    So the line is emptiness, not type. Anything falsy carries no words --
+    ``None``, ``""``, ``[]``, ``{}``, ``false``, ``0`` -- and so does a string
+    that is only whitespace, which is not falsy and is emptied by the strip
+    rather than by the guard. Everything else renders as itself, bounded,
+    because a judge's justification is the largest thing quoted here and it
+    lands in an unbounded column once per criterion.
     """
     if not value:
         return ""
-    return value.strip() if isinstance(value, str) else str(value)
+    rendered = value.strip() if isinstance(value, str) else str(value)
+    return _cut(rendered)
 
 
 def criterion_score(payload: object) -> tuple[float, str] | None:

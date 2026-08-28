@@ -70,11 +70,12 @@ def test_the_judges_own_words_are_carried_through() -> None:
 
 @pytest.mark.parametrize("empty", [None, "", "   ", [], {}, False, 0])
 def test_an_empty_justification_is_not_quoted_as_an_explanation(empty: object) -> None:
-    """Anything falsy carries no words, whatever its type.
+    """Anything empty carries no words, whatever its type.
 
     `str()` on several of these yields a truthy string -- "None", "[]", "{}",
-    "False" -- which would be quoted back as something the judge said.
-    Emptiness is the line, not type, so whitespace and `0` go the same way.
+    "False" -- which would be quoted back as something the judge said. `0` is
+    falsy and goes the same way. Whitespace is NOT falsy; the strip is what
+    empties it, which is a separate mechanism worth not conflating.
     """
     reason = unscored_reason({"score": None, "justification": empty})
 
@@ -150,3 +151,31 @@ def test_the_cut_reports_the_real_length() -> None:
     quoted = quote_judge_value(value)
 
     assert f"{len(repr(value))} chars" in quoted
+
+
+def test_a_huge_justification_is_bounded_before_it_reaches_the_column() -> None:
+    """The judge's own words are the largest thing quoted here.
+
+    `Verdict.justification` is an unbounded text column and this is written to
+    it once per criterion, so a judge replying with a megabyte of prose would
+    store it per criterion. The two malformed-shape echoes were capped first;
+    this is the path an actual judge is most likely to blow up.
+    """
+    huge = "why " * 5000
+
+    scored = criterion_score({"score": 0.5, "justification": huge})
+    reason = unscored_reason({"score": None, "justification": huge})
+
+    assert scored is not None
+    assert len(scored[1]) < 700
+    assert "cut," in scored[1]
+    assert len(reason) < 700
+    assert "cut," in reason
+
+
+def test_whitespace_is_emptied_by_the_strip_not_by_falsiness() -> None:
+    """`not "   "` is False, so the docstring's mechanism has to say which."""
+    assert bool("   ") is True
+    assert unscored_reason({"score": None, "justification": "   "}) == (
+        "Criterion present in judge output but carries no usable score"
+    )
