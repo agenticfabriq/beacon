@@ -31,8 +31,8 @@ class ResultRowOut(BaseModel):
     candidate_row_count: int | None = None
     gold_row_count: int | None = None
     mismatch_kind: str | None = None
-    tokens_input: int
-    tokens_output: int
+    tokens_input: int | None
+    tokens_output: int | None
     runtime_ms: int
     created_at: datetime | None = None
 
@@ -84,8 +84,8 @@ class ResultDetailOut(BaseModel):
     error: str | None = None
     output: dict[str, Any]
     gold: dict[str, Any]
-    tokens_input: int
-    tokens_output: int
+    tokens_input: int | None
+    tokens_output: int | None
     runtime_ms: int
     created_at: datetime | None = None
     verdicts: list[VerdictOut]

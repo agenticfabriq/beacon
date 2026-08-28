@@ -326,7 +326,11 @@ class MnemiqInProcessSUT:
             output=output,
             output_kind="sql",
             trace=root,
-            tokens_input=0,
+            # mnemiq reports one number and it is the output half. The prompt
+            # half is never measured, so it stays unrecorded rather than 0 --
+            # a total that assumes a free prompt understates a schema-carrying
+            # SQL agent by more than it reports.
+            tokens_input=None,
             tokens_output=max(tokens_used, 0),
             runtime_ms=runtime_ms,
             error=error,

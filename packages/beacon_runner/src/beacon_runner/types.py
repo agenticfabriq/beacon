@@ -90,8 +90,11 @@ class ExecutionResult(BaseModel):
     output: dict[str, Any]
     output_kind: str = "json"
     trace: ExecutionStep
-    tokens_input: int = 0
-    tokens_output: int = 0
+    # None means this SUT did not measure the cost, which is a different claim
+    # from measuring it as zero -- the default has to be the absence, or every
+    # SUT that cannot count tokens silently reports a free configuration.
+    tokens_input: int | None = None
+    tokens_output: int | None = None
     runtime_ms: int = 0
     error: str | None = None
     # The solution was asked and chose not to answer. Distinct from `error`,

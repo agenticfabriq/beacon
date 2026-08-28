@@ -129,11 +129,16 @@ class RetentionWorker:
 def _result_metrics(result: Result | None) -> dict[str, object]:
     if result is None:
         return {}
+    # Cost is nullable, and a total needs both halves: summing a recorded
+    # output against an unrecorded prompt would report a number smaller than
+    # the truth in a summary that outlives the results it summarises.
+    tokens_in, tokens_out = result.tokens_input, result.tokens_output
+    total = tokens_in + tokens_out if tokens_in is not None and tokens_out is not None else None
     return {
         "latency_ms": result.runtime_ms,
-        "tokens_in": result.tokens_input,
-        "tokens_out": result.tokens_output,
-        "tokens": result.tokens_input + result.tokens_output,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "tokens": total,
         "outcome": _stored_value(result.outcome) if result.outcome is not None else None,
     }
 

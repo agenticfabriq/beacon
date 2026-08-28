@@ -9,6 +9,7 @@ from uuid import UUID  # noqa: TC003
 
 from beacon_ablation.metrics import (
     gradeable_results,
+    median_total_tokens,
     min_attempts_per_task,
     suite_pass_at_k,
     suite_pass_hat_k,
@@ -88,7 +89,6 @@ def _summary(run: Run, session: Session) -> RunSummaryOut:
     graded = gradeable_results(results)
     n_errors = n_items - len({result.item_id for result in graded})
     n_deferred = len({r.item_id for r in graded if r.outcome == VerdictOutcome.DEFER})
-    token_totals = [result.tokens_input + result.tokens_output for result in results]
     latencies = [result.runtime_ms for result in results]
 
     return RunSummaryOut(
@@ -96,7 +96,7 @@ def _summary(run: Run, session: Session) -> RunSummaryOut:
         pass_at_3=_pass_at_k(graded, k=3),
         pass_at_5=_pass_at_k(graded, k=5),
         pass_hat_3=_pass_hat_k(graded, k=3),
-        median_tokens=float(median(token_totals)) if token_totals else None,
+        median_tokens=median_total_tokens(results),
         median_latency_ms=float(median(latencies)) if latencies else None,
         n_items=n_items,
         n_errors=n_errors,

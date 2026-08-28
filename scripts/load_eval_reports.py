@@ -246,9 +246,12 @@ def ingest_payload(record: ReportRecord, *, item_id: str, engine: str) -> dict[s
         "attempt_idx": 0,
         "output": output,
         "output_kind": "sql",
-        # A run-level token total cannot be divided across items honestly.
-        "tokens_input": 0,
-        "tokens_output": 0,
+        # A run-level token total cannot be divided across items honestly, and
+        # writing 0 does not decline to divide it -- it claims the item was
+        # free. The run total is kept in the run's config extras as `run_tokens`,
+        # which is where it is true.
+        "tokens_input": None,
+        "tokens_output": None,
         "runtime_ms": record.runtime_ms,
         "deferred": record.deferred,
         "error": "runner reported an error for this item" if record.errored else None,

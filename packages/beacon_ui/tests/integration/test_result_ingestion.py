@@ -160,6 +160,40 @@ def test_a_declined_answer_stays_declined_in_storage(
     assert [row.output.get("deferred") for row in stored] == [True]
 
 
+def test_a_push_that_omits_cost_records_no_cost_rather_than_zero(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """A runner that cannot measure tokens must not be made to claim zero.
+
+    ``tokens_input`` defaulted to 0, so every push that left it out asserted a
+    free configuration -- and the matrix medians that into a 0 in the tokens
+    column, beside models whose cost is real. Absent has to stay absent all the
+    way to the column.
+    """
+    run_id, item_id = _seed(session, world)
+    body = _payload(item_id, "yes")
+    del body["tokens_input"]
+    del body["tokens_output"]
+
+    response = _push(api_client, world, run_id, body)
+
+    assert response.status_code == 200, response.text
+    stored = ResultRepo(session).list_for_run(UUID(run_id))
+    assert [(row.tokens_input, row.tokens_output) for row in stored] == [(None, None)]
+
+
+def test_a_push_that_states_zero_cost_is_believed(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """Omitted and zero are different claims, so they must not collapse."""
+    run_id, item_id = _seed(session, world)
+
+    _push(api_client, world, run_id, _payload(item_id, "yes", tokens_input=0, tokens_output=0))
+
+    stored = ResultRepo(session).list_for_run(UUID(run_id))
+    assert [(row.tokens_input, row.tokens_output) for row in stored] == [(0, 0)]
+
+
 def test_pushing_marks_the_run_running(
     api_client: TestClient, world: _World, session: Session
 ) -> None:

@@ -140,8 +140,14 @@ class Result(Base, IdMixin, TimestampsMixin):
     attempt_idx: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     output_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="json")
-    tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # NULL means the writer had no measurement, which is not the same claim as
+    # zero: both file importers push results whose report format carries no
+    # per-item token count, and a 0 there reaches the matrix as a median of 0
+    # and reads as a configuration that costs nothing.
+    tokens_input: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    tokens_output: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # Not nullable, and deliberately: every report format carries ``ms`` and
+    # every runner path measures elapsed time, so there is no absence to say.
     runtime_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[ResultStatus] = mapped_column(String(20), nullable=False)
     outcome: Mapped[VerdictOutcome | None] = mapped_column(String(20), nullable=True)

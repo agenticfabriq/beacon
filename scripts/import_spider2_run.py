@@ -334,8 +334,9 @@ def main() -> int:
                         output=output,
                         output_kind="sql",
                         trace=ExecutionStep(uuid="import", name="import", level="workflow"),
-                        tokens_input=0,
-                        tokens_output=0,
+                        # The report format carries no per-item token count.
+                        tokens_input=None,
+                        tokens_output=None,
                         runtime_ms=int(row.get("ms") or 0),
                     )
                     if grader.applicable(shim_item, shim_result):
@@ -365,8 +366,9 @@ def main() -> int:
                     attempt_idx=0,
                     output=output,
                     output_kind="sql",
-                    tokens_input=0,
-                    tokens_output=0,
+                    # The report format carries no per-item token count.
+                    tokens_input=None,
+                    tokens_output=None,
                     runtime_ms=int(row.get("ms") or 0),
                     status=(ResultStatus.ERROR if outcome == "error" else ResultStatus.COMPLETED),
                     outcome=verdict,

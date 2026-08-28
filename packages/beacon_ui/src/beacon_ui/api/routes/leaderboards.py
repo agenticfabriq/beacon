@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from beacon_ablation.metrics import (
     gradeable_results,
+    median_total_tokens,
     min_attempts_per_task,
     suite_pass_at_k,
 )
@@ -40,8 +41,8 @@ class _ResultRow:
     solution_version: str
     item_id: str
     attempt_idx: int
-    tokens_input: int
-    tokens_output: int
+    tokens_input: int | None
+    tokens_output: int | None
     runtime_ms: int
     outcome: VerdictOutcome | str | None
 
@@ -150,9 +151,8 @@ def _rows_for_metric(
             if min_attempts_per_task(graded) >= _K_LEADERBOARD
             else None
         )
-        token_totals = [row.tokens_input + row.tokens_output for row in group_rows]
         latencies = [row.runtime_ms for row in group_rows]
-        median_tokens = float(median(token_totals)) if token_totals else None
+        median_tokens = median_total_tokens(group_rows)
         median_latency_ms = float(median(latencies)) if latencies else None
         cost_adjusted = (
             _safe_ratio(pass_at_3, median_tokens)

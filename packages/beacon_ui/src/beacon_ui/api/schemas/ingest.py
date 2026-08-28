@@ -22,8 +22,10 @@ class ResultIngestIn(BaseModel):
     attempt_idx: int = Field(default=0, ge=0)
     output: dict[str, Any]
     output_kind: str = "json"
-    tokens_input: int = Field(default=0, ge=0)
-    tokens_output: int = Field(default=0, ge=0)
+    # Omitted means unmeasured, not free. A runner whose format carries no
+    # per-item cost must not be made to assert zero.
+    tokens_input: int | None = Field(default=None, ge=0)
+    tokens_output: int | None = Field(default=None, ge=0)
     runtime_ms: int = Field(default=0, ge=0)
     # The solution was asked and declined. Composes to DEFER, not FAIL.
     deferred: bool = False

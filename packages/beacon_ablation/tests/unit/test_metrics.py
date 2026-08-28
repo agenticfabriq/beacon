@@ -22,8 +22,8 @@ class _FakeResult:
     task_id: str
     attempt_idx: int
     verdict: str
-    tokens_input: int = 0
-    tokens_output: int = 0
+    tokens_input: int | None = None
+    tokens_output: int | None = None
     runtime_ms: int = 0
 
 
@@ -142,6 +142,35 @@ def test_median_total_tokens() -> None:
 
 def test_median_total_tokens_empty() -> None:
     assert median_total_tokens([]) is None
+
+
+def test_a_result_with_unrecorded_tokens_is_not_a_result_that_cost_nothing() -> None:
+    """Unmeasured cost used to be stored as 0, which drags the median down."""
+    results = [
+        _FakeResult("t1", 0, "PASS", tokens_input=100, tokens_output=50),
+        _FakeResult("t2", 0, "PASS", tokens_input=None, tokens_output=None),
+        _FakeResult("t3", 0, "PASS", tokens_input=200, tokens_output=100),
+    ]
+
+    assert median_total_tokens(results) == 225.0
+
+
+def test_half_a_measurement_is_not_a_total() -> None:
+    """Output tokens with input unrecorded understates the total, badly.
+
+    The in-process SUT reports one number and it is the output half; calling
+    that the total claims the prompt was free, and for a schema-carrying SQL
+    prompt the input half is usually the larger one.
+    """
+    results = [_FakeResult("t1", 0, "PASS", tokens_input=None, tokens_output=9000)]
+
+    assert median_total_tokens(results) is None
+
+
+def test_no_result_recorded_its_tokens_is_unknown_not_zero() -> None:
+    results = [_FakeResult("t1", 0, "PASS"), _FakeResult("t2", 0, "PASS")]
+
+    assert median_total_tokens(results) is None
 
 
 def test_median_runtime_ms() -> None:

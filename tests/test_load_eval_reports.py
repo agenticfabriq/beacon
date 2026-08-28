@@ -99,12 +99,18 @@ def test_an_errored_item_carries_an_error_rather_than_a_deferral() -> None:
     assert payload["error"] is not None
 
 
-def test_per_item_tokens_are_zero_because_the_format_only_has_a_run_total() -> None:
-    """Dividing a run total across items would invent per-item cost data."""
+def test_per_item_tokens_are_unrecorded_rather_than_zero() -> None:
+    """The format has only a run total, and zero is not the way to say so.
+
+    Dividing a run total across items would invent per-item cost data -- but
+    writing 0 invents it too, and more quietly: it reaches the matrix as a
+    median of 0 and reads as a configuration that costs nothing. The run total
+    is kept in the run's config extras, where it is true.
+    """
     payload = ingest_payload(_record(), item_id="i", engine="duckdb")
 
-    assert payload["tokens_input"] == 0
-    assert payload["tokens_output"] == 0
+    assert payload["tokens_input"] is None
+    assert payload["tokens_output"] is None
 
 
 def test_right_data_in_the_wrong_shape_is_agreement_not_disagreement() -> None:

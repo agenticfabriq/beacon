@@ -94,12 +94,19 @@ def test_eval_item_minimal_construction() -> None:
 
 
 def test_execution_result_defaults() -> None:
+    """An SUT that reports no cost has not reported a cost of zero.
+
+    The default used to be 0, so every SUT that cannot count tokens asserted a
+    free configuration -- and it arrived in the matrix as a median of 0 beside
+    models whose cost is real.
+    """
     result = ExecutionResult(
         output={"answer": "4"},
         output_kind="answer",
         trace=ExecutionStep(uuid="r", name="root", level="workflow", status="COMPLETED"),
     )
-    assert result.tokens_input == 0
+    assert result.tokens_input is None
+    assert result.tokens_output is None
     assert result.error is None
 
 

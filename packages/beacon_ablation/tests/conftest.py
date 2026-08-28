@@ -106,8 +106,10 @@ class SweepResult:
     item_id: str
     attempt_idx: int
     outcome: str
-    tokens_input: int
-    tokens_output: int
+    # Mirrors the persisted row: cost is nullable because an SUT that cannot
+    # count tokens has nothing to report, and zero is a different claim.
+    tokens_input: int | None
+    tokens_output: int | None
     runtime_ms: int
 
 

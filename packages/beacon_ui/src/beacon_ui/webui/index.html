@@ -494,6 +494,13 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g,
   (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const pct = (value) => (value === null || value === undefined) ? "n/a" : (value * 100).toFixed(1) + "%";
 const short = (value) => String(value ?? "").slice(0, 8);
+// `null + null` is 0 in JavaScript, so an unrecorded cost must never reach a
+// sum -- it would print "0 tokens" for an attempt nobody measured. A total
+// needs both halves: an output count with the prompt assumed free understates
+// a schema-carrying SQL agent by more than it reports.
+const tokenTotal = (input, output) =>
+  (input === null || input === undefined || output === null || output === undefined)
+    ? "tokens not recorded" : (input + output) + " tokens";
 const KW = /\b(SELECT|FROM|WHERE|JOIN|INNER|LEFT|ON|AS|AND|OR|NOT|NULL|IS|ORDER|BY|GROUP|HAVING|LIMIT|DISTINCT|COUNT|MAX|MIN|SUM|AVG|CAST|RANK|OVER|NULLIF|DESC|ASC|BETWEEN|IN|LIKE|CASE|WHEN|THEN|ELSE|END)\b/g;
 const sqlfmt = (sql) => esc(sql)
   .replace(KW, (m) => `<span class="kw">${m}</span>`)
@@ -852,7 +859,7 @@ const openItem = guard(async (runId, itemId) => {
       <span>item ${short(itemId)}</span>
       ${detail.difficulty ? `<span class="tag">${esc(detail.difficulty)}</span>` : ""}
       ${detail.database ? `<span>${esc(detail.database)}</span>` : ""}
-      <span>${detail.tokens_input + detail.tokens_output} tokens</span>
+      <span>${tokenTotal(detail.tokens_input, detail.tokens_output)}</span>
       <span>${detail.runtime_ms}ms</span></div></div>` + why + factsNote +
     `<div class="split">
       <div class="pane ours ${detail.outcome === "PASS" ? "ok" : ""}">

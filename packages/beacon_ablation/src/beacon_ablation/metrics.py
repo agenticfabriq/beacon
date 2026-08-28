@@ -150,9 +150,22 @@ def suite_pass_hat_k(results: Iterable[object], *, k: int) -> float | None:
 
 
 def median_total_tokens(results: Iterable[object]) -> float | None:
-    """Return median input-plus-output tokens, or None for empty input."""
+    """Return median input-plus-output tokens over the results that recorded them.
+
+    ``None`` when none did. Token cost is nullable because a runner whose
+    report format carries no per-item count has nothing to report, and a result
+    that recorded no cost is not a result that cost nothing -- averaging those
+    in as zeros drags the median toward a configuration nobody measured.
+
+    A total needs BOTH halves. The in-process SUT reports one number and it is
+    the output half; calling that the total assumes a free prompt, and for a
+    schema-carrying SQL prompt the input half is usually the larger one.
+    """
     totals = [
-        _int_attr(result, "tokens_input") + _int_attr(result, "tokens_output") for result in results
+        result_input + result_output
+        for result in results
+        if isinstance(result_input := _get_attr(result, "tokens_input"), int)
+        and isinstance(result_output := _get_attr(result, "tokens_output"), int)
     ]
     if not totals:
         return None

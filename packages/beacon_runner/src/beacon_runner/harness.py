@@ -219,8 +219,8 @@ class HarnessRunner:
                     status="FAILED",
                     error=str(exc)[:1000],
                 ),
-                tokens_input=0,
-                tokens_output=0,
+                # The SUT raised: cost is unmeasured, not zero. Elapsed time is
+                # real -- we timed the attempt that failed.
                 runtime_ms=elapsed_ms,
                 error=f"sut_invoke_raised: {type(exc).__name__}: {exc!s}"[:1000],
             )

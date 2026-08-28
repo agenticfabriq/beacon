@@ -85,8 +85,10 @@ class SweepResult:
     item_id: str
     attempt_idx: int
     outcome: str
-    tokens_input: int
-    tokens_output: int
+    # None where the SUT did not measure cost; median_total_tokens skips those
+    # rather than averaging them in as zeros.
+    tokens_input: int | None
+    tokens_output: int | None
     runtime_ms: int
 
 

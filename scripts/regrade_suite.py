@@ -141,8 +141,11 @@ def main() -> int:
                         output=dict(result.output or {}),
                         output_kind=result.output_kind,
                         trace=ExecutionStep(uuid="regrade", name="regrade", level="workflow"),
-                        tokens_input=0,
-                        tokens_output=0,
+                        # A regrade re-reads a stored output; it spends nothing
+                        # and measures nothing, so it must not overwrite the
+                        # original attempt's cost with a zero.
+                        tokens_input=result.tokens_input,
+                        tokens_output=result.tokens_output,
                         runtime_ms=int(result.runtime_ms or 0),
                     )
                     if not grader.applicable(shim_item, shim_result):

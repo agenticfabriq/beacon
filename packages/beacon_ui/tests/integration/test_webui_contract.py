@@ -123,3 +123,20 @@ def test_a_failed_matrix_load_says_the_numbers_are_unknown() -> None:
     body = re.search(r"const loadMatrix = guard\(async \(\) => \{(.*?)\n\}\);", page, re.S)
     assert body, "loadMatrix must be one guarded block"
     assert "matrixUnknown" in body.group(1), "loadMatrix must call it when the fetch throws"
+
+
+def test_the_drilldown_does_not_add_two_token_fields_that_may_be_null() -> None:
+    """`null + null` is `0` in JavaScript, so the naive sum invents a zero.
+
+    Unrecorded cost is null all the way from the importer to the wire, and the
+    one place it can quietly become a number again is the drill-down's
+    `tokens_input + tokens_output`: JS coerces both nulls to 0 and prints
+    "0 tokens" for an attempt whose cost nobody measured. The sum has to go
+    through a guard that keeps absent absent.
+    """
+    page = _page()
+
+    assert "detail.tokens_input + detail.tokens_output" not in page, (
+        "the drill-down must not sum the token fields without a null guard"
+    )
+    assert "const tokenTotal =" in page, "the guard is expected to be a named helper"
