@@ -156,26 +156,24 @@ class OpenAICompatibleProvider:
 
         That last line is drawn today and is not the only one there could be.
         ``finish_reason`` reports why a reply ended, and two of its values --
-        ``length`` and ``content_filter`` -- say the ending came from a ceiling
-        or a refusal rather than from the model answering badly. Which ceiling
-        the field does not say, and the three call for opposite responses: the
-        budget this module sets (``max_completion_tokens``, or ``max_tokens``
-        on the legacy retry), the model's context window, which no request
-        field controls, or -- on reasoning models, where the budget also covers
-        hidden reasoning tokens -- that budget spent before any content. Raising
-        the budget is the fix for the first and third and makes the second fail
-        outright, so the cause has to be identified, not assumed. Both are
-        counted against the model today, and this tracker has opinions about
-        that shape of mistake: a deferral is not a failure, an outage is not a
-        wrong answer.
+        ``length``, some token ceiling, and ``content_filter``, the server
+        refusing -- say the ending did not come from the model answering badly.
+        Both are counted against the model today, and this tracker has opinions
+        about that shape of mistake: a deferral is not a failure, an outage is
+        not a wrong answer.
 
-        Unexamined, not settled, and deliberately not prejudged here -- what
-        each value should grade as depends on the endpoint and the model, which
-        this repo does not know. Two things that are true from here: nothing
-        reads ``finish_reason`` (``generate`` puts it in ``raw`` and no caller
-        touches it), so the distinction is unrecoverable downstream as things
-        stand; and it cannot be reconstructed from the text, because ``length``
-        arrives both with content and without.
+        Unexamined, not settled, and not prejudged here, because deciding it
+        needs facts this repo does not hold. ``length`` alone does not say
+        WHICH ceiling -- the budget we send, the model's context window, a
+        reasoning budget spent before any content, a cap the server or gateway
+        imposes -- and those want different responses. Separating them is an
+        experiment against a live endpoint, not a docstring.
+
+        Two things that are true from here. Nothing reads ``finish_reason``:
+        ``generate`` puts it in ``raw`` and no caller touches it, so the
+        distinction is unrecoverable downstream as things stand. And it cannot
+        be reconstructed from the text, because ``length`` arrives both with
+        content and without.
         """
         messages: list[dict[str, str]] = []
         if request.system:
