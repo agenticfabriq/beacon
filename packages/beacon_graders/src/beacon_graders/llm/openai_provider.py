@@ -33,13 +33,12 @@ def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
     ``GraderJudgeError``.
 
     ``float()`` is the throwing step and it throws two ways: ``ValueError`` on
-    a string that is not a number, ``OverflowError`` on an int too large to
-    convert. Both are reachable, because httpx parses bodies with stdlib json,
-    which accepts bare ``Infinity`` and ``NaN`` tokens and integers up to 4300
-    digits -- comfortably past the ~309 where ``float()`` starts overflowing.
-    Beyond 4300 digits ``json.loads`` raises first, one frame up in
-    ``generate``, and that parse is not yet inside the GraderJudgeError
-    contract; this guard covers the range that reaches it.
+    a string that is not a number, ``OverflowError`` on an int past the ~309
+    digits it can represent. Both are reachable, because httpx parses bodies
+    with stdlib json, which accepts bare ``Infinity`` and ``NaN`` tokens and
+    integers far longer than that. (A longer one still -- past
+    ``sys.get_int_max_str_digits()``, 4300 by default -- never arrives here:
+    ``_post_with_retries`` fails to parse it and raises GraderJudgeError.)
     """
     value = usage.get(key)
     if isinstance(value, bool) or not isinstance(value, int | float | str):
@@ -158,7 +157,16 @@ class OpenAICompatibleProvider:
                 last_error = exc
             else:
                 if response.status_code == 200:
-                    parsed = response.json()
+                    # Whatever stdlib json raises here is not something a
+                    # caller discriminating on GraderJudgeError can catch: a
+                    # JSONDecodeError for a non-JSON 200, and a bare ValueError
+                    # for an integer literal over the interpreter's digit limit.
+                    try:
+                        parsed = response.json()
+                    except ValueError as exc:
+                        raise GraderJudgeError(
+                            f"Judge endpoint returned an unparseable body: {exc}"
+                        ) from exc
                     if not isinstance(parsed, dict):
                         raise GraderJudgeError("Judge endpoint returned a non-object body")
                     return parsed

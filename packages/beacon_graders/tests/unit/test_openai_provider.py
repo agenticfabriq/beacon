@@ -304,3 +304,32 @@ def test_a_bare_infinity_token_in_the_body_does_not_escape_as_overflow(
     response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
 
     assert response.tokens_input is None
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        ("not json at all", "a 200 that is not JSON"),
+        ('{"a": ' + "1" * 4400 + "}", "an integer literal past json's digit limit"),
+    ],
+)
+def test_an_unparseable_200_body_is_a_judge_error(
+    monkeypatch: pytest.MonkeyPatch, body: str, why: str
+) -> None:
+    """Callers discriminate on GraderJudgeError, so the parse must raise it.
+
+    `response.json()` raised whatever stdlib json raised -- JSONDecodeError for
+    a non-JSON body, a bare ValueError for an integer literal over 4300 digits
+    -- straight past every caller's except clause. Guarding the counters was
+    only half of it while the frame that produces the body was still open.
+    """
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, *, json, headers, timeout: httpx.Response(
+            200, content=body, headers={"content-type": "application/json"}
+        ),
+    )
+
+    with pytest.raises(GraderJudgeError):
+        _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
