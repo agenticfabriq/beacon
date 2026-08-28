@@ -48,9 +48,10 @@ def _object(value: object) -> dict[str, Any]:
 
     A well-formed body reporting no text -- ``"content": null``, or ``""``, or
     the key absent -- is deliberately NOT that case and still grades FAIL. All
-    that is known at this level is that the response was well formed and
-    carried no text; whether the model answered with nothing or was cut off is
-    the open question ``generate`` describes.
+    this level reads is that the response was well formed and carried no text;
+    whether the model answered with nothing or was cut off is recorded in
+    ``finish_reason`` and acted on nowhere -- the open question ``generate``
+    describes.
 
     Shape-versus-payload is the line drawn TODAY; see ``generate`` for the one
     that is still open.
@@ -156,7 +157,14 @@ class OpenAICompatibleProvider:
         That last line is drawn today and is not the only one there could be.
         ``finish_reason`` reports why a reply ended, and two of its values --
         ``length`` and ``content_filter`` -- say the ending came from a ceiling
-        or a refusal rather than from the model answering badly. Both are
+        or a refusal rather than from the model answering badly. Which ceiling
+        the field does not say, and the three call for opposite responses: the
+        budget this module sets (``max_completion_tokens``, or ``max_tokens``
+        on the legacy retry), the model's context window, which no request
+        field controls, or -- on reasoning models, where the budget also covers
+        hidden reasoning tokens -- that budget spent before any content. Raising
+        the budget is the fix for the first and third and makes the second fail
+        outright, so the cause has to be identified, not assumed. Both are
         counted against the model today, and this tracker has opinions about
         that shape of mistake: a deferral is not a failure, an outage is not a
         wrong answer.
