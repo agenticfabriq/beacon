@@ -128,7 +128,7 @@ def unscored_reason(payload: object) -> str:
             # to tell a bare string from an object -- and echo what arrived,
             # since "empty" would be a claim about `"   "` that is not true.
             return (
-                "Criterion in judge output is a bare string with no words: "
+                "Criterion in judge output is a bare string, not an object, with no words: "
                 f"{quote_judge_value(payload)}"
             )
         return f"Criterion in judge output is a bare string, not an object: {words}"

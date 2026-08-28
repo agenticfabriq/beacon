@@ -235,7 +235,6 @@ def test_a_wordless_bare_string_names_its_shape_without_claiming_which(blank: st
     whitespace, which this module is careful about everywhere else -- so the
     message echoes what arrived instead of naming it.
     """
-    reason = unscored_reason(blank)
-
-    assert reason.startswith("Criterion in judge output is a bare string with no words:")
-    assert repr(blank) in reason
+    assert unscored_reason(blank) == (
+        f"Criterion in judge output is a bare string, not an object, with no words: {blank!r}"
+    )
