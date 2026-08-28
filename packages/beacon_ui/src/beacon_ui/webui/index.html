@@ -498,9 +498,13 @@ const short = (value) => String(value ?? "").slice(0, 8);
 // sum -- it would print "0 tokens" for an attempt nobody measured. A total
 // needs both halves: an output count with the prompt assumed free understates
 // a schema-carrying SQL agent by more than it reports.
-const tokenTotal = (input, output) =>
-  (input === null || input === undefined || output === null || output === undefined)
-    ? "tokens not recorded" : (input + output) + " tokens";
+const tokenTotal = (input, output) => {
+  const has = (value) => value !== null && value !== undefined;
+  if (has(input) && has(output)) return (input + output) + " tokens";
+  if (has(output)) return output + " output tokens, prompt not recorded";
+  if (has(input)) return input + " prompt tokens, output not recorded";
+  return "tokens not recorded";
+};
 const KW = /\b(SELECT|FROM|WHERE|JOIN|INNER|LEFT|ON|AS|AND|OR|NOT|NULL|IS|ORDER|BY|GROUP|HAVING|LIMIT|DISTINCT|COUNT|MAX|MIN|SUM|AVG|CAST|RANK|OVER|NULLIF|DESC|ASC|BETWEEN|IN|LIKE|CASE|WHEN|THEN|ELSE|END)\b/g;
 const sqlfmt = (sql) => esc(sql)
   .replace(KW, (m) => `<span class="kw">${m}</span>`)
@@ -1304,7 +1308,9 @@ curl -X POST ${esc(b)}/v1/runs/&lt;run_id&gt;/results \\
       "output_kind": "sql",
       "output": {"sql": "SELECT ...", "columns": ["a"],
                  "rows": [[1]], "row_count": 1, "engine": "duckdb"},
-      "tokens_input": 0, "tokens_output": 0, "runtime_ms": 100}'
+      "runtime_ms": 100}'
+# tokens_input/tokens_output are optional: send them only if you
+# measured them. Omitted reads as unrecorded; 0 reads as free.
 
 # close the run when every item is pushed
 curl -X POST ${esc(b)}/v1/runs/&lt;run_id&gt;/complete -H "X-API-Key: $BEACON_API_KEY"</pre>

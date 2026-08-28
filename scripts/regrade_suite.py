@@ -141,9 +141,11 @@ def main() -> int:
                         output=dict(result.output or {}),
                         output_kind=result.output_kind,
                         trace=ExecutionStep(uuid="regrade", name="regrade", level="workflow"),
-                        # A regrade re-reads a stored output; it spends nothing
-                        # and measures nothing, so it must not overwrite the
-                        # original attempt's cost with a zero.
+                        # This shim is only ever handed to the grader -- the
+                        # regrade writes verdicts and `outcome`, never a result
+                        # row -- so it should show the grader the attempt as it
+                        # was recorded rather than a cost of zero the attempt
+                        # never reported.
                         tokens_input=result.tokens_input,
                         tokens_output=result.tokens_output,
                         runtime_ms=int(result.runtime_ms or 0),

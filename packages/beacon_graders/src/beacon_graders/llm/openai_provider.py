@@ -9,14 +9,28 @@ endpoint is deployment configuration, not source).
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from beacon_graders.errors import GraderJudgeError
 from beacon_graders.llm.provider import JudgeRequest, JudgeResponse
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
+    """Return one usage counter, or None where the server reported none.
+
+    A server that omits ``usage`` has not told us the call was free, and the
+    reference SUTs persist this value -- so the absence has to survive rather
+    than coerce to 0.
+    """
+    value = usage.get(key)
+    return int(value) if isinstance(value, int | float) else None
 
 
 class OpenAICompatibleProvider:
@@ -74,8 +88,8 @@ class OpenAICompatibleProvider:
         usage = body.get("usage") or {}
         return JudgeResponse(
             text=text,
-            tokens_input=int(usage.get("prompt_tokens") or 0),
-            tokens_output=int(usage.get("completion_tokens") or 0),
+            tokens_input=_usage_count(usage, "prompt_tokens"),
+            tokens_output=_usage_count(usage, "completion_tokens"),
             model_version=self._model,
             raw={
                 "id": body.get("id"),

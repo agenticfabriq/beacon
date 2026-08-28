@@ -22,8 +22,12 @@ class JudgeRequest:
 @dataclass
 class JudgeResponse:
     text: str
-    tokens_input: int
-    tokens_output: int
+    # None where the server reported no usage. Local OpenAI-compatible
+    # runtimes routinely omit the block, and the reference SUTs pass these
+    # straight into the result they persist -- a fabricated 0 there is
+    # believed, and medianed into the matrix beside real costs.
+    tokens_input: int | None
+    tokens_output: int | None
     model_version: str
     raw: dict[str, Any] = field(default_factory=dict)
 

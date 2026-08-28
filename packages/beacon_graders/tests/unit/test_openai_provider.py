@@ -118,3 +118,43 @@ def test_an_empty_choices_list_is_an_error(monkeypatch: pytest.MonkeyPatch) -> N
 def test_missing_configuration_is_refused() -> None:
     with pytest.raises(GraderJudgeError, match="required"):
         OpenAICompatibleProvider(base_url="", api_key="k", model="m")
+
+
+def test_a_response_without_usage_reports_no_token_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`or 0` turned a missing usage block into a measurement of zero.
+
+    Not every OpenAI-compatible server returns `usage` -- local runtimes
+    routinely omit it. Cost is nullable now precisely so an absence stays an
+    absence, and this is the last writer that was still coercing one to 0:
+    the reference SUTs pass this straight into the result they persist, where
+    a 0 is believed and medianed into the matrix beside real costs.
+    """
+    body = {"id": "r", "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}]}
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input is None
+    assert response.tokens_output is None
+
+
+def test_a_partial_usage_block_keeps_the_half_it_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = {
+        "id": "r",
+        "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}],
+        "usage": {"completion_tokens": 7},
+    }
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.tokens_input is None
+    assert response.tokens_output == 7

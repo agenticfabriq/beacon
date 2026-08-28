@@ -140,3 +140,32 @@ def test_the_drilldown_does_not_add_two_token_fields_that_may_be_null() -> None:
         "the drill-down must not sum the token fields without a null guard"
     )
     assert "const tokenTotal =" in page, "the guard is expected to be a named helper"
+
+
+def test_the_runner_recipe_does_not_teach_a_runner_to_claim_zero_cost() -> None:
+    """The cheat sheet is the onboarding path an external operator pastes.
+
+    While tokens defaulted to 0 the sample's `"tokens_input": 0` was a harmless
+    echo of the default. Now that omitted means unmeasured, sending it is an
+    explicit claim that the attempt was free -- and a runner following the
+    recipe lands a believed zero in the tokens column, which is the reading
+    this contract exists to keep out.
+    """
+    page = _page()
+
+    assert '"tokens_input": 0' not in page, (
+        "the runner recipe must omit token fields rather than send zeros"
+    )
+
+
+def test_half_a_measurement_is_not_reported_as_nothing_recorded() -> None:
+    """The in-process SUT records output tokens and never the prompt.
+
+    Refusing to total half a measurement is deliberate, but telling the
+    operator nothing was recorded contradicts the row they are looking at.
+    """
+    page = _page()
+
+    assert "prompt not recorded" in page, (
+        "a row with one half measured must say which half is missing"
+    )

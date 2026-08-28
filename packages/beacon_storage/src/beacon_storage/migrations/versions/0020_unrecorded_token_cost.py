@@ -7,10 +7,14 @@ per-item tokens), the harness does on the path where the SUT raised before
 running, and the matrix medians those zeros into a tokens column that reads as
 a configuration costing nothing -- beside models whose cost is real.
 
-The backfill reads a zero as the absence it always was. In this schema's
-lifetime no result has ever recorded a positive ``tokens_input``: an LLM call
-cannot consume zero prompt tokens, so a 0 there is a writer with nothing to
-write, never a measurement. That makes both cases safe to convert:
+The backfill reads a zero as the absence it was written as. The argument is
+about the value, not about any particular database: an LLM call cannot consume
+zero prompt tokens, so a stored 0 there is a writer that had nothing to write,
+never a measurement -- and only rows already at 0 are touched, so a deployment
+whose runners did record cost keeps every number it measured. (Checked on the
+dev database before writing this: 111,369 results, none with a positive
+``tokens_input``. Other deployments may differ and do not need to match.) Both
+cases convert:
 
   * both halves 0 -- nothing was measured, so both become NULL
   * input 0 with output positive -- the in-process SUT reports one number and
