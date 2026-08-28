@@ -421,11 +421,12 @@ def test_a_body_of_the_wrong_shape_is_a_judge_error(
     the wrong type. Reading through them with `.get` turned that into an
     AttributeError -- the same hole the parse frame had, one level in.
 
-    These raise rather than degrade because they carry the payload. Not for a
-    different outcome: an empty `text` would reach `extract_json` and raise
-    there too, so both roads end at a failed verdict. It is the justification
-    that differs, and naming the field the server got wrong is the whole
-    return. That includes an absent message, which the first version of this
+    These raise rather than degrade because they carry the payload. The outcome
+    is a zero either way -- the LLM graders' `extract_json` raises on an empty
+    text, and the reference SUT turns one into empty SQL that grades "No SQL
+    produced by SUT". That second route is the reason: a judge endpoint sending
+    the wrong shape must not be recorded as the system under test producing
+    nothing. That includes an absent message, which the first version of this
     guard let through while its own docstring said it must not.
 
     Each case asserts its message. Without that they are indistinguishable

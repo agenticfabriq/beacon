@@ -30,11 +30,14 @@ def _object(value: object) -> dict[str, Any]:
     back the wrong type. Reading through them with ``.get`` turns that into an
     AttributeError.
 
-    What the guards around it buy is diagnosis, not a different outcome. Every
-    path here already ends in a failed verdict: the graders catch bare
-    ``Exception``, and an empty ``text`` would reach ``extract_json`` and raise
-    there anyway. What changes is whether the justification names the field the
-    judge server got wrong, or reads "'NoneType' object has no attribute 'get'".
+    What the guards around it buy is diagnosis. Every path already ends at a
+    zero-scoring verdict, by two different routes: the LLM graders catch bare
+    ``Exception`` and an empty ``text`` raises inside ``extract_json`` anyway,
+    while the reference SUT hands ``text`` straight to ``_parse_output`` and an
+    empty one becomes a COMPLETED result with empty SQL, graded "No SQL
+    produced by SUT". That second route is why these raise rather than degrade:
+    the outcome is a zero either way, but degrading files it against the system
+    under test for a fault in the judge endpoint's response shape.
 
     Used only where absent is a real reading -- ``usage``, because cost nobody
     reported is the case the nullable columns exist to express, and losing a
@@ -203,8 +206,12 @@ class OpenAICompatibleProvider:
                     # 200, a bare ValueError for an integer literal over the
                     # interpreter's digit limit, and a RecursionError -- not a
                     # ValueError at all -- for a body nested deeply enough.
-                    # Callers catch bare Exception, so what this converts is the
-                    # message they end up recording, not whether they catch.
+                    # No caller outside this module catches GraderJudgeError --
+                    # they all catch bare Exception -- so what this mostly
+                    # converts is the message they record. The exception is
+                    # `generate`'s own legacy-max_tokens retry just below, which
+                    # does discriminate; it re-raises these only because an
+                    # unparseable body never mentions max_completion_tokens.
                     try:
                         parsed = response.json()
                     except (ValueError, RecursionError) as exc:
