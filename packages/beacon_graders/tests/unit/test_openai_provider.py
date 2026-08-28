@@ -307,14 +307,15 @@ def test_a_bare_infinity_token_in_the_body_does_not_escape_as_overflow(
 
 
 @pytest.mark.parametrize(
-    ("body", "why"),
+    "body",
     [
-        ("not json at all", "a 200 that is not JSON"),
-        ('{"a": ' + "1" * 4400 + "}", "an integer literal past json's digit limit"),
+        pytest.param("not json at all", id="not json"),
+        pytest.param('{"a": ' + "1" * 4400 + "}", id="int past json digit limit"),
+        pytest.param("[" * 20000 + "]" * 20000, id="nested past the recursion limit"),
     ],
 )
 def test_an_unparseable_200_body_is_a_judge_error(
-    monkeypatch: pytest.MonkeyPatch, body: str, why: str
+    monkeypatch: pytest.MonkeyPatch, body: str
 ) -> None:
     """Callers discriminate on GraderJudgeError, so the parse must raise it.
 
@@ -322,6 +323,11 @@ def test_an_unparseable_200_body_is_a_judge_error(
     a non-JSON body, a bare ValueError for an integer literal over 4300 digits
     -- straight past every caller's except clause. Guarding the counters was
     only half of it while the frame that produces the body was still open.
+
+    `match` is not decoration: with the int-string-digit limit disabled the
+    4400-digit body parses fine, `generate` raises a different GraderJudgeError
+    about an empty response, and a bare `pytest.raises` would go green while
+    the guard under test never ran.
     """
     monkeypatch.setattr(
         httpx,
@@ -331,5 +337,5 @@ def test_an_unparseable_200_body_is_a_judge_error(
         ),
     )
 
-    with pytest.raises(GraderJudgeError):
+    with pytest.raises(GraderJudgeError, match="unparseable body"):
         _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))

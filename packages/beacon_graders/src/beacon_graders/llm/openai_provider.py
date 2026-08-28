@@ -157,13 +157,15 @@ class OpenAICompatibleProvider:
                 last_error = exc
             else:
                 if response.status_code == 200:
-                    # Whatever stdlib json raises here is not something a
-                    # caller discriminating on GraderJudgeError can catch: a
-                    # JSONDecodeError for a non-JSON 200, and a bare ValueError
-                    # for an integer literal over the interpreter's digit limit.
+                    # Nothing stdlib json raises here is something a caller
+                    # discriminating on GraderJudgeError can catch: a
+                    # JSONDecodeError for a non-JSON 200, a bare ValueError for
+                    # an integer literal over the interpreter's digit limit, and
+                    # a RecursionError -- not a ValueError at all -- for a body
+                    # nested deeply enough.
                     try:
                         parsed = response.json()
-                    except ValueError as exc:
+                    except (ValueError, RecursionError) as exc:
                         raise GraderJudgeError(
                             f"Judge endpoint returned an unparseable body: {exc}"
                         ) from exc
