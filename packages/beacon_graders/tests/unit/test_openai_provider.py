@@ -461,3 +461,31 @@ def test_a_malformed_usage_block_is_unrecorded_cost_not_a_failed_call(
     assert response.text == "v"
     assert response.tokens_input is None
     assert response.tokens_output is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param({"content": None}, id="null content"),
+        pytest.param({"content": ""}, id="empty content"),
+        pytest.param({"role": "assistant"}, id="no content key"),
+    ],
+)
+def test_a_well_formed_body_with_no_text_is_an_answer_not_a_malformed_response(
+    monkeypatch: pytest.MonkeyPatch, message: dict[str, Any]
+) -> None:
+    """The line the shape guards draw is shape, not whether text arrived.
+
+    `"content": null` is a real OpenAI shape and the server saying the model
+    produced nothing. That is the model's answer and belongs against it -- the
+    reference SUT grading it FAIL on empty SQL is correct, and turning it into
+    a judge-endpoint error would move a real failure out of the denominator.
+    """
+    body = {"choices": [{"message": message, "finish_reason": "stop"}]}
+    monkeypatch.setattr(
+        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
+    )
+
+    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
+
+    assert response.text == ""

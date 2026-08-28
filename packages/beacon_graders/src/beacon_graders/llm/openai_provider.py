@@ -38,13 +38,19 @@ def _object(value: object) -> dict[str, Any]:
     at the same failed verdict. All that differs is whether the justification
     names the field the server got wrong.
 
-    For a reference SUT built on this provider it changes the outcome, and to
-    the right one. That SUT hands ``text`` straight to ``_parse_output``, so a
-    degraded empty string becomes a COMPLETED result with empty SQL and grades
-    FAIL, counted against the model. Raising makes it ERROR instead, which is
-    this tracker's founding distinction: an endpoint that returned an unusable
-    shape means the attempt never produced an answer, and an error leaves the
-    denominator rather than counting against the model.
+    For a reference SUT built on this provider it changes the outcome of a
+    WRONG-SHAPED body, and to the right one. That SUT hands ``text`` straight
+    to ``_parse_output``, so an empty string becomes a COMPLETED result with
+    empty SQL and grades FAIL, counted against the model. Raising makes it
+    ERROR instead, which is this tracker's founding distinction: an endpoint
+    that returned an unusable shape means the attempt never produced an answer,
+    and an error leaves the denominator rather than counting against the model.
+
+    A well-formed body reporting no text -- ``"content": null``, or ``""``, or
+    the key absent -- is deliberately NOT that case and still grades FAIL. The
+    server did its job and said the model produced nothing, which is the
+    model's answer and belongs against it. The line is the response's shape,
+    not whether it happened to carry an answer.
 
     Used only where absent is a real reading -- ``usage``, because cost nobody
     reported is the case the nullable columns exist to express, and losing a
