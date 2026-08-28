@@ -395,18 +395,21 @@ def test_a_parse_failure_still_arrives_as_a_valueerror() -> None:
 
 
 @pytest.mark.parametrize(
-    ("body", "why"),
+    ("body", "expected"),
     [
-        pytest.param({"choices": [None]}, "a null choice", id="null choice"),
-        pytest.param({"choices": "abc"}, "choices as a string", id="choices not a list"),
-        pytest.param({"choices": [3]}, "a choice that is not an object", id="scalar choice"),
+        pytest.param({"choices": [None]}, "NoneType choice", id="null choice"),
+        pytest.param({"choices": "abc"}, "str choices", id="choices not a list"),
+        pytest.param({"choices": []}, "Empty response", id="no choices"),
+        pytest.param({"choices": [3]}, "int choice", id="scalar choice"),
+        pytest.param({"choices": [{"message": "hi"}]}, "str message", id="message not an object"),
+        pytest.param({"choices": [{"message": None}]}, "NoneType message", id="null message"),
         pytest.param(
-            {"choices": [{"message": "hi"}]}, "message as a string", id="message not an object"
+            {"choices": [{"finish_reason": "stop"}]}, "NoneType message", id="no message key"
         ),
     ],
 )
 def test_a_body_of_the_wrong_shape_is_a_judge_error(
-    monkeypatch: pytest.MonkeyPatch, body: dict[str, Any], why: str
+    monkeypatch: pytest.MonkeyPatch, body: dict[str, Any], expected: str
 ) -> None:
     """Parsing as JSON is not the same as being the response we expect.
 
@@ -417,26 +420,20 @@ def test_a_body_of_the_wrong_shape_is_a_judge_error(
 
     These raise rather than degrade because the text is the payload: an
     unreadable message emptied to "" is a verdict the grader would score as
-    though the judge had answered.
+    though the judge had answered. That includes an absent message, which is
+    the case the first version of this guard let through while its own
+    docstring said it must not.
+
+    `match` is not decoration here either -- without it these four could not be
+    told apart from each other or from the pre-existing emptiness guard, which
+    is how a "choices is not a list" body ended up reported as an empty one.
     """
     monkeypatch.setattr(
         httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
     )
 
-    with pytest.raises(GraderJudgeError):
+    with pytest.raises(GraderJudgeError, match=expected):
         _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
-
-
-def test_a_missing_usage_block_is_still_not_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Absent cost is a reading, not a malformed response."""
-    body = {"id": "r", "choices": [{"message": {"content": "v"}, "finish_reason": "stop"}]}
-    monkeypatch.setattr(
-        httpx, "post", lambda url, *, json, headers, timeout: httpx.Response(200, json=body)
-    )
-
-    response = _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
-
-    assert response.text == "v"
 
 
 def test_a_malformed_usage_block_is_unrecorded_cost_not_a_failed_call(

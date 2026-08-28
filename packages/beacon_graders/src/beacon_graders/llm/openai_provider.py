@@ -28,13 +28,16 @@ def _object(value: object) -> dict[str, Any]:
 
     Every level of a judge response is server-supplied and any of them can come
     back the wrong type. Reading through them with ``.get`` turns that into an
-    AttributeError, which escapes the GraderJudgeError contract callers
-    discriminate on -- the same hole the parse frame had, one level in.
+    AttributeError. The graders above this catch bare ``Exception`` and turn
+    whatever arrives into a failed verdict carrying its message, so the cost of
+    the untyped error is the diagnostic: "'NoneType' object has no attribute
+    'get'" in a verdict justification says nothing about which field the judge
+    server got wrong.
 
     Used only where absent is a reading the caller already handles, which is
     ``usage``: cost nobody reported is the case this whole column exists to
-    express. It is NOT used for ``choices`` or ``message``, where degrading
-    would hand the grader an empty verdict it would score as if the judge had
+    express. Not used for ``choices`` or ``message``, where degrading would
+    hand the grader an empty verdict it would score as if the judge had
     answered; those raise.
     """
     return value if isinstance(value, dict) else {}
@@ -46,8 +49,8 @@ def _usage_count(usage: Mapping[str, Any], key: str) -> int | None:
     Numeric strings count: some servers send ``"prompt_tokens": "12"`` and the
     reading it stands for is a measurement either way. Anything that is not a
     finite, non-negative number is not a count -- and it has to fail to None
-    here rather than out of ``generate``, which callers discriminate on
-    ``GraderJudgeError``.
+    here rather than out of ``generate``, where it would lose the judge's
+    answer over its accounting.
 
     ``float()`` is the throwing step and it throws two ways: ``ValueError`` on
     a string that is not a number, ``OverflowError`` on an int past the ~309
@@ -147,15 +150,21 @@ class OpenAICompatibleProvider:
             body = self._post_with_retries(payload)
 
         choices = body.get("choices")
-        if not isinstance(choices, list) or not choices:
+        if not isinstance(choices, list):
+            raise GraderJudgeError(
+                f"Judge endpoint returned {type(choices).__name__} choices, expected a list"
+            )
+        if not choices:
             raise GraderJudgeError("Empty response from judge endpoint")
         choice = choices[0]
         if not isinstance(choice, dict):
             raise GraderJudgeError(f"Judge endpoint returned a {type(choice).__name__} choice")
         message = choice.get("message")
-        if message is not None and not isinstance(message, dict):
-            raise GraderJudgeError(f"Judge endpoint returned a {type(message).__name__} message")
-        text = str(_object(message).get("content") or "")
+        if not isinstance(message, dict):
+            raise GraderJudgeError(
+                f"Judge endpoint returned a {type(message).__name__} message, expected an object"
+            )
+        text = str(message.get("content") or "")
         tokens_input, tokens_output = _usage_counts(_object(body.get("usage")))
         return JudgeResponse(
             text=text,
