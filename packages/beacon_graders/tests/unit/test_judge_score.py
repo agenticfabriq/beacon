@@ -198,7 +198,8 @@ def test_a_failure_message_keeps_the_upstream_body_the_provider_preserved() -> N
 
 
 @pytest.mark.parametrize(
-    "text", ["0.8", "1", "80%", "8/10", "0.8 (good)", "no evidence to score against"]
+    "text",
+    ["0.8", "1", "80%", "8/10", "0.8 (good)", "no evidence to score against", "  padded  "],
 )
 def test_a_bare_string_is_reported_as_a_bare_string_and_shown_whole(text: str) -> None:
     """Classifying it would have to pick a side, and get one of them wrong.
@@ -225,7 +226,11 @@ def test_a_bare_string_justification_is_not_bounded() -> None:
 
 
 @pytest.mark.parametrize("blank", ["", "   "])
-def test_an_empty_bare_string_carries_no_words_either(blank: str) -> None:
-    assert unscored_reason(blank) == (
-        "Criterion present in judge output but carries no usable score"
-    )
+def test_an_empty_bare_string_still_names_its_shape(blank: str) -> None:
+    """Otherwise it is byte-identical to the message for `{"score": null}`.
+
+    The operator would get neither signal: not the words, since there are
+    none, and not the shape either, so a bare string and an object read the
+    same.
+    """
+    assert unscored_reason(blank) == ("Criterion in judge output is an empty string, not an object")

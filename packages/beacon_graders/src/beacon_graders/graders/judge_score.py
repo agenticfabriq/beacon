@@ -123,7 +123,10 @@ def unscored_reason(payload: object) -> str:
         # operator gets both signals and nothing is thrown away or dressed up.
         words = _as_words(payload)
         if not words:
-            return "Criterion present in judge output but carries no usable score"
+            # Still name the shape: falling back to the dict path's message
+            # would be byte-identical to `{"score": null}` and leave the
+            # operator unable to tell an empty string from an object.
+            return "Criterion in judge output is an empty string, not an object"
         return f"Criterion in judge output is a bare string, not an object: {words}"
     if not isinstance(payload, dict):
         # The judge emitted something for this criterion, just not the object
