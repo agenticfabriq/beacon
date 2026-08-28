@@ -147,19 +147,28 @@ class OpenAICompatibleProvider:
     def generate(self, request: JudgeRequest) -> JudgeResponse:
         """Issue one chat completion and return the concatenated text response.
 
-        A malformed SHAPE raises; a well-formed body carrying no text returns
-        ``""``, which downstream grades against the model. That line is drawn
-        today and is not the only one there could be.
+        A malformed shape on the PAYLOAD path -- ``choices``, ``message``,
+        ``content`` -- raises. A malformed ``usage`` does not: cost that cannot
+        be read is unrecorded cost, and losing a good answer over its accounting
+        would be perverse. A well-formed body carrying no text returns ``""``,
+        which downstream grades against the model.
 
-        ``finish_reason`` says WHY the text is missing, and two of its values
-        say it was not the model declining to answer: ``length`` means we
-        truncated the reply at our own ``max_completion_tokens``, and
-        ``content_filter`` means the server refused. Both currently land as a
-        wrong answer counted against the model, and this tracker has opinions
-        about exactly that shape of mistake -- a deferral is not a failure, an
-        outage is not a wrong answer. ``finish_reason`` goes into ``raw`` and
-        nothing in the repo reads it, so the distinction is unrecoverable
-        downstream as things stand. Unexamined, not settled.
+        That last line is drawn today and is not the only one there could be.
+        ``finish_reason`` says why a reply ended, and two of its values say the
+        ending was not the model's doing: ``length`` means the reply hit the
+        token budget we set (``max_completion_tokens``, or ``max_tokens`` on the
+        legacy retry below), and ``content_filter`` means the server refused.
+        Both are counted against the model today, and this tracker has opinions
+        about that shape of mistake -- a deferral is not a failure, an outage is
+        not a wrong answer.
+
+        Note for whoever takes it up: this is NOT only about empty text.
+        ``length`` usually arrives WITH content, just cut short, so a fix that
+        triggers on an empty answer would still score truncated replies as
+        wrong ones -- which is the mistake being tracked, not the fix for it.
+        ``finish_reason`` goes into ``raw`` and nothing in the repo reads it, so
+        neither case is recoverable downstream as things stand. Unexamined, not
+        settled.
         """
         messages: list[dict[str, str]] = []
         if request.system:
