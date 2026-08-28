@@ -102,6 +102,15 @@ def criterion_score(payload: object) -> tuple[float, str] | None:
     return max(0.0, min(1.0, value)), justification
 
 
+def _looks_like_a_number(text: str) -> bool:
+    """True when a bare string is a stringified score rather than prose."""
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
 def unscored_reason(payload: object) -> str:
     """Say WHY a criterion has no score, without claiming more than is true.
 
@@ -113,10 +122,14 @@ def unscored_reason(payload: object) -> str:
     """
     if payload is None:
         return "Missing criterion in judge output"
-    if isinstance(payload, str):
-        # A bare string for a criterion is the judge explaining itself without
-        # scoring -- its own words, not a shape to echo, so it takes the
-        # justification path and its bound, not the echo's tight one.
+    if isinstance(payload, str) and not _looks_like_a_number(payload):
+        # A bare string for a criterion is usually the judge explaining itself
+        # without scoring -- its own words, not a shape to echo, so it takes
+        # the justification path and its bound, not the echo's tight one.
+        #
+        # Unless it is a stringified score. `"0.8"` is a VALUE in the wrong
+        # shape, and reporting it as "Not scored by the judge: 0.8" would read
+        # as the judge's reasoning -- the same overclaim from the other side.
         return unscored_reason({"justification": payload})
     if not isinstance(payload, dict):
         # The judge emitted something for this criterion, just not the object

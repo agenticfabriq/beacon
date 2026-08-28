@@ -210,3 +210,30 @@ def test_a_bare_string_criterion_is_the_judges_words_not_a_shape_to_echo() -> No
 
     assert "cut," not in reason
     assert reason == f"Not scored by the judge: {words.strip()}"
+
+
+@pytest.mark.parametrize("scalar", ["0.8", "1", " 0.5 ", "-2"])
+def test_a_stringified_score_is_an_off_shape_value_not_the_judges_reasoning(
+    scalar: str,
+) -> None:
+    """ "Not scored by the judge: 0.8" would read as prose the judge wrote.
+
+    It is a value in the wrong shape. Reporting it as reasoning is the same
+    overclaim the echo path exists to avoid, arriving from the other side, and
+    the repr quoting is what marks it as raw text rather than an explanation.
+    """
+    reason = unscored_reason(scalar)
+
+    assert reason.startswith("Criterion in judge output is not an object:")
+    assert repr(scalar) in reason
+
+
+def test_prose_is_still_routed_to_the_judges_words() -> None:
+    assert unscored_reason("no evidence to score against").startswith("Not scored by the judge:")
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_an_empty_bare_string_carries_no_words_either(blank: str) -> None:
+    assert unscored_reason(blank) == (
+        "Criterion present in judge output but carries no usable score"
+    )
