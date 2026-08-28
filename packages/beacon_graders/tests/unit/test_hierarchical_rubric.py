@@ -205,3 +205,27 @@ def test_an_unscored_criterion_does_not_count_as_a_zero(
     # "Missing" would be false: the judge emitted this one and said why it
     # could not score it. That sentence is worth more than our label.
     assert "no rubric evidence in the answer" in verdicts["correctness"].justification
+
+
+def test_a_criteria_container_of_the_wrong_shape_is_not_every_criterion_missing(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """The judge answered; the container just is not the object we asked for.
+
+    `parsed.get("criteria") or {}` collapsed a list into an empty mapping, so
+    every criterion reported itself missing while the judge's reply sat in
+    front of the operator with the scores in it.
+    """
+    provider = _StubProvider({"criteria": [{"name": "completeness", "score": 1.0}]})
+    rubric_grader = HierarchicalRubricGrader(judge_cache=JudgeCache(provider=provider))
+    item = make_item(
+        metadata={"rubric": {"criteria": [{"name": "completeness", "description": "d"}]}}
+    )
+    result = make_result(output={"answer": "x"}, output_kind="answer")
+
+    verdict = rubric_grader.grade(item, result)[0]
+
+    assert verdict.value is None
+    assert "Missing criterion" not in verdict.justification
+    assert "not an object" in verdict.justification

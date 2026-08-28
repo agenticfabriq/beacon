@@ -51,7 +51,17 @@ class HierarchicalRubricGrader:
                 for criterion in criteria
             ]
 
-        criteria_scores = parsed.get("criteria") or {}
+        raw_scores = parsed.get("criteria")
+        criteria_scores = raw_scores if isinstance(raw_scores, dict) else {}
+        # A `criteria` that is present but not an object makes every criterion
+        # look absent. It is not: the judge answered, in a shape the prompt did
+        # not ask for, and telling the operator all of them are "missing"
+        # denies a reply sitting in front of them.
+        container_note = (
+            None
+            if raw_scores is None or isinstance(raw_scores, dict)
+            else f"Judge output's 'criteria' is not an object: {raw_scores!r}"
+        )
         out: list[Verdict] = []
         for criterion in criteria:
             name = str(criterion["name"])
@@ -71,7 +81,7 @@ class HierarchicalRubricGrader:
                         grader_version=self.version,
                         criterion=name,
                         value=None,
-                        justification=unscored_reason(payload),
+                        justification=container_note or unscored_reason(payload),
                         # The judge did answer; only this criterion is absent
                         # from what it said, so the call's evidence stands --
                         # same as the free-text grader does for this case.

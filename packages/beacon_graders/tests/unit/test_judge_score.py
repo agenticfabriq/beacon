@@ -64,11 +64,31 @@ def test_the_judges_own_words_are_carried_through() -> None:
     )
 
 
-@pytest.mark.parametrize("justification", [None, 0, [], {"a": 1}])
-def test_a_non_string_justification_is_not_quoted_as_an_explanation(
-    justification: object,
-) -> None:
+def test_a_null_justification_is_not_quoted_as_an_explanation() -> None:
     """`str(None)` is the truthy literal "None", which would be quoted as one."""
-    reason = unscored_reason({"score": None, "justification": justification})
+    reason = unscored_reason({"score": None, "justification": None})
 
     assert reason == "Criterion present in judge output but carries no usable score"
+
+
+@pytest.mark.parametrize(
+    ("justification", "shown"),
+    [
+        pytest.param(["a", "b"], "['a', 'b']", id="bullet list"),
+        pytest.param({"why": "no evidence"}, "no evidence", id="object"),
+        pytest.param(0, "0", id="number"),
+    ],
+)
+def test_an_explanation_in_another_shape_is_still_an_explanation(
+    justification: object, shown: str
+) -> None:
+    """Dropping every non-string loses words the judge did say.
+
+    A list of bullet points is an explanation, and the drill-down used to show
+    it. Only an absence should render as nothing; a shape should render as
+    itself.
+    """
+    reason = unscored_reason({"score": None, "justification": justification})
+
+    assert shown in reason
+    assert reason.startswith("Not scored by the judge:")
