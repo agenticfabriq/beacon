@@ -368,7 +368,7 @@ def test_a_parse_that_exhausts_the_stack_is_a_judge_error(
         _provider().generate(JudgeRequest(prompt="p", grader_version="v1", system="s"))
 
 
-def test_httpx_still_lets_the_decoder_s_own_errors_through() -> None:
+def test_a_parse_failure_still_arrives_as_a_valueerror() -> None:
     """The guard rests on a dependency guarantee, so name the guarantee.
 
     `except (ValueError, RecursionError)` needs exactly one thing to be true:
@@ -381,13 +381,15 @@ def test_httpx_still_lets_the_decoder_s_own_errors_through() -> None:
 
     The tests above already exercise the real `Response.json()` -- they
     monkeypatch `httpx.post` and hand back a genuine response -- so an httpx
-    that broke this would fail them too. What this adds is localization: those
-    surface as an exception leaking out of `generate`, from anywhere inside it,
-    while this points at the library call.
+    that started raising a non-ValueError on a bad parse would fail them too.
+    What this adds is localization: those surface as an exception leaking out
+    of `generate`, from anywhere inside it, while this points at the library
+    call.
 
-    The RecursionError half is not asserted against the real library, because
-    provoking it needs a literal body deep enough to be interpreter-dependent
-    -- which the test above it exists to avoid.
+    The RecursionError half is asserted by no test here against the real
+    library -- the one that covers it injects the error -- because provoking it
+    needs a literal body deep enough to be interpreter-dependent, which the
+    test above exists to avoid.
     """
     with pytest.raises(ValueError):
         httpx.Response(200, content="not json at all").json()
