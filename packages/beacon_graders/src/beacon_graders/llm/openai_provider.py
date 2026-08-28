@@ -155,15 +155,18 @@ class OpenAICompatibleProvider:
         no text returns ``""``, which downstream grades against the model.
 
         That last line is drawn today and is not the only one there could be.
-        ``finish_reason`` separates a model that answered badly from one whose
-        reply was capped (``length``) or refused (``content_filter``), and
-        nothing reads it: this method puts it in ``raw`` and no caller touches
-        it. Nor can the text stand in for it, since ``length`` arrives both
-        with content and without.
+        ``finish_reason`` says whether a reply was capped (``length``) or
+        refused (``content_filter``) rather than answered, and nothing reads
+        it: this method puts it in ``raw`` and no caller touches it.
 
-        So both still grade against the model, in a tracker built on "a
-        deferral is not a failure". Whether they should is open, and settling
-        it needs experiments against a live endpoint rather than a docstring.
+        The sharper half is that on the grader path the capped reply is the
+        JUDGE's. When the cap leaves the JSON unparseable or a criterion
+        missing, the grader's ``except Exception`` turns it into a FAIL
+        charged to the SUT model, which never emitted it. (A ``length`` reply
+        whose JSON happens to be complete parses and grades normally, so this
+        is a sometimes, not an always.) Open question -- B61 in the internal
+        register, which the split leaves unresolvable from here, so the
+        description above is the part to rely on.
         """
         messages: list[dict[str, str]] = []
         if request.system:
