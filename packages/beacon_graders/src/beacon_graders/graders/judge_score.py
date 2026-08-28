@@ -15,11 +15,14 @@ def _as_words(value: object) -> str:
     ``str()`` alone turns a JSON null into the truthy literal "None" and shows
     it to the operator as something the judge said. Dropping every non-string
     instead loses the ones it did say in another shape -- a list of bullet
-    points is still an explanation, and the drill-down used to show it. So:
-    nothing for an absence, the text for a string, its rendering for anything
-    else.
+    points is still an explanation, and the drill-down used to show it.
+
+    So the line is emptiness, not type. ``None``, ``""``, ``[]``, ``{}`` and
+    ``false`` all carry no words and render as nothing; anything else renders
+    as itself. Quoting the judge an empty list is the same overclaim as
+    quoting it the literal "None".
     """
-    if value is None:
+    if not value:
         return ""
     return value.strip() if isinstance(value, str) else str(value)
 

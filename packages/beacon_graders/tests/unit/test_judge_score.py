@@ -64,11 +64,38 @@ def test_the_judges_own_words_are_carried_through() -> None:
     )
 
 
-def test_a_null_justification_is_not_quoted_as_an_explanation() -> None:
-    """`str(None)` is the truthy literal "None", which would be quoted as one."""
-    reason = unscored_reason({"score": None, "justification": None})
+@pytest.mark.parametrize("empty", [None, "", "   ", [], {}, False, 0])
+def test_an_empty_justification_is_not_quoted_as_an_explanation(empty: object) -> None:
+    """`str()` makes every one of these truthy: "None", "[]", "{}", "False".
+
+    Each would be quoted back as something the judge said. Emptiness is the
+    line, not type -- an empty list is an absence exactly like a null.
+    """
+    reason = unscored_reason({"score": None, "justification": empty})
 
     assert reason == "Criterion present in judge output but carries no usable score"
+
+
+@pytest.mark.parametrize(
+    ("justification", "expected"),
+    [
+        pytest.param(None, "", id="null"),
+        pytest.param([], "", id="empty list"),
+        pytest.param(["a", "b"], "['a', 'b']", id="bullet list"),
+        pytest.param("  spaced  ", "spaced", id="string is stripped"),
+    ],
+)
+def test_the_scored_path_renders_a_justification_the_same_way(
+    justification: object, expected: str
+) -> None:
+    """The rule has to hold where a criterion WAS scored, too.
+
+    This string goes straight into `Verdict.justification` for a scored
+    criterion, and the same coercion bug lived here first.
+    """
+    scored = criterion_score({"score": 0.5, "justification": justification})
+
+    assert scored == (0.5, expected)
 
 
 @pytest.mark.parametrize(
@@ -76,7 +103,7 @@ def test_a_null_justification_is_not_quoted_as_an_explanation() -> None:
     [
         pytest.param(["a", "b"], "['a', 'b']", id="bullet list"),
         pytest.param({"why": "no evidence"}, "no evidence", id="object"),
-        pytest.param(0, "0", id="number"),
+        pytest.param(3, "3", id="number"),
     ],
 )
 def test_an_explanation_in_another_shape_is_still_an_explanation(

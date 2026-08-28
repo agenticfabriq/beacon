@@ -60,12 +60,15 @@ class HierarchicalRubricGrader:
         container_note = (
             None
             if raw_scores is None or isinstance(raw_scores, dict)
-            else f"Judge output's 'criteria' is not an object: {raw_scores!r}"
+            # Truncated: this one note is repeated on EVERY criterion in the
+            # rubric, so a verbose judge would store the whole malformed
+            # container once per criterion.
+            else f"Judge output's 'criteria' is not an object: {raw_scores!r:.120}"
         )
         out: list[Verdict] = []
         for criterion in criteria:
             name = str(criterion["name"])
-            payload = criteria_scores.get(name) if isinstance(criteria_scores, dict) else None
+            payload = criteria_scores.get(name)
             # `_fail` said "missing" and scored it 0.0, which `composer.compose`
             # averages into the SUT's composite exactly like a real score -- so
             # the message reported an absence the number denied. `value=None`
