@@ -219,7 +219,7 @@ class VerdictComposer:
             verdict for verdict in verdicts if self._kind_of(verdict.grader) is GraderKind.LLM_JUDGE
         ]
         # A judge verdict with no value declined to score that criterion -- the
-        # reply was cut off before it, or never carried it. Averaging only the
+        # reply never carried it, or carried no usable score. Averaging only the
         # criteria that survived hands the outcome to whichever ones did: 0.8
         # alone composes PASS where 0.8 beside a zeroed sibling composed FAIL.
         # A rubric half judged has not been judged, and ERROR is the label for

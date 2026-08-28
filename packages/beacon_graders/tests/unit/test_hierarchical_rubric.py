@@ -172,15 +172,16 @@ def test_an_unscored_criterion_does_not_count_as_a_zero(
 ) -> None:
     """The score level has the same hole the criterion level had.
 
-    A criterion cut off mid-object carries no usable score -- no `score` key,
-    or a null one -- and coerced to 0.0, which `composer.compose` counted into
-    the SUT's composite exactly like a real score.
+    A criterion emitted with no usable score -- no `score` key, or a null one
+    -- coerced to 0.0, which `composer.compose` counted into the SUT's
+    composite exactly like a real score. Reached by a well-formed reply that
+    is incomplete; a truncated one raises in `extract_json` instead.
     """
     provider = _StubProvider(
         {
             "criteria": {
                 "completeness": {"score": 0.9, "justification": "good"},
-                "correctness": {"justification": "cut off"},
+                "correctness": {"justification": "no rubric evidence in the answer"},
             }
         }
     )
@@ -201,3 +202,6 @@ def test_an_unscored_criterion_does_not_count_as_a_zero(
 
     assert verdicts["completeness"].value == 0.9
     assert verdicts["correctness"].value is None
+    # "Missing" would be false: the judge emitted this one and said why it
+    # could not score it. That sentence is worth more than our label.
+    assert "no rubric evidence in the answer" in verdicts["correctness"].justification

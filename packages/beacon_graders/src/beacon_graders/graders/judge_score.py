@@ -14,7 +14,10 @@ def criterion_score(payload: object) -> tuple[float, str] | None:
 
     Guards both levels. The criterion object can be absent or the wrong type,
     and it can be present with no usable score -- ``{}``, a justification with
-    no ``score`` key, ``{"score": null}``, ``{"score": "n/a"}``. Every one of
+    no ``score`` key, ``{"score": null}``, ``{"score": "n/a"}``. Note this is
+    reached by a WELL-FORMED reply that is incomplete, not by a truncated one:
+    ``extract_json`` decodes with ``raw_decode``, so a cut-off reply raises
+    there and the grader's ``except Exception`` turns it into a 0.0 instead. Every one of
     those used to coerce to 0.0 and become indistinguishable from a judge that
     read the answer and scored it zero.
     """
@@ -49,7 +52,10 @@ def unscored_reason(payload: object) -> str:
     """
     if not isinstance(payload, dict):
         return "Missing criterion in judge output"
-    explanation = str(payload.get("justification", "")).strip()
-    if explanation:
-        return f"Not scored by the judge: {explanation}"
+    # `str()` first would turn a JSON null into the truthy literal "None" and
+    # quote the judge an explanation it never gave -- the exact overclaim this
+    # function exists to avoid, one line in.
+    explanation = payload.get("justification")
+    if isinstance(explanation, str) and explanation.strip():
+        return f"Not scored by the judge: {explanation.strip()}"
     return "Criterion present in judge output but carries no usable score"

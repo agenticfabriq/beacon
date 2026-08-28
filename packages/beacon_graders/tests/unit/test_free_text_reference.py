@@ -117,8 +117,8 @@ def test_a_criterion_the_judge_never_scored_is_not_a_score_of_zero(
 ) -> None:
     """`parsed.get(criterion) or {}` turned an absence into a measurement.
 
-    A judge that omits a criterion -- truncated mid-JSON, or simply not
-    emitting it -- produced `payload.get("score", 0.0)` = 0.0 with an empty
+    A judge whose reply is well formed but incomplete -- a criterion simply
+    not emitted -- produced `payload.get("score", 0.0)` = 0.0 with an empty
     justification, which is indistinguishable from the judge reading the
     answer and scoring it zero. The sibling grader already refuses to guess:
     `hierarchical_rubric` emits "Missing criterion in judge output". This one
@@ -177,9 +177,13 @@ def test_a_criterion_present_but_unscored_is_also_unscored(
 ) -> None:
     """The guard has to reach the score, not stop at the object around it.
 
-    A judge cut off mid-criterion emits the key with no usable score --
-    `{}`, `{"justification": "cut off"}`, `{"score": null}`. Coercing those
-    to 0.0 is the same absence-as-measurement one level down.
+    A judge that emits the key with no usable score -- `{}`, a justification
+    and no `score`, `{"score": null}` -- is the same absence one level down,
+    and coercing it to 0.0 is the same absence-as-measurement.
+
+    Not a truncated reply: `extract_json` decodes with `raw_decode`, so a
+    cut-off reply raises there and becomes a 0.0 through the grader's
+    `except Exception` instead. This path needs well-formed JSON.
     """
     grader = _grader_with(
         {
@@ -291,22 +295,3 @@ def test_an_unscorable_criterion_does_not_report_itself_as_missing(
     assert verdicts["insight_recall"].value is None
     assert "missing" not in verdicts["insight_recall"].justification.lower()
     assert "no citations to check against" in verdicts["insight_recall"].justification
-
-
-def test_a_criterion_the_judge_never_emitted_still_reports_itself_as_missing(
-    make_item: Callable[..., EvalItem],
-    make_result: Callable[..., ExecutionResult],
-) -> None:
-    grader = _grader_with({"citation_correctness": {"score": 0.5, "justification": "half"}})
-    item = make_item(
-        query={"question": "Summarize"},
-        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
-        metadata={"output_format": "narrative"},
-    )
-    result = make_result(
-        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
-    )
-
-    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
-
-    assert "Missing criterion" in verdicts["insight_recall"].justification

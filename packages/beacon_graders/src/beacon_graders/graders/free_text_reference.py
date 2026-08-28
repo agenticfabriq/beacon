@@ -61,14 +61,17 @@ class FreeTextReferenceGrader:
         for criterion in _CRITERIA:
             # A criterion the judge never scored is not a criterion scored 0.0.
             # `parsed.get(criterion) or {}` handed the default straight to
-            # `payload.get("score", 0.0)`, so a judge that omitted one -- cut off
-            # mid-JSON, or simply not emitting it -- produced a zero that
+            # `payload.get("score", 0.0)`, so a judge whose reply is well
+            # formed but incomplete -- a criterion omitted, or emitted with no
+            # usable score -- produced a zero that
             # `composer.compose` averages into the SUT's composite exactly like a
             # real score. `value=None` is how a verdict declines to score, and
             # the composer treats any of them as making the item ungradeable --
-            # ERROR for the item, not a quiet exclusion from the average, since
+            # ERROR rather than a quiet exclusion from the average, since
             # averaging the survivors hands the outcome to whichever criteria
-            # happened to make it.
+            # happened to make it. Only where no execution grader decided the
+            # item first: those short-circuit on `bool_value` before the judge
+            # values are read at all.
             scored = criterion_score(parsed.get(criterion))
             if scored is None:
                 out.append(

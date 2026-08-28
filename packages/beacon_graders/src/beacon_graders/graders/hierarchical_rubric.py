@@ -59,8 +59,9 @@ class HierarchicalRubricGrader:
             # `_fail` said "missing" and scored it 0.0, which `composer.compose`
             # averages into the SUT's composite exactly like a real score -- so
             # the message reported an absence the number denied. `value=None`
-            # declines to score, and the composer makes the whole item ERROR
-            # rather than averaging whichever criteria survived.
+            # declines to score, and the composer makes the item ERROR rather
+            # than averaging whichever criteria survived -- unless an execution
+            # grader already decided it, which short-circuits earlier.
             scored = criterion_score(payload)
             if scored is None:
                 out.append(
