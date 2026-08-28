@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from beacon_graders.graders.judge_score import criterion_score
+from beacon_graders.graders.judge_score import criterion_score, unscored_reason
 from beacon_graders.llm.prompts import HIERARCHICAL_RUBRIC_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
 from beacon_graders.types import GraderKind, Verdict
@@ -58,8 +58,9 @@ class HierarchicalRubricGrader:
             payload = criteria_scores.get(name) if isinstance(criteria_scores, dict) else None
             # `_fail` said "missing" and scored it 0.0, which `composer.compose`
             # averages into the SUT's composite exactly like a real score -- so
-            # the message reported an absence the number denied. The composer
-            # skips `value is None`; that is how a verdict declines to score.
+            # the message reported an absence the number denied. `value=None`
+            # declines to score, and the composer makes the whole item ERROR
+            # rather than averaging whichever criteria survived.
             scored = criterion_score(payload)
             if scored is None:
                 out.append(
@@ -68,7 +69,7 @@ class HierarchicalRubricGrader:
                         grader_version=self.version,
                         criterion=name,
                         value=None,
-                        justification="Missing criterion in judge output",
+                        justification=unscored_reason(payload),
                         # The judge did answer; only this criterion is absent
                         # from what it said, so the call's evidence stands --
                         # same as the free-text grader does for this case.

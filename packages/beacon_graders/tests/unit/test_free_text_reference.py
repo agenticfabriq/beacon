@@ -139,10 +139,10 @@ def test_a_criterion_the_judge_never_scored_is_not_a_score_of_zero(
 
     assert verdicts["insight_recall"].value == 0.8
     assert "Missing criterion" in (verdicts["citation_correctness"].justification or "")
-    # The number is the part that decides anything: `composer.compose` averages
-    # every LLM verdict value into the PASS/FAIL composite and skips only None,
-    # so a 0.0 here would drag the SUT's score down for a criterion nobody
-    # scored -- a justification string no scoring path reads cannot fix that.
+    # The number is the part that decides anything: `composer.compose` builds
+    # the PASS/FAIL composite from the values, so a 0.0 here would drag the
+    # SUT's score down for a criterion nobody scored, and a justification
+    # string no scoring path reads cannot fix that. None makes the item ERROR.
     assert verdicts["citation_correctness"].value is None
 
 
@@ -234,10 +234,11 @@ def test_a_score_that_is_not_a_number_does_not_become_a_perfect_one(
 ) -> None:
     """NaN clamps UPWARD, and `True` is an int.
 
-    `max(0.0, min(1.0, nan))` is nan, and the stdlib decoder `extract_json`
-    uses accepts a bare `NaN` literal -- so a judge emitting one handed out a
-    perfect score. `{"score": true}` did the same by being an int. Neither is
-    a reading, so neither is scored.
+    Comparisons against nan are all False, so `min(1.0, nan)` returns 1.0 and
+    the clamp yields full marks rather than propagating the nan -- and the
+    stdlib decoder `extract_json` uses accepts a bare `NaN` literal, so a judge
+    emitting one handed out a perfect score. `{"score": true}` did the same by
+    being an int. Neither is a reading, so neither is scored.
     """
     grader = _grader_with(
         {
@@ -258,3 +259,54 @@ def test_a_score_that_is_not_a_number_does_not_become_a_perfect_one(
 
     assert verdicts["insight_recall"].value is None
     assert verdicts["citation_correctness"].value is None
+
+
+def test_an_unscorable_criterion_does_not_report_itself_as_missing(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """ "Missing" is a claim, and it is false when the judge did emit one.
+
+    A criterion the judge emitted but could not score is present in the reply
+    the operator is looking at, usually with the judge's own explanation. Both
+    end unscored; only one of them is missing.
+    """
+    grader = _grader_with(
+        {
+            "insight_recall": {"justification": "no citations to check against"},
+            "citation_correctness": {"score": 0.5, "justification": "half"},
+        }
+    )
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(
+        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
+    )
+
+    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
+
+    assert verdicts["insight_recall"].value is None
+    assert "missing" not in verdicts["insight_recall"].justification.lower()
+    assert "no citations to check against" in verdicts["insight_recall"].justification
+
+
+def test_a_criterion_the_judge_never_emitted_still_reports_itself_as_missing(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    grader = _grader_with({"citation_correctness": {"score": 0.5, "justification": "half"}})
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(
+        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
+    )
+
+    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
+
+    assert "Missing criterion" in verdicts["insight_recall"].justification

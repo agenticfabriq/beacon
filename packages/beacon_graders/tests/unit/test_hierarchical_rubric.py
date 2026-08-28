@@ -98,9 +98,9 @@ def test_missing_criterion_in_judge_output_is_unscored_not_zero(
 ) -> None:
     """The justification said "missing"; the 0.0 beside it still counted.
 
-    `composer.compose` averages every LLM verdict value into the PASS/FAIL
-    composite and skips only None, so a criterion the judge never emitted
-    dragged the SUT's score down while claiming to report its own absence.
+    `composer.compose` builds the PASS/FAIL composite from every LLM verdict
+    value, so a criterion the judge never emitted dragged the SUT's score down
+    while claiming to report its own absence. None makes the item ERROR.
     """
     provider = _StubProvider({"criteria": {"completeness": {"score": 1.0, "justification": ""}}})
     rubric_grader = HierarchicalRubricGrader(judge_cache=JudgeCache(provider=provider))
@@ -173,7 +173,7 @@ def test_an_unscored_criterion_does_not_count_as_a_zero(
     """The score level has the same hole the criterion level had.
 
     A criterion cut off mid-object carries no usable score -- no `score` key,
-    or a null one -- and coerced to 0.0, which `composer.compose` averages into
+    or a null one -- and coerced to 0.0, which `composer.compose` counted into
     the SUT's composite exactly like a real score.
     """
     provider = _StubProvider(

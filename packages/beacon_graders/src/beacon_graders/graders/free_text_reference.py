@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from beacon_graders.graders.judge_score import criterion_score
+from beacon_graders.graders.judge_score import criterion_score, unscored_reason
 from beacon_graders.llm.prompts import FREE_TEXT_REFERENCE_PROMPT, extract_json
 from beacon_graders.llm.provider import JudgeRequest
 from beacon_graders.types import GraderKind, Verdict
@@ -64,9 +64,11 @@ class FreeTextReferenceGrader:
             # `payload.get("score", 0.0)`, so a judge that omitted one -- cut off
             # mid-JSON, or simply not emitting it -- produced a zero that
             # `composer.compose` averages into the SUT's composite exactly like a
-            # real score. The composer skips `value is None`, which is how a
-            # verdict says "nobody scored this"; a justification string alone
-            # changes nothing, because no scoring path reads one.
+            # real score. `value=None` is how a verdict declines to score, and
+            # the composer treats any of them as making the item ungradeable --
+            # ERROR for the item, not a quiet exclusion from the average, since
+            # averaging the survivors hands the outcome to whichever criteria
+            # happened to make it.
             scored = criterion_score(parsed.get(criterion))
             if scored is None:
                 out.append(
@@ -75,7 +77,7 @@ class FreeTextReferenceGrader:
                         grader_version=self.version,
                         criterion=criterion,
                         value=None,
-                        justification="Missing criterion in judge output",
+                        justification=unscored_reason(parsed.get(criterion)),
                         # The judge did answer; only this criterion is absent
                         # from what it said, so the call's evidence stands.
                         raw_output=evidence,
