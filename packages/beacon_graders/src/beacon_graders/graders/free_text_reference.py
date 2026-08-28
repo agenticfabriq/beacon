@@ -53,15 +53,23 @@ class FreeTextReferenceGrader:
 
         out: list[Verdict] = []
         for criterion in _CRITERIA:
-            payload = parsed.get(criterion) or {}
+            payload = parsed.get(criterion)
+            # A criterion the judge never scored is not a criterion scored 0.0.
+            # `parsed.get(criterion) or {}` used to hand the default straight to
+            # `payload.get("score", 0.0)`, so a judge that omitted one -- cut off
+            # mid-JSON, or simply not emitting it -- produced a zero with an
+            # empty justification, indistinguishable from a judge that read the
+            # answer and scored it zero. `hierarchical_rubric` already says so;
+            # this now matches it.
+            if not isinstance(payload, dict):
+                out.append(self._fail(criterion, "Missing criterion in judge output"))
+                continue
             try:
-                value = float(payload.get("score", 0.0)) if isinstance(payload, dict) else 0.0
+                value = float(payload.get("score", 0.0))
             except (TypeError, ValueError):
                 value = 0.0
             value = max(0.0, min(1.0, value))
-            justification = (
-                str(payload.get("justification", "")) if isinstance(payload, dict) else ""
-            )
+            justification = str(payload.get("justification", ""))
             out.append(
                 Verdict(
                     grader=self.name,

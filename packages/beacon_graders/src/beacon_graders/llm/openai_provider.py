@@ -155,18 +155,23 @@ class OpenAICompatibleProvider:
         no text returns ``""``, which downstream grades against the model.
 
         That last line is drawn today and is not the only one there could be.
-        ``finish_reason`` says whether a reply was capped (``length``) or
-        refused (``content_filter``) rather than answered, and nothing reads
-        it: this method puts it in ``raw`` and no caller touches it.
+        ``finish_reason`` reports why a reply ended -- ``length`` for a token
+        ceiling, ``content_filter`` for a refusal -- and nothing reads it: this
+        method puts it in ``raw`` and no caller touches it. Neither value means
+        the reply was empty; a capped reply usually carries the text it managed
+        before the cap.
 
         The sharper half is that on the grader path the capped reply is the
-        JUDGE's. When the cap leaves the JSON unparseable or a criterion
-        missing, the grader's ``except Exception`` turns it into a FAIL
-        charged to the SUT model, which never emitted it. (A ``length`` reply
-        whose JSON happens to be complete parses and grades normally, so this
-        is a sometimes, not an always.) Open question -- B61 in the internal
-        register, which the split leaves unresolvable from here, so the
-        description above is the part to rely on.
+        JUDGE's. When the cap leaves the JSON unparseable, the grader's
+        ``except Exception`` turns it into a FAIL charged to the SUT model,
+        which never emitted it. When it merely drops a criterion, both graders
+        now say "Missing criterion in judge output" rather than scoring it 0.0
+        -- and a capped reply whose JSON happens to be complete grades normally,
+        so the misattribution is a sometimes, not an always.
+
+        Open question, and the description above is the part to rely on: it is
+        B61 in the internal findings register, a private companion to this
+        repo, so the id will not resolve from here.
         """
         messages: list[dict[str, str]] = []
         if request.system:

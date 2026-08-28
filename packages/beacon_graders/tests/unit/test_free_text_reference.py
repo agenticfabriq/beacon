@@ -109,3 +109,57 @@ def test_judge_failure_yields_zero_verdicts(
     verdicts = grader.grade(item, result)
     assert all(verdict.value == 0.0 for verdict in verdicts)
     assert any("boom" in verdict.justification for verdict in verdicts)
+
+
+def test_a_criterion_the_judge_never_scored_is_not_a_score_of_zero(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """`parsed.get(criterion) or {}` turned an absence into a measurement.
+
+    A judge that omits a criterion -- truncated mid-JSON, or simply not
+    emitting it -- produced `payload.get("score", 0.0)` = 0.0 with an empty
+    justification, which is indistinguishable from the judge reading the
+    answer and scoring it zero. The sibling grader already refuses to guess:
+    `hierarchical_rubric` emits "Missing criterion in judge output". This one
+    now says so too, so a verdict that means "nobody scored this" cannot be
+    read as "scored badly".
+    """
+    grader = _grader_with({"insight_recall": {"score": 0.8, "justification": "4 of 5"}})
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(
+        output={"narrative": "lorem", "citations": ["table_a"]}, output_kind="narrative"
+    )
+
+    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
+
+    assert verdicts["insight_recall"].value == 0.8
+    assert "Missing criterion" in (verdicts["citation_correctness"].justification or "")
+
+
+def test_a_judge_that_really_scored_zero_still_scores_zero(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """Absent and zero are different claims, so they must not collapse."""
+    grader = _grader_with(
+        {
+            "insight_recall": {"score": 0.0, "justification": "nothing recalled"},
+            "citation_correctness": {"score": 0.0, "justification": "no citations"},
+        }
+    )
+    item = make_item(
+        query={"question": "Summarize"},
+        ground_truth={"reference_insights": ["i1"], "data_sources": ["table_a"]},
+        metadata={"output_format": "narrative"},
+    )
+    result = make_result(output={"narrative": "lorem", "citations": []}, output_kind="narrative")
+
+    verdicts = {verdict.criterion: verdict for verdict in grader.grade(item, result)}
+
+    assert verdicts["insight_recall"].value == 0.0
+    assert verdicts["insight_recall"].justification == "nothing recalled"
