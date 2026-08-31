@@ -68,7 +68,16 @@ def test_register_is_idempotent_and_links_project(engine: Engine) -> None:
             "mode_routing",
         ]
         assert first.supported_modes == ["EVAL", "NIGHTLY_LOO"]
-        assert registry.get("mnemiq", MnemiqInProcessSUT.VERSION) is sut
+        # Looked up by the version the SUT DECLARES, not by the class
+        # constant, because the declared version carries the mnemiq build.
+        # Production resolves it the same way, from the persisted
+        # `solution.version` (`harness.py`, `cli.py`), never from the constant.
+        # That the stamp REACHES the version is pinned in
+        # test_build_stamp.py::test_the_declared_version_carries_the_build --
+        # it cannot be pinned here, since mnemiq is absent in CI and only the
+        # unstamped branch would ever run.
+        assert registry.get("mnemiq", sut.identity().version) is sut
+        assert first.version == sut.identity().version
 
 
 def test_register_without_project_skips_link(engine: Engine) -> None:

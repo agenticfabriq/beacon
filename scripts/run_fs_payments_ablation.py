@@ -124,45 +124,6 @@ def _rate(value: object) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
 
 
-def _mnemiq_rev() -> str:
-    """Return the mnemiq working tree's revision, marked when it is dirty.
-
-    Read from the installed package's own location rather than a fixed path,
-    because the editable install is what the SUT actually imports. A dirty
-    tree is reported as such: uncommitted changes are still what ran, and a
-    bare SHA would claim a provenance the bytes do not have.
-    """
-    import shutil
-    import subprocess
-
-    import mnemiq
-
-    git = shutil.which("git")
-    if git is None:
-        return "unknown"
-    root = str(Path(mnemiq.__file__).resolve().parent)
-
-    def _git(*args: str) -> str:
-        # Absolute executable, fully literal argv, and `root` is derived from
-        # the installed package's own location rather than from any input.
-        return subprocess.run(  # noqa: S603
-            [git, "-C", root, *args],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=10,
-        ).stdout.strip()
-
-    try:
-        sha = _git("rev-parse", "--short", "HEAD")
-        dirty = _git("status", "--porcelain")
-    except (subprocess.SubprocessError, OSError):
-        # Not a checkout (a wheel, a vendored copy). Unknown is the honest
-        # value; a placeholder that looks like a revision would be worse.
-        return "unknown"
-    return f"{sha}-dirty" if dirty else sha
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -312,18 +273,6 @@ def main(argv: list[str] | None = None) -> int:
             # Only the experiment's layer is enumerated: baseline plus
             # no_certified_records, the two arms and nothing else.
             layers_enabled={"certified_records": True},
-            # The system under test is mnemiq's WORKING TREE, and nothing else
-            # in the run's identity records which one. `MnemiqInProcessSUT`
-            # pins `VERSION = "0.1.0.dev0"` as a class constant and mnemiq's
-            # package version says the same, so two runs of two different
-            # branches register as one solution AND digest to one
-            # configuration -- and the matrix pools them into a single row.
-            # For an experiment whose whole question is "did this branch move
-            # the number", that is the measurement destroyed at the point it
-            # is read. `extras` is inside the digest (only source_report,
-            # run_tokens and llm_calls are stripped), so naming the revision
-            # here is what makes before and after two rows.
-            extras={"mnemiq_rev": _mnemiq_rev()},
         )
         adapter = AttributionHarnessRunner(runner=runner, session_factory=factory, user_id=user_id)
 

@@ -38,6 +38,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from beacon_runner.sut.mnemiq.build_stamp import build_stamp
 from beacon_runner.types import (
     EvalItem,
     ExecutionResult,
@@ -149,9 +150,14 @@ class MnemiqInProcessSUT:
         ] = {}
 
     def identity(self) -> SolutionIdentity:
+        # The build is part of the system's identity, not of a run's config:
+        # two mnemiq revisions are two solution versions, and pinning VERSION
+        # as a constant merged them into one. See `build_stamp` for why this
+        # belongs here rather than in the config digest.
+        stamp = build_stamp()
         return SolutionIdentity(
             solution_id=self.SOLUTION_ID,
-            version=self.VERSION,
+            version=f"{self.VERSION}+{stamp}" if stamp else self.VERSION,
             owner_team=self._owner_team_id,
             summary=self.SUMMARY,
             supported_modes=["EVAL", "NIGHTLY_LOO"],
