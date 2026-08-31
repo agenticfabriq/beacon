@@ -125,7 +125,10 @@ DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
 ```
 
 Open <http://localhost:8000/ui> and sign in with an API key (one is printed by
-`beacon demo seed`) or with email and password. For a pre-authenticated demo or
+`beacon demo seed`). The sign-in screen takes a key and nothing else: password
+login exists on the API as `POST /v1/auth/password/login`, but no form posts to
+it, and a user created through OIDC — which is how the demo seeds alice and
+carol — has no `password_hash` for it to check. For a pre-authenticated demo or
 kiosk, append `?api_key=bcn_...` — the key moves to local storage and leaves
 the URL.
 

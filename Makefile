@@ -34,10 +34,18 @@ typecheck:
 	$(UV) run mypy packages/ scripts/
 
 demo: db-up migrate
-	DATABASE_URL=$(DATABASE_URL) $(UV) run beacon-worker-promotion &
-	DATABASE_URL=$(DATABASE_URL) $(UV) run beacon-worker-convergence &
-	DATABASE_URL=$(DATABASE_URL) $(UV) run beacon-worker-antigoodhart &
 	DATABASE_URL=$(DATABASE_URL) $(UV) run beacon-worker-retention &
-	DATABASE_URL=$(DATABASE_URL) BEACON_DATABASE_URL=$(DATABASE_URL) $(UV) run uvicorn beacon_ui.api.app:app --reload &
 	DATABASE_URL=$(DATABASE_URL) $(UV) run beacon demo seed
-	DATABASE_URL=$(DATABASE_URL) $(UV) run streamlit run packages/beacon_ui/src/beacon_ui/dashboard/app.py
+	@echo ""
+	@echo "UI:   http://localhost:8000/ui"
+	@echo "Sign in with an API key. The seed prints one on a fresh database; a"
+	@echo "re-run says 'existing key not reprinted' and the first run's key still works."
+	@echo "Ctrl-C stops the API and the retention worker with it."
+	@echo ""
+# Last, and NOT backgrounded: the API has to hold the foreground so Ctrl-C
+# ends the demo. When `streamlit run` was here it did that by accident;
+# replacing it with an echo returned straight to the prompt and orphaned
+# every backgrounded child, with no PID printed and no demo-down target.
+# Its own "Uvicorn running on ..." line is also the readiness signal, which
+# an echo printed before the port binds is not.
+	DATABASE_URL=$(DATABASE_URL) BEACON_DATABASE_URL=$(DATABASE_URL) $(UV) run uvicorn beacon_ui.api.app:app --reload
