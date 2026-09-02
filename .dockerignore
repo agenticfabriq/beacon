@@ -1,9 +1,15 @@
-# Build context exclusions. The .env block is the load-bearing one; the rest
-# keeps host-local state and caches out of the image.
+# Build context exclusions. Two blocks below are the point -- the dumps and
+# .env, each carrying live credential material. The rest is caches and
+# host-local state.
+#
+# Every rule is written `**/`-prefixed. .gitignore matches a bare name at ANY
+# depth, so anything gitignored is invisible in `git status` wherever it sits;
+# a root-anchored rule here would admit the nested copy of a file no commit
+# will ever show you.
 .git
-.venv
-.local
-.worktrees
+**/.venv
+**/.local
+**/.worktrees
 **/__pycache__
 **/*.pyc
 **/.pytest_cache
@@ -11,15 +17,15 @@
 **/.ruff_cache
 **/.hypothesis
 **/*.egg-info
-.claude
-logs
-dist
-.coverage
+**/.claude
+**/logs
+**/dist
+**/.coverage
 docs/screenshots
 
 # Database dumps: 41 MB carrying users.password_hash and api_keys.key_hash.
-# beacon.dump is a directory now; the bare name matches it, the globs catch a
-# dump dropped loose in the tree. Kept in sync with .gitignore, and neither
+# beacon.dump is a directory; the first rule matches it, the globs catch a
+# dump dropped loose anywhere in the tree. Kept in sync with .gitignore, and neither
 # file's rules can be complete -- nothing here produces dumps, so the names
 # are typed by hand.
 **/beacon.dump

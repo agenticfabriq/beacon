@@ -23,8 +23,10 @@ COPY --parents packages/*/pyproject.toml ./
 # --frozen fails on a stale lockfile rather than quietly resolving something
 # the test suite never ran against. --no-install-workspace is what keeps this
 # layer cacheable: without it the workspace source is needed here too.
-# --no-dev keeps mypy, pytest, ruff, hypothesis and statsmodels (with their
-# scipy and pandas transitives) out of an image that serves HTTP.
+# --no-dev keeps mypy, pytest, ruff, hypothesis and statsmodels out of an
+# image that serves HTTP. Not scipy or pandas: those are declared runtime
+# dependencies of beacon_ablation, beacon_ui and beacon_benchmarks, so they
+# ship either way and most of the 1.26 GB is them.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --all-packages --frozen --no-install-workspace --no-dev
 
