@@ -65,7 +65,13 @@ the excluded half, and a membership test wrapped in `~` or `sa.not_` is tagged
 as the complement it is.
 
 Negation is handled on membership gates and equalities in four spellings: `~`,
-`sa.not_(...)`, bare `not_(...)`, and `.is_(False)` / `== False`.
+`sa.not_(...)`, bare `not_(...)`, and `.is_(False)` / `== False`. Complement
+spellings are open-ended and this list is not closed -- `.is_not(True)`,
+`.isnot(True)`, `!= True`, `.is_(sa.false())` and `False == <gate>` all still
+read as the gate itself. `.isnot(...)` is already live in matrix.py, so that
+is a spelling someone reaches for, not a hypothetical. Adding one is a line in
+`_negated_nodes`; the reason they are not all there is that each was added when
+a mutation found it, and these have not been.
 
 **One known blind spot, left open deliberately.**
 
@@ -86,8 +92,9 @@ today's aggregates; this is the form a NEW one could take without this file
 noticing, written down rather than left to be rediscovered one mutation at a
 time.
 
-The per-run check does NOT: it compares the unparsed condition against the literal
-string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
+The per-run check, by contrast, is NOT alias-independent: it compares the
+unparsed condition against the literal string `Result.outcome.in_(_GRADED)`, so
+renaming the model import to `res`
 fails it. That is deliberate -- it is pinning one known site exactly, and a
 behaviour-preserving rename there should be a decision someone makes on
 purpose rather than one this test waves through.
@@ -415,6 +422,37 @@ def test_the_per_run_denominator_still_has_its_gate() -> None:
         f"test inspects gates that exist, so one removed, reshaped, widened or "
         f"AND-ed with a second condition is invisible to it. If the extra condition "
         f"is deliberate, change `expected` here and say why."
+    )
+
+
+def test_the_negation_detector_actually_detects() -> None:
+    """The complement branches have no cover from matrix.py itself.
+
+    matrix.py contains no `.is_(False)` and no `== False` on an outcome
+    predicate, so deleting either branch of `_negated_nodes` leaves every other
+    test in this file green -- detection code with no test, in a file whose
+    whole subject is checks that cannot fail. Synthetic sources instead of
+    mutating the real one, since the point is the helper, not the module.
+    """
+    covered = [
+        "count().filter(~Result.outcome.in_(_GRADED))",
+        "count().filter(sa.not_(Result.outcome.in_(_GRADED)))",
+        "count().filter(not_(Result.outcome.in_(_GRADED)))",
+        "count().filter(Result.outcome.in_(_GRADED).is_(False))",
+        "count().filter(Result.outcome.in_(_GRADED) == False)",  # noqa: E712
+        "count().filter(~(Result.outcome == 'PASS'))",
+    ]
+    for src in covered:
+        tags = _restrictions_of(ast.parse(src))
+        assert any(t.startswith("negated:") for t in tags), (
+            f"{src!r} is a complement and was tagged {tags}. A complement read as "
+            f"a gate is the defect this whole file exists to catch."
+        )
+
+    plain = _restrictions_of(ast.parse("count().filter(Result.outcome.in_(_GRADED))"))
+    assert plain == ["in_:_GRADED"], (
+        f"An unnegated gate must not be tagged as a complement; got {plain}. A "
+        f"detector that flags everything is as useless as one that flags nothing."
     )
 
 
