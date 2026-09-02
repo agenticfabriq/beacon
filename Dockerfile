@@ -42,7 +42,8 @@ COPY --from=build --chown=beacon:beacon /app /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 USER beacon
 EXPOSE 8000
-# --proxy-headers only. The TRUST LIST is deliberately not set here.
+# No trust list here, deliberately. (--proxy-headers is uvicorn's default and
+# is written out only to make the dependency visible; it carries no behaviour.)
 #
 # uvicorn honours X-Forwarded-Proto only from addresses in
 # --forwarded-allow-ips, which defaults to $FORWARDED_ALLOW_IPS or 127.0.0.1.
@@ -51,8 +52,10 @@ EXPOSE 8000
 # an http:// redirect_uri for an https-only site. Inert while oidc_issuer is
 # empty; scheduled to break on the day someone enables single sign-on.
 #
-# So the deployment sets FORWARDED_ALLOW_IPS to the proxy's subnet, next to the
-# network that defines it (beacon-internal, deploy/compose.yaml). NOT `*` here:
+# So the deployment must set FORWARDED_ALLOW_IPS to the proxy's address, next
+# to the network that defines it -- beacon-internal's deploy/compose.yaml does,
+# pinning Caddy to a fixed address and naming exactly that. If it is ever unset,
+# the failure is silent in the direction described above. NOT `*`:
 # `*` puts uvicorn on its always-trust path, where the client address becomes
 # the LEFTMOST X-Forwarded-For entry -- appended to by the proxy, so
 # attacker-chosen even in a correct deployment -- instead of walking the chain
