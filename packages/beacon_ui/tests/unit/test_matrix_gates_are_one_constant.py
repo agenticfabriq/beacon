@@ -439,8 +439,13 @@ def test_the_negation_detector_actually_detects() -> None:
         "count().filter(sa.not_(Result.outcome.in_(_GRADED)))",
         "count().filter(not_(Result.outcome.in_(_GRADED)))",
         "count().filter(Result.outcome.in_(_GRADED).is_(False))",
-        "count().filter(Result.outcome.in_(_GRADED) == False)",  # noqa: E712
+        "count().filter(Result.outcome.in_(_GRADED) == False)",
         "count().filter(~(Result.outcome == 'PASS'))",
+        # Compound, so the subtree walk is exercised. Without it -- marking only
+        # the operand node itself -- every case above still passes while a
+        # complement wrapping a conjunction reads as the gate inside it.
+        "count().filter(~sa.or_(Result.outcome.in_(_GRADED), Result.error.is_(None)))",
+        "count().filter(sa.not_(sa.and_(Result.outcome == 'PASS', Result.id.isnot(None))))",
     ]
     for src in covered:
         tags = _restrictions_of(ast.parse(src))
