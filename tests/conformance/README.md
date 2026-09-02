@@ -10,9 +10,28 @@ The file is **byte-identical in both repos**:
 - `beacon/tests/conformance/grading-conformance-v2.json`
 - `semantic-layer-for-ai/crates/grading_pipeline/tests/conformance/grading-conformance-v2.json`
 
-Each repo has a test that pins its SHA-256. Editing one copy and not the other
-fails both suites, which is the point: a shared contract that can drift silently
-is not shared.
+Each repo has a test that pins its SHA-256 -- against its OWN copy, which is
+less than it sounds and less than this file used to claim.
+
+| what you do | what happens |
+|---|---|
+| edit one copy, leave its pin | that repo's suite fails; the other stays green |
+| edit one copy **and** its pin, forget the other repo | **both suites pass, with two different contracts** |
+
+The second row is the silent drift the pins are supposed to prevent, and no
+test in either repo can see it: each hashes the file beside it against the
+literal above it, and neither reads the other copy even with both repos checked
+out. Checking out both in CI fixes nothing. The missing comparison is between
+the two literals.
+
+Detection is therefore two steps, not one:
+
+1. Run both suites -- ties each copy to its own pin.
+2. Compare the two literals -- ties the two repos together.
+
+Step 2 is a human protocol. Comparing the two JSON files instead of the two
+literals is not a substitute either: edit a copy without its pin and the
+literals still match while the files differ. Both steps, in that order.
 
 To change the contract: edit both copies, update the pinned digest in both
 tests, and record why in each repo's findings register.

@@ -6,8 +6,19 @@ they did not: beacon called 45 correct answers wrong for want of a relative
 bound, and verity applied a curated tolerance to a scalar while comparing the
 same number inside a table byte-exactly.
 
-The case file is byte-identical in both repos and its digest is pinned here, so
-editing one copy and not the other fails both suites.
+The case file is byte-identical in both repos and its digest is pinned here.
+That pin catches an edit to THIS repo's copy that forgot to update THIS repo's
+constant. It cannot see the other repo BY CONSTRUCTION: it hashes the file
+beside it against the literal above it, and would still not read the other copy
+if both repos were checked out side by side. So checking out both in CI fixes
+nothing -- the comparison that is missing is between the two literals, and no
+test in either repo makes it.
+
+Editing one copy fails ONE suite. Editing a copy together with its own pin
+while forgetting the other repo passes BOTH, with two different contracts,
+which is the silent drift this file used to claim was impossible. Keeping the
+two equal is a human protocol; see the sibling README for what is and is not
+enforced.
 """
 
 from __future__ import annotations
@@ -23,8 +34,9 @@ from beacon_graders.tolerance import Tolerance
 
 CONTRACT = Path(__file__).parent / "conformance" / "grading-conformance-v2.json"
 
-# Bump only by editing BOTH copies of the file and BOTH pinned digests. A shared
-# contract that can drift silently is not shared.
+# Bump only by editing BOTH copies of the file and BOTH pinned digests, then
+# confirm this literal still equals verity's. Nothing here can check that for
+# you.
 CONTRACT_SHA256 = "e259b1e5764c999291be6740ab3172e0d910798dea04cfd59f29f63caba84314"
 
 
@@ -45,12 +57,18 @@ def _tolerance(case: dict[str, Any]) -> Tolerance:
     return Tolerance.model_validate(merged)
 
 
-def test_the_contract_has_not_drifted_from_the_other_repo() -> None:
+def test_the_contract_has_not_changed_without_its_pin() -> None:
+    """Named for what it checks. It was called
+    ``test_the_contract_has_not_drifted_from_the_other_repo``, which promised a
+    cross-repo comparison the assertion never made -- so the one test that
+    WOULD report a real drift reported it under a name claiming coverage that
+    does not exist."""
     digest = hashlib.sha256(CONTRACT.read_bytes()).hexdigest()
 
     assert digest == CONTRACT_SHA256, (
-        "grading-conformance-v2.json changed. Update BOTH repos' copies and BOTH "
-        f"pinned digests, or the two graders are no longer testing the same contract. "
+        "grading-conformance-v2.json changed without its pin. Update BOTH repos' "
+        "copies and BOTH pinned digests, then confirm the two literals are equal "
+        "-- no test does that, in either repo. "
         f"New digest: {digest}"
     )
 
