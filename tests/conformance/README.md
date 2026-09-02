@@ -27,11 +27,16 @@ the two literals.
 Detection is therefore two steps, not one:
 
 1. Run both suites -- ties each copy to its own pin.
-2. Compare the two literals -- ties the two repos together.
+2. Compare the two copies across repos -- ties the two repos together.
 
-Step 2 is a human protocol. Comparing the two JSON files instead of the two
-literals is not a substitute either: edit a copy without its pin and the
-literals still match while the files differ. Both steps, in that order.
+Step 2 is a human protocol, and comparing the two JSON FILES is the direct way
+to do it: byte-identity across repos is the property, and a file comparison
+answers it outright. Comparing the two literals only implies that property when
+step 1 has already passed in both repos -- edit a copy without its pin and the
+two literals still match while the files differ.
+
+    diff <repo-a>/.../grading-conformance-v2.json \
+         <repo-b>/.../grading-conformance-v2.json
 
 To change the contract: edit both copies, update the pinned digest in both
 tests, and record why in each repo's findings register.

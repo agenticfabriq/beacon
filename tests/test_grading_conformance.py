@@ -11,8 +11,10 @@ That pin catches an edit to THIS repo's copy that forgot to update THIS repo's
 constant. It cannot see the other repo BY CONSTRUCTION: it hashes the file
 beside it against the literal above it, and would still not read the other copy
 if both repos were checked out side by side. So checking out both in CI fixes
-nothing -- the comparison that is missing is between the two literals, and no
-test in either repo makes it.
+nothing -- the comparison that is missing is between the two COPIES, and no
+test in either repo makes it. (Verified on both halves: verity's
+`grading_conformance.rs` hashes an ``include_str!`` of its own sibling file
+against its own literal, exactly as this does.)
 
 Editing one copy fails ONE suite. Editing a copy together with its own pin
 while forgetting the other repo passes BOTH, with two different contracts,

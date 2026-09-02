@@ -246,9 +246,12 @@ Stop Postgres with `make db-down`.
 
 `tests/conformance/grading-conformance-v2.json` is a contract shared with the
 semantic layer: cases both graders must agree on. It is byte-identical in both
-repos with its SHA-256 pinned in both suites, so editing one copy and not the
-other fails both. If you change how answers are compared, that file is where the
-change has to be argued.
+repos with its SHA-256 pinned in both suites -- but each pin only ties that
+repo's copy to that repo's constant, so editing one copy and its pin while
+forgetting the other repo leaves BOTH suites green on two different contracts.
+See `tests/conformance/README.md` for what is and is not enforced. If you
+change how answers are compared, that file is where the change has to be
+argued.
 
 ## Repository layout
 
