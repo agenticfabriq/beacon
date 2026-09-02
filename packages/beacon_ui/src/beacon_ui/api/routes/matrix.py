@@ -194,11 +194,18 @@ def results_matrix(
             # numerator cannot answer that: a system that matched nothing and
             # a metric that never ran both count zero, and only one of them is
             # a measurement. These decide None vs 0.0 below.
+            #
+            # Restricted to _GRADED, matching the denominator they gate.
+            # Verdicts survive an ERROR composite -- the composer returns the
+            # ones earlier graders already emitted, and every one is
+            # persisted -- so counting any outcome would let a row whose
+            # graded results were never scored report 0.0 on the strength of
+            # verdicts attached to results the rate excludes.
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(got_facts_now.c.bool_value.isnot(None))
+            .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.isnot(None))
             .label("n_got_facts_scored"),
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(exact_now.c.bool_value.isnot(None))
+            .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.isnot(None))
             .label("n_exact_scored"),
             sa.func.percentile_cont(0.5)
             .within_group(Result.tokens_input + Result.tokens_output)

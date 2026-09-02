@@ -307,10 +307,16 @@ def test_a_metric_scored_and_never_true_reads_zero_not_none(
 
     The row above passes under either reading because it seeds no verdicts at
     all, so the numerator and the verdict count are both zero and None is
-    right either way. This is the case that separates them: every gradeable
-    result carries a got_facts verdict and every one of them is false. The
-    system was measured and matched nothing, which is 0.0 -- reporting None
-    tells the reader the metric was never run.
+    right either way. This is the case that separates them: the PASS and the
+    FAIL each carry a verdict and each is false, so the metric was read and
+    matched nothing -- 0.0. Reporting None says it was never run. (The DEFER
+    stays unscored, as it is in the corpus: a refusal has no output to
+    compare. It is in the denominator either way.)
+
+    Both readings are asserted, not just the tolerant one. Guarding only
+    got_facts leaves exact_rate free to be reverted to the numerator gate with
+    every test in this file still green -- which is the shape of defect this
+    test exists to catch, one metric over.
     """
     from beacon_storage.models.runs import Result
     from beacon_storage.repository.verdicts import VerdictRepo
@@ -319,6 +325,49 @@ def test_a_metric_scored_and_never_true_reads_zero_not_none(
     results = session.scalars(select(Result).where(Result.team_id == world.acme_team_id)).all()
     for result in results:
         if str(result.outcome) not in ("PASS", "FAIL"):
+            continue
+        for metric in ("got_facts", "exact_match"):
+            VerdictRepo(session).create(
+                team_id=world.acme_team_id,
+                result_id=result.id,
+                grader="execution_grounded_sql",
+                grader_version="v1",
+                metric=metric,
+                criterion="correctness",
+                bool_value=False,
+                value=0.0,
+                justification="seeded",
+                raw_output=None,
+            )
+    session.commit()
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    assert row["got_facts_rate"] == pytest.approx(0.0)
+    assert row["exact_rate"] == pytest.approx(0.0)
+
+
+def test_a_verdict_on_an_excluded_result_does_not_make_the_row_look_measured(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """The scored count has to describe the denominator it gates.
+
+    ERROR leaves the rate denominator, but its verdicts survive: the composer
+    returns whatever earlier graders already emitted, and every one is
+    persisted. So a row can hold a got_facts verdict on a result the rate
+    excludes. Counting that as evidence the metric was read makes an entirely
+    unscored row report 0.0 -- "measured, matched nothing" -- on the strength
+    of a verdict attached to a result no rate counts.
+
+    model-b is PASS, PASS, ERROR. Only the ERROR is scored here.
+    """
+    from beacon_storage.models.runs import Result
+    from beacon_storage.repository.verdicts import VerdictRepo
+    from sqlalchemy import select
+
+    errored = session.scalars(select(Result).where(Result.team_id == world.acme_team_id)).all()
+    for result in errored:
+        if str(result.outcome) != "ERROR":
             continue
         VerdictRepo(session).create(
             team_id=world.acme_team_id,
@@ -334,9 +383,10 @@ def test_a_metric_scored_and_never_true_reads_zero_not_none(
         )
     session.commit()
 
-    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-b")
 
-    assert row["got_facts_rate"] == pytest.approx(0.0)
+    assert row["n_errors"] == 1
+    assert row["got_facts_rate"] is None
 
 
 def test_only_the_latest_verdict_version_is_read(
