@@ -1,0 +1,39 @@
+# Build context exclusions. Two of these are not hygiene, they are the point --
+# see below. Everything else is size and reproducibility.
+.git
+.venv
+.local
+.worktrees
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+docs/screenshots
+
+# Database dumps: 41 MB carrying users.password_hash and api_keys.key_hash.
+# beacon.dump is a directory now; the bare name matches it, the globs catch a
+# dump dropped loose in the root. Kept in sync with .gitignore, and neither
+# file's rules can be complete -- nothing in this tree produces dumps, so the
+# names are typed by hand.
+beacon.dump
+*.dump
+*.dump.*
+*.backup
+*.sql.gz
+
+# .env is the dangerous one, and it is worse than a leak.
+#
+# It holds a live BEACON_JUDGE_API_KEY and REPO_GUARD_NAME_PATTERNS. `COPY . .`
+# would bake both into the image pushed to ECR, and they would not sit there
+# inert: api/config.py sets `env_file=".env"` and this image's WORKDIR is
+# /app, so the DEPLOYED container would read it and drive the LLM judge
+# against the workstation's endpoint on that key.
+#
+# .env is gitignored, so the clean-tree check before a build passes without
+# noticing it. Nothing else catches this.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
