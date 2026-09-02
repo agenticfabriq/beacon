@@ -300,6 +300,45 @@ def test_rows_graded_before_the_second_metric_read_none_not_zero(
     assert row["got_facts_rate"] is None
 
 
+def test_a_metric_scored_and_never_true_reads_zero_not_none(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """Scored-and-matched-nothing is a measurement; never-scored is not.
+
+    The row above passes under either reading because it seeds no verdicts at
+    all, so the numerator and the verdict count are both zero and None is
+    right either way. This is the case that separates them: every gradeable
+    result carries a got_facts verdict and every one of them is false. The
+    system was measured and matched nothing, which is 0.0 -- reporting None
+    tells the reader the metric was never run.
+    """
+    from beacon_storage.models.runs import Result
+    from beacon_storage.repository.verdicts import VerdictRepo
+    from sqlalchemy import select
+
+    results = session.scalars(select(Result).where(Result.team_id == world.acme_team_id)).all()
+    for result in results:
+        if str(result.outcome) not in ("PASS", "FAIL"):
+            continue
+        VerdictRepo(session).create(
+            team_id=world.acme_team_id,
+            result_id=result.id,
+            grader="execution_grounded_sql",
+            grader_version="v1",
+            metric="got_facts",
+            criterion="correctness",
+            bool_value=False,
+            value=0.0,
+            justification="seeded",
+            raw_output=None,
+        )
+    session.commit()
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    assert row["got_facts_rate"] == pytest.approx(0.0)
+
+
 def test_only_the_latest_verdict_version_is_read(
     api_client: TestClient, world: _World, seeded: Seeded, session: Session
 ) -> None:

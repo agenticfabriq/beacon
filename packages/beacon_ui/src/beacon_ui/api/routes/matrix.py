@@ -190,6 +190,16 @@ def results_matrix(
             sa.func.count(sa.func.distinct(Result.id))
             .filter(exact_now.c.bool_value.is_(True))
             .label("n_exact"),
+            # How many results the metric was READ on, true or false. The
+            # numerator cannot answer that: a system that matched nothing and
+            # a metric that never ran both count zero, and only one of them is
+            # a measurement. These decide None vs 0.0 below.
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(got_facts_now.c.bool_value.isnot(None))
+            .label("n_got_facts_scored"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(exact_now.c.bool_value.isnot(None))
+            .label("n_exact_scored"),
             sa.func.percentile_cont(0.5)
             .within_group(Result.tokens_input + Result.tokens_output)
             .label("median_tokens"),
@@ -253,9 +263,18 @@ def results_matrix(
                     if int(record.n_portability_flagged)
                     else None
                 ),
-                exact_rate=(_rate(int(record.n_exact), graded) if int(record.n_exact) else None),
+                # Gated on whether the metric was read, never on whether it
+                # was ever true. Guarding with the numerator made a row that
+                # was scored and matched nothing report None -- "the grader
+                # never ran" -- and the arms most likely to hit it are the
+                # weak ones a reader is trying to tell apart.
+                exact_rate=(
+                    _rate(int(record.n_exact), graded) if int(record.n_exact_scored) else None
+                ),
                 got_facts_rate=(
-                    _rate(int(record.n_got_facts), graded) if int(record.n_got_facts) else None
+                    _rate(int(record.n_got_facts), graded)
+                    if int(record.n_got_facts_scored)
+                    else None
                 ),
                 defer_rate=_rate(int(record.n_defer), graded),
                 wrong_rate=_rate(int(record.n_fail), graded),

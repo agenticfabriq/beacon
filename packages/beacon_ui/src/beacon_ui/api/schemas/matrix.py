@@ -51,11 +51,13 @@ class MatrixRowOut(BaseModel):
     # suite-independent. EX stays the benchmark-headline number (strict for
     # BIRD, tolerant for Spider -- each benchmark defines its own); this
     # column means the same thing on every row. None when no verdict carries
-    # the metric, which must not read as 0%.
+    # the metric, which must not read as 0%; a metric that WAS read and matched
+    # nothing is 0.0, which must not read as None.
     exact_rate: float | None = None
     # The tolerant reading: right data, shape-tolerant (mnemiq's CORRECT_FACTS,
     # computed by beacon's own grader). None when no verdict carries the metric
-    # -- runs graded before the grader emitted it -- which must not read as 0%.
+    # -- runs graded before the grader emitted it -- which must not read as 0%;
+    # read and matched nothing is 0.0, which must not read as None.
     got_facts_rate: float | None = None
     defer_rate: float | None = None
     wrong_rate: float | None = None

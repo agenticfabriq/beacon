@@ -1,14 +1,14 @@
 # Shared grading conformance suite
 
-`grading-conformance-v1.json` is the contract between the two graders in the
+`grading-conformance-v2.json` is the contract between the two graders in the
 portfolio. Verity decides what "correct" means for a question; beacon decides
 who is more often correct. If the two disagree about the same answer, neither
 number can be cited — and nothing tested that they agreed.
 
 The file is **byte-identical in both repos**:
 
-- `beacon/tests/conformance/grading-conformance-v1.json`
-- `semantic-layer-for-ai/crates/grading_pipeline/tests/conformance/grading-conformance-v1.json`
+- `beacon/tests/conformance/grading-conformance-v2.json`
+- `semantic-layer-for-ai/crates/grading_pipeline/tests/conformance/grading-conformance-v2.json`
 
 Each repo has a test that pins its SHA-256. Editing one copy and not the other
 fails both suites, which is the point: a shared contract that can drift silently
