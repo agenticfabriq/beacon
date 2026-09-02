@@ -35,17 +35,32 @@ answers it outright. Comparing the two literals only implies that property when
 step 1 has already passed in both repos -- edit a copy without its pin and the
 two literals still match while the files differ.
 
-    diff beacon/tests/conformance/grading-conformance-v2.json \
-         semantic-layer-for-ai/crates/grading_pipeline/tests/conformance/grading-conformance-v2.json
+    shasum -a 256 \
+      ~/src/fabriq/beacon/tests/conformance/grading-conformance-v2.json \
+      ~/src/sandbox/semantic-layer-for-ai/crates/grading_pipeline/tests/conformance/grading-conformance-v2.json
 
-Both paths spelled out, because they are not the same subpath and a symmetric
-`<repo-a>/...` / `<repo-b>/...` placeholder invites pasting one repo's path
-twice. `diff` then prints nothing and exits 0 -- byte-for-byte the same
-observation as a real pass, from a comparison of a file with itself. The one
-step that catches cross-repo drift would be the step reporting a false clean.
+Two digests, two paths, printed. Compare the digests; read the paths to confirm
+they are two different files.
 
-To change the contract: edit both copies, update the pinned digest in both
-tests, and record why in each repo's findings register.
+`shasum` and not `diff`, for the reason this whole section exists. `diff`
+prints nothing on a real match AND nothing when handed the same file twice, so
+a mis-paste is indistinguishable from a pass -- the one step that catches
+cross-repo drift would be the step reporting a false clean. The subpaths are
+not symmetric (`tests/conformance/` here, `crates/grading_pipeline/tests/conformance/`
+there) and the repos are not siblings on disk, so both are written in full
+rather than elided into matching placeholders that invite pasting one twice.
+Adjust the roots to wherever the two repos are checked out; the point is that
+the output names what it read.
+
+To change the contract, four steps and the last one is the only cross-repo
+check there is:
+
+1. Edit both copies.
+2. Update the pinned digest in both tests.
+3. Run both suites.
+4. `shasum` both copies and compare, as above.
+
+Record why in each repo's findings register.
 
 Every case came from a real disagreement or from a bound one of the two graders
 had wrong. `num-representation-noise` is the 45 correct answers beacon was
