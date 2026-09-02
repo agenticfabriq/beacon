@@ -1,26 +1,32 @@
-# Build context exclusions. Two of these are not hygiene, they are the point --
-# see below. Everything else is size and reproducibility.
+# Build context exclusions. The .env block is the load-bearing one; the rest
+# keeps host-local state and caches out of the image.
 .git
 .venv
 .local
 .worktrees
 **/__pycache__
 **/*.pyc
-.pytest_cache
-.mypy_cache
-.ruff_cache
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.hypothesis
+**/*.egg-info
+.claude
+logs
+dist
+.coverage
 docs/screenshots
 
 # Database dumps: 41 MB carrying users.password_hash and api_keys.key_hash.
 # beacon.dump is a directory now; the bare name matches it, the globs catch a
-# dump dropped loose in the root. Kept in sync with .gitignore, and neither
-# file's rules can be complete -- nothing in this tree produces dumps, so the
-# names are typed by hand.
-beacon.dump
-*.dump
-*.dump.*
-*.backup
-*.sql.gz
+# dump dropped loose in the tree. Kept in sync with .gitignore, and neither
+# file's rules can be complete -- nothing here produces dumps, so the names
+# are typed by hand.
+**/beacon.dump
+**/*.dump
+**/*.dump.*
+**/*.backup
+**/*.sql.gz
 
 # .env is the dangerous one, and it is worse than a leak.
 #
@@ -30,10 +36,12 @@ beacon.dump
 # /app, so the DEPLOYED container would read it and drive the LLM judge
 # against the workstation's endpoint on that key.
 #
-# .env is gitignored, so the clean-tree check before a build passes without
-# noticing it. Nothing else catches this.
-.env
-.env.*
-!.env.example
-*.pem
-*.key
+# `**/` and not a bare name: .gitignore's `.env` matches at ANY depth, so a
+# file at packages/beacon_ui/.env is invisible to git. A root-anchored rule
+# here would let exactly that file into the image -- gitignored, so no commit
+# ever shows it, and unexcluded, so every build carries it.
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key

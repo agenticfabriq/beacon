@@ -1,31 +1,35 @@
+# syntax=docker/dockerfile:1.7-labs
 FROM python:3.13-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
 WORKDIR /app
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
+
+# UV_PYTHON_DOWNLOADS=0 is load-bearing, not a preference. uv defaults to
+# python-preference=managed and will fetch its own CPython into
+# /root/.local/share/uv/python -- outside /app, and so outside the only thing
+# the runtime stage copies. The venv's interpreter symlink would dangle and
+# CMD would fail to exec. Pinned to the base image's interpreter instead.
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
 
 # Dependency layer: manifests only, so editing source does not reinstall the
-# world. Every workspace member's pyproject.toml has to be here -- uv resolves
-# the whole workspace at once and fails on a member it cannot find, so this
-# list is not an optimisation, it is a requirement.
+# world. --parents keeps each member's path, which a plain glob would flatten.
+# Written as a glob rather than nine COPY lines because uv resolves the whole
+# workspace at once and fails on a member it cannot find: hand-listing them
+# duplicates `members = ["packages/*"]` from pyproject.toml with nothing
+# enforcing the copy, and a tenth package would break this build with no
+# signal until someone built it by hand.
 COPY pyproject.toml uv.lock ./
-COPY packages/beacon_ablation/pyproject.toml packages/beacon_ablation/
-COPY packages/beacon_benchmarks/pyproject.toml packages/beacon_benchmarks/
-COPY packages/beacon_graders/pyproject.toml packages/beacon_graders/
-COPY packages/beacon_iam/pyproject.toml packages/beacon_iam/
-COPY packages/beacon_registry/pyproject.toml packages/beacon_registry/
-COPY packages/beacon_runner/pyproject.toml packages/beacon_runner/
-COPY packages/beacon_storage/pyproject.toml packages/beacon_storage/
-COPY packages/beacon_ui/pyproject.toml packages/beacon_ui/
-COPY packages/beacon_workers/pyproject.toml packages/beacon_workers/
+COPY --parents packages/*/pyproject.toml ./
 
 # --frozen fails on a stale lockfile rather than quietly resolving something
 # the test suite never ran against. --no-install-workspace is what keeps this
 # layer cacheable: without it the workspace source is needed here too.
+# --no-dev keeps mypy, pytest, ruff, hypothesis and statsmodels (with their
+# scipy and pandas transitives) out of an image that serves HTTP.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --all-packages --frozen --no-install-workspace
+    uv sync --all-packages --frozen --no-install-workspace --no-dev
 
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --all-packages --frozen
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --all-packages --frozen --no-dev
 
 FROM python:3.13-slim AS runtime
 RUN useradd --create-home --uid 10001 beacon
