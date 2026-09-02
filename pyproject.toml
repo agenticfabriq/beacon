@@ -46,6 +46,12 @@ mypy_path = [
     "packages/beacon_sdk/src",
     "packages/beacon_workers/src",
     "packages/beacon_benchmarks/src",
+    # `scripts/` is not a package and is imported by path at runtime
+    # (`sys.path.insert` in the bootstrap-key test). Without it here, mypy
+    # cannot resolve that import and the module goes unchecked -- while
+    # `make typecheck` already runs over `scripts/`, so the file IS checked
+    # and only its importers are not.
+    "scripts",
 ]
 
 [[tool.mypy.overrides]]
