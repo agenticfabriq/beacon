@@ -28,22 +28,26 @@ because matrix.py's module docstring states the rule as an exclusion ("ERROR
 leaves the denominator"). If one is ever genuinely wanted, this test is the
 place to argue for it.
 
-**Two checks, because neither covers the other.**
+**Three checks, because no two of them cover the third.**
 
 `test_every_membership_gate_names_the_constant` is module-wide: any
-`outcome.in_(...)` anywhere in the file must name `_GRADED`. It is the only
-thing covering gates that are not numerators -- `_per_run_rate`'s own
-denominator among them, which a derived check never inspects because
-`.label("rate")` is not a `_rate(..., graded)` call site.
+`outcome.in_(...)` anywhere must name `_GRADED`. It catches a gate that
+disagrees with the constant. It cannot catch a gate that is absent, because
+there is then nothing to inspect.
 
-`test_every_numerator_over_graded_is_restricted_to_graded_rows` is derived:
-the numerators are the `_rate(int(record.X), graded)` call sites, so an
-aggregate added tomorrow is checked the moment it is divided. It is the only
-thing covering a numerator with NO gate, which the module-wide check cannot see
-because there is nothing to inspect.
+`test_every_numerator_over_graded_is_restricted_to_graded_rows` derives the
+numerators from the `_rate(int(record.X), graded)` call sites, so an aggregate
+added tomorrow is checked the moment it is divided. It catches a numerator with
+NO restriction. It never reaches `_per_run_rate`, whose result is labelled
+"rate" and divided by nothing.
 
-An earlier version had only the first, then only the second. Each time, the
-dropped one was the only cover for a real form.
+`test_the_per_run_denominator_still_has_its_gate` asserts presence and exact
+shape at one named site, because the other two are both blind there: removing
+that gate leaves nothing for the first to inspect, and the second does not look.
+
+An earlier version had only the first, then only the second, then the first two
+without the third. Each time the missing one was the sole cover for a real
+form, and each gap was found by mutation rather than by reading.
 
 **Reach, stated rather than left to be inferred.** This reads source with
 `ast`. It sees `<anything>.outcome.in_/.notin_(X)` whatever the left-hand name
@@ -206,10 +210,10 @@ def test_every_membership_gate_names_the_constant() -> None:
             offenders.append((node.lineno, f"{func.attr}({arg})"))
 
     assert seen, (
-        f"No outcome membership gate found anywhere in matrix.py. Either the rates "
-        f"stopped filtering by outcome -- in which case B68 is back -- or they were "
-        f"rewritten in a form this walk cannot see. Either way this test is now "
-        f"checking nothing; read the file rather than trusting the green."
+        "No outcome membership gate found anywhere in matrix.py. Either the rates "
+        "stopped filtering by outcome -- in which case B68 is back -- or they were "
+        "rewritten in a form this walk cannot see. Either way this test is now "
+        "checking nothing; read the file rather than trusting the green."
     )
     assert not offenders, (
         f"Outcome membership gates that do not name {GATE_CONSTANT}: {offenders}. "
@@ -244,24 +248,46 @@ def test_the_per_run_denominator_still_has_its_gate() -> None:
         "this check with it; if it was deleted, delete this test deliberately."
     )
 
-    # Presence, not first-match: this function holds BOTH an `outcome == "PASS"`
-    # numerator and the `in_(_GRADED)` denominator, and a first-match helper
-    # returns whichever it walks into first.
-    gates = [
-        ast.unparse(node.args[0]) if node.args else "<none>"
+    # The DENOMINATOR's filter specifically, and it must be the whole condition.
+    #
+    # "contains an in_(_GRADED) node somewhere" is not enough: widening it to
+    # `in_(_GRADED) | (outcome == "ERROR")` still contains one, and puts ERROR
+    # back in the denominator behind ex_rate_min/ex_rate_max -- B68 verbatim,
+    # the mutation this test exists for. The behavioural spread test cannot see
+    # it either, since model-a's seed is PASS/FAIL/DEFER with no ERROR.
+    #
+    # The denominator is the `nullif(count().filter(X), 0)` divisor; X is the
+    # condition that must be exactly the gate.
+    divisors = [
+        node.args[0]
         for node in ast.walk(func)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "in_"
-        and isinstance(node.func.value, ast.Attribute)
-        and node.func.value.attr == "outcome"
+        and node.func.attr == "nullif"
+        and node.args
     ]
+    assert divisors, (
+        "No `nullif(...)` divisor found in `_per_run_rate`. The rate was "
+        "restructured; this check no longer knows where the denominator is."
+    )
 
-    assert GATE_CONSTANT in gates, (
-        f"`_per_run_rate` has no `outcome.in_({GATE_CONSTANT})` gate. Found: {gates}. "
-        f"Its denominator feeds ex_rate_min and ex_rate_max, and nothing else in this "
-        f"file checks it -- the module-wide test inspects gates that exist, so a "
-        f"removed or reshaped one is invisible to it."
+    conditions: list[str] = []
+    for divisor in divisors:
+        for node in ast.walk(divisor):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "filter"
+                and node.args
+            ):
+                conditions.append(ast.unparse(node.args[0]))
+
+    expected = f"Result.outcome.in_({GATE_CONSTANT})"
+    assert expected in conditions, (
+        f"`_per_run_rate`'s denominator is not exactly `{expected}`. Found: "
+        f"{conditions}. That denominator feeds ex_rate_min and ex_rate_max, nothing "
+        f"else in this file checks it -- the module-wide test inspects gates that "
+        f"exist, so a removed, reshaped or WIDENED one is invisible to it."
     )
 
 
