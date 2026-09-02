@@ -22,7 +22,7 @@ The second row is the silent drift the pins are supposed to prevent, and no
 test in either repo can see it: each hashes the file beside it against the
 literal above it, and neither reads the other copy even with both repos checked
 out. Checking out both in CI fixes nothing. The missing comparison is between
-the two literals.
+the two copies.
 
 Detection is therefore two steps, not one:
 
@@ -35,8 +35,14 @@ answers it outright. Comparing the two literals only implies that property when
 step 1 has already passed in both repos -- edit a copy without its pin and the
 two literals still match while the files differ.
 
-    diff <repo-a>/.../grading-conformance-v2.json \
-         <repo-b>/.../grading-conformance-v2.json
+    diff beacon/tests/conformance/grading-conformance-v2.json \
+         semantic-layer-for-ai/crates/grading_pipeline/tests/conformance/grading-conformance-v2.json
+
+Both paths spelled out, because they are not the same subpath and a symmetric
+`<repo-a>/...` / `<repo-b>/...` placeholder invites pasting one repo's path
+twice. `diff` then prints nothing and exits 0 -- byte-for-byte the same
+observation as a real pass, from a comparison of a file with itself. The one
+step that catches cross-repo drift would be the step reporting a false clean.
 
 To change the contract: edit both copies, update the pinned digest in both
 tests, and record why in each repo's findings register.

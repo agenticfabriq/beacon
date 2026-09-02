@@ -37,8 +37,9 @@ from beacon_graders.tolerance import Tolerance
 CONTRACT = Path(__file__).parent / "conformance" / "grading-conformance-v2.json"
 
 # Bump only by editing BOTH copies of the file and BOTH pinned digests, then
-# confirm this literal still equals verity's. Nothing here can check that for
-# you.
+# diff this repo's copy against verity's. Nothing here can check that for you,
+# and diffing the two COPIES is the direct check -- comparing the two pinned
+# literals only implies byte-identity once both suites have passed.
 CONTRACT_SHA256 = "e259b1e5764c999291be6740ab3172e0d910798dea04cfd59f29f63caba84314"
 
 
@@ -69,7 +70,7 @@ def test_the_contract_has_not_changed_without_its_pin() -> None:
 
     assert digest == CONTRACT_SHA256, (
         "grading-conformance-v2.json changed without its pin. Update BOTH repos' "
-        "copies and BOTH pinned digests, then confirm the two literals are equal "
+        "copies and BOTH pinned digests, then diff this copy against verity's "
         "-- no test does that, in either repo. "
         f"New digest: {digest}"
     )
