@@ -283,7 +283,8 @@ def test_got_facts_is_reported_beside_exact_match(
                 grader_version="v1",
                 metric=metric,
                 criterion="correctness",
-                # everything that graded PASS or FAIL got the facts in this seed
+                # everything that graded PASS or FAIL is right under both
+                # readings in this seed; they diverge in the test below
                 bool_value=True,
                 value=1.0,
                 justification="seeded",
@@ -298,6 +299,50 @@ def test_got_facts_is_reported_beside_exact_match(
     # gated on PASS would read 1/3 for both and look entirely plausible.
     assert row["got_facts_rate"] == pytest.approx(2 / 3)
     assert row["exact_rate"] == pytest.approx(2 / 3)
+
+
+def test_the_strict_and_tolerant_columns_report_different_readings(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """The two columns must not be able to be the same wire.
+
+    The test above seeds both metrics identically, so it proves each column is
+    not EX without proving either is not the OTHER: pointing the strict
+    column's subquery at "got_facts" passes it unchanged, and the strict column
+    then publishes the tolerant number under the strict name.
+
+    So seed them apart, which is also the real case -- tolerant forgives shape,
+    strict does not, and B58's 100.5% came from exactly this overlap. Right
+    facts on the PASS and the FAIL, exact match on the PASS alone.
+    """
+    from beacon_storage.models.runs import Result
+    from beacon_storage.repository.verdicts import VerdictRepo
+    from sqlalchemy import select
+
+    results = session.scalars(select(Result).where(Result.team_id == world.acme_team_id)).all()
+    for result in results:
+        outcome = str(result.outcome)
+        if outcome not in ("PASS", "FAIL"):
+            continue
+        for metric, matched in (("got_facts", True), ("exact_match", outcome == "PASS")):
+            VerdictRepo(session).create(
+                team_id=world.acme_team_id,
+                result_id=result.id,
+                grader="execution_grounded_sql",
+                grader_version="v1",
+                metric=metric,
+                criterion="correctness",
+                bool_value=matched,
+                value=1.0 if matched else 0.0,
+                justification="seeded",
+                raw_output=None,
+            )
+    session.commit()
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    assert row["got_facts_rate"] == pytest.approx(2 / 3)
+    assert row["exact_rate"] == pytest.approx(1 / 3)
 
 
 def test_rows_graded_before_the_second_metric_read_none_not_zero(
