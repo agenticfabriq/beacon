@@ -51,9 +51,19 @@ EXPOSE 8000
 # on an https-only site. Inert while oidc_issuer is empty -- it breaks on the
 # day OIDC is switched on, which is the worst day to discover it.
 #
-# `*` trusts the header from anyone who can reach port 8000, so this container
-# MUST stay unpublished: compose gives it `expose:`, never `ports:`, and Caddy
-# is the only thing on that network. Publishing it directly would let any
-# client claim https.
+# `*` trusts BOTH forwarded headers from anyone who can reach port 8000, so
+# this container MUST stay unpublished. Two consequences, not one:
+#   - X-Forwarded-Proto: any client could claim https.
+#   - X-Forwarded-For: uvicorn's always-trust path takes the LEFTMOST entry,
+#     which is fully client-supplied, as request.client. Nothing under
+#     beacon_ui/api reads request.client today, so the blast radius is the
+#     access log -- but any future client-IP check inherits an
+#     attacker-chosen value.
+#
+# The compensating control is not in this repo: the deployment's compose file
+# (beacon-internal, deploy/compose.yaml) gives this service `expose:` and never
+# `ports:`, with Caddy alone on that network. The local `docker-compose.yml`
+# here defines only postgres and does NOT run this image -- so anyone starting
+# it by hand with `-p 8000:8000` has removed the control this flag depends on.
 CMD ["uvicorn", "beacon_ui.api.app:app", "--host", "0.0.0.0", "--port", "8000", \
      "--proxy-headers", "--forwarded-allow-ips", "*"]
