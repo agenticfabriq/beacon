@@ -64,17 +64,31 @@ first, so a condition OR-ing an excluded outcome beside a graded one fails on
 the excluded half, and a membership test wrapped in `~` or `sa.not_` is tagged
 as the complement it is.
 
-Negation is handled on both membership gates and equalities, in all three
-spellings: `~`, `sa.not_(...)` and a bare `not_(...)`.
+Negation is handled on both membership gates and equalities, in the spellings
+`~`, `sa.not_(...)` and bare `not_(...)`. That list is what is COVERED, not
+what exists: `outcome.in_(_GRADED).is_(False)` and `== False` compile to the
+same complement and are NOT detected.
 
-**Known blind spot, left open deliberately.** It records WHICH restrictions an
-aggregate contains, not how they are combined, so an OR whose other half is not
+**Known blind spots, left open deliberately and listed so they are not
+mistaken for oversights.**
+
+1. Boolean structure. It records WHICH restrictions an aggregate contains, not
+   how they are combined, so an OR whose other half is not
 an outcome predicate at all -- `sa.or_(outcome == "PASS", output[...].isnot(None))`
 -- is seen as `eq:PASS` and passes, while admitting every ERROR row that
-satisfies the second disjunct. Closing it means evaluating arbitrary
-SQLAlchemy boolean structure, which is a query planner in a unit test. The
-behavioural tests cover today's aggregates; this is the cost of that choice,
-recorded so the next person weighs it rather than assumes it was not noticed.
+   satisfies the second disjunct.
+
+2. Complement spellings beyond the three above, `.is_(False)` chief among them.
+
+3. A negated non-gate predicate inside an OR, where the surviving acceptable
+   tag satisfies the check on its own.
+
+All three close the same way: by evaluating arbitrary SQLAlchemy boolean
+structure, which is a query planner inside a unit test. Every increment so far
+has cost more than the last and returned less, so this is where it stops. The
+behavioural tests cover today's aggregates; these are the forms a NEW one could
+take without this file noticing, which is the whole reason to write them down
+rather than let the next reader discover them one mutation at a time.
 
 The third does NOT: it compares the unparsed condition against the literal
 string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
@@ -202,8 +216,10 @@ def _restrictions_of(expr: ast.AST) -> list[str]:
                 and isinstance(right.value, str)
             ):
                 # Negation matters here as much as on a membership gate:
-                # `~(outcome == "PASS")` counts FAIL, DEFER and ERROR while the
-                # denominator excludes ERROR -- ex_rate over 100%.
+                # `~(outcome == "PASS")` counts FAIL, DEFER and ERROR against a
+                # denominator of PASS+FAIL+DEFER. That exceeds 100% only when
+                # ERROR outnumbers PASS; below it the rate is silently wrong,
+                # which is the harder case to notice.
                 tag = "negated:eq" if id(node) in negated else "eq:"
                 found.append(tag + right.value if tag == "eq:" else tag)
     return found
