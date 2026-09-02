@@ -49,14 +49,23 @@ An earlier version had only the first, then only the second, then the first two
 without the third. Each time the missing one was the sole cover for a real
 form, and each gap was found by mutation rather than by reading.
 
-**Reach, stated rather than left to be inferred.** This reads source with
-`ast`. It sees `<anything>.outcome.in_/.notin_(X)` whatever the left-hand name
-is aliased to, and equality against a string literal. It does NOT see a gate
-built dynamically -- a column in a variable, `getattr(Result, "outcome")`, a
-filter assembled in a comprehension. The derived check additionally cannot
-follow a gate lifted into a helper, since it walks only the expression the
-`.label()` hangs off; the module-wide check still would. Both cover
-`routes/matrix.py` alone.
+**Reach, stated rather than left to be inferred.** All three read source with
+`ast`, and all three cover `routes/matrix.py` alone.
+
+The first two see `<anything>.outcome.in_/.notin_(X)` whatever the left-hand
+name is aliased to, and equality against a string literal.
+
+The third does NOT: it compares the unparsed condition against the literal
+string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
+fails it. That is deliberate -- it is pinning one known site exactly, and a
+behaviour-preserving rename there should be a decision someone makes on
+purpose rather than one this test waves through.
+
+None of them sees a gate built dynamically: a column in a variable,
+`getattr(Result, "outcome")`, or a filter assembled in a comprehension. The
+derived check additionally cannot follow a gate lifted into a helper, since it
+walks only the expression the `.label()` hangs off; the module-wide one still
+would.
 """
 
 from __future__ import annotations
@@ -271,6 +280,11 @@ def test_the_per_run_denominator_still_has_its_gate() -> None:
         "restructured; this check no longer knows where the denominator is."
     )
 
+    # EVERY argument of every filter under the divisor, not just args[0].
+    # SQLAlchemy ANDs multiple criteria, so `.filter(gate, Result.error.is_(None))`
+    # renders `outcome IN (...) AND error IS NULL` -- a NARROWER denominator that
+    # agrees with _GRADED only because today's seed sets `error` on ERROR rows
+    # alone. Checking one argument would pass it.
     conditions: list[str] = []
     for divisor in divisors:
         for node in ast.walk(divisor):
@@ -278,16 +292,17 @@ def test_the_per_run_denominator_still_has_its_gate() -> None:
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "filter"
-                and node.args
             ):
-                conditions.append(ast.unparse(node.args[0]))
+                conditions.extend(ast.unparse(a) for a in node.args)
 
     expected = f"Result.outcome.in_({GATE_CONSTANT})"
-    assert expected in conditions, (
-        f"`_per_run_rate`'s denominator is not exactly `{expected}`. Found: "
-        f"{conditions}. That denominator feeds ex_rate_min and ex_rate_max, nothing "
-        f"else in this file checks it -- the module-wide test inspects gates that "
-        f"exist, so a removed, reshaped or WIDENED one is invisible to it."
+    assert conditions == [expected], (
+        f"`_per_run_rate`'s denominator must be exactly `{expected}` and nothing "
+        f"else. Found: {conditions}. That denominator feeds ex_rate_min and "
+        f"ex_rate_max, and nothing else in this file checks it -- the module-wide "
+        f"test inspects gates that exist, so one removed, reshaped, widened or "
+        f"AND-ed with a second condition is invisible to it. If the extra condition "
+        f"is deliberate, change `expected` here and say why."
     )
 
 
