@@ -24,9 +24,11 @@ COPY --parents packages/*/pyproject.toml ./
 # the test suite never ran against. --no-install-workspace is what keeps this
 # layer cacheable: without it the workspace source is needed here too.
 # --no-dev keeps mypy, pytest, ruff, hypothesis and statsmodels out of an
-# image that serves HTTP. Not scipy or pandas: those are declared runtime
-# dependencies of beacon_ablation, beacon_ui and beacon_benchmarks, so they
-# ship either way and most of the 1.26 GB is them.
+# image that serves HTTP. It does NOT shrink the big wheels: measured in the
+# built image, site-packages is 767 MB and the top five are pyarrow 140,
+# scipy 118, pandas 74, plotly 67 and duckdb 53 -- every one a declared
+# runtime dependency of beacon_ablation, beacon_ui or beacon_benchmarks.
+# Anyone shrinking this image starts at pyarrow, not at the dev group.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --all-packages --frozen --no-install-workspace --no-dev
 

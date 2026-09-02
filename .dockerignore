@@ -2,11 +2,15 @@
 # .env, each carrying live credential material. The rest is caches and
 # host-local state.
 #
-# Every rule is written `**/`-prefixed. .gitignore matches a bare name at ANY
+# Bare names are written `**/`-prefixed. .gitignore matches a bare name at ANY
 # depth, so anything gitignored is invisible in `git status` wherever it sits;
 # a root-anchored rule here would admit the nested copy of a file no commit
-# will ever show you.
-.git
+# will ever show you. `.git` included: a vendored clone under packages/ shows
+# in `git status` as one collapsed entry, and an unprefixed rule would put its
+# whole object database -- history included -- in the context.
+#
+# Path rules like docs/screenshots stay anchored, because they name a place.
+**/.git
 **/.venv
 **/.local
 **/.worktrees
