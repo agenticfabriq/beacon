@@ -52,8 +52,9 @@ rather than elided into matching placeholders that invite pasting one twice.
 Adjust the roots to wherever the two repos are checked out; the point is that
 the output names what it read.
 
-To change the contract, four steps and the last one is the only cross-repo
-check there is:
+To change the contract, four steps. Step 3 is what makes step 4 conclusive:
+with both suites green, each copy provably matches its own pin, so comparing
+the copies settles byte-identity across repos.
 
 1. Edit both copies.
 2. Update the pinned digest in both tests.
