@@ -527,11 +527,12 @@ def test_only_the_latest_verdict_version_is_read(
     # By outcome on model-a's run, not by position in an unordered select.
     # That select spans all three seeded runs -- model-a's PASS/FAIL/DEFER,
     # model-b's two PASSes and an ERROR, the invalidated run's three FAILs --
-    # so indexing it asserts
-    # 1/3 only while Postgres happens to return insertion order. Land one pick
-    # on a model-b PASS and the row reports 0.0; land both off model-a and it
-    # reports None. Both are green-or-red on storage internals, not on the
-    # behaviour named in the docstring.
+    # so the three picks below hold only while Postgres happens to return
+    # insertion order. Any of them landing on another run's result seeds the
+    # version history somewhere the assertion does not read, and model-a's
+    # own result keeps no verdict at all: the rate moves to whatever that
+    # leaves, green or red on storage internals rather than on the behaviour
+    # named in the docstring.
     model_a = {
         str(r.outcome): r
         for r in session.scalars(
