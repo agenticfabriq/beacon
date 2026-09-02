@@ -524,15 +524,20 @@ def test_only_the_latest_verdict_version_is_read(
     from beacon_storage.repository.verdicts import VerdictRepo
     from sqlalchemy import select
 
-    # By outcome on model-a's run, not by position in an unordered select.
-    # That select spans all three seeded runs -- model-a's PASS/FAIL/DEFER,
-    # model-b's two PASSes and an ERROR, the invalidated run's three FAILs --
-    # so the three picks below hold only while Postgres happens to return
-    # insertion order. Any of them landing on another run's result seeds the
-    # version history somewhere the assertion does not read, and model-a's
-    # own result keeps no verdict at all: the rate moves to whatever that
-    # leaves, green or red on storage internals rather than on the behaviour
+    # Keyed by outcome, over a select restricted to model-a's live run.
+    #
+    # What this replaces: indexing an unordered `select(Result)` spanning all
+    # three seeded runs -- model-a's PASS/FAIL/DEFER, model-b's two PASSes and
+    # an ERROR, the invalidated run's three FAILs. Picking results[0..2] out of
+    # that held only while Postgres happened to return insertion order; a pick
+    # landing on another run seeds version history the assertion never reads,
+    # and leaves a model-a result unscored, so the rate moved to whatever that
+    # left -- green or red on storage internals rather than on the behaviour
     # named in the docstring.
+    #
+    # The filter below makes order irrelevant: one result per outcome, so the
+    # three lookups are total functions of the seed. No order_by is needed and
+    # adding one would suggest otherwise.
     model_a = {
         str(r.outcome): r
         for r in session.scalars(
