@@ -47,14 +47,29 @@ siblings on disk, so both are written in full rather than elided into matching
 placeholders that invite pasting one twice. Adjust the roots to wherever the
 two repos are checked out; the point is that the output names what it read.
 
-**B. Run both suites, then compare the two pinned literals.** Also conclusive,
-by transitivity: each green suite proves its copy matches its own pin, so equal
-pins force equal copies. This is the route verity's README prescribes, and it
-uses artifacts you may already have from CI.
+**B. Run both suites on the CURRENT tree, then compare the two pinned
+literals.** Also conclusive, by transitivity: each green suite proves its copy
+matches its own pin, so equal pins force equal copies.
 
-B is only valid with BOTH suites green. Comparing the literals alone proves
-nothing -- edit a copy without touching its pin and the two literals still
-match while the files differ.
+    grep CONTRACT_SHA256 \
+      ~/src/fabriq/beacon/tests/test_grading_conformance.py \
+      ~/src/sandbox/semantic-layer-for-ai/crates/grading_pipeline/tests/grading_conformance.rs
+
+Same mis-paste hazard as route A, and worse: the two constants share a name AND
+a value, so reading one repo's literal twice looks exactly like a match. `grep`
+over both paths prints the path beside each hit.
+
+Two conditions, and skipping either makes B prove nothing:
+
+- **Both suites green.** Literals alone say nothing -- edit a copy without
+  touching its pin and the literals still match while the files differ. That is
+  row 1 of the table.
+- **Green on the tree in front of you.** A remembered CI run attests to the
+  commit it ran on. Route A reads the files as they are now; route B is only as
+  fresh as the run you are citing.
+
+Verity's README prescribes route B but its change-the-contract recipe omits the
+suite run, which is the condition that makes it valid. Run the suites.
 
 What is never enough is green suites alone. That is the second row of the table
 above: each copy matches its own pin, the two pins differ, and both repos are
@@ -68,3 +83,8 @@ To change the contract:
 4. Close the gap by route A or route B.
 
 Record why in each repo's findings register.
+
+Every case came from a real disagreement or from a bound one of the two graders
+had wrong. `num-representation-noise` is the 45 correct answers beacon was
+calling wrong; `table-numeric-cell-within-tolerance` is verity applying a
+curated tolerance to a scalar and ignoring it for the same number in a table.
