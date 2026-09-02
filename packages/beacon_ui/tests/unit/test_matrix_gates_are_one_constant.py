@@ -441,11 +441,16 @@ def test_the_negation_detector_actually_detects() -> None:
         "count().filter(Result.outcome.in_(_GRADED).is_(False))",
         "count().filter(Result.outcome.in_(_GRADED) == False)",
         "count().filter(~(Result.outcome == 'PASS'))",
-        # Compound, so the subtree walk is exercised. Without it -- marking only
-        # the operand node itself -- every case above still passes while a
-        # complement wrapping a conjunction reads as the gate inside it.
+        # Compound and NESTED, so the recursive descent is exercised, not just
+        # depth 1. Marking only the operand node passes every case above;
+        # descending one level passes the depth-1 pair; only a full walk passes
+        # the depth-2 case. Tagging is conservative rather than exact here --
+        # `~or_(gate, x)` negates the gate while `not_(and_(gate, x))` admits
+        # rows satisfying it, and both are flagged.
         "count().filter(~sa.or_(Result.outcome.in_(_GRADED), Result.error.is_(None)))",
         "count().filter(sa.not_(sa.and_(Result.outcome == 'PASS', Result.id.isnot(None))))",
+        "count().filter(~sa.or_(sa.and_(Result.outcome.in_(_GRADED), "
+        "Result.error.is_(None)), Result.id.isnot(None)))",
     ]
     for src in covered:
         tags = _restrictions_of(ast.parse(src))
