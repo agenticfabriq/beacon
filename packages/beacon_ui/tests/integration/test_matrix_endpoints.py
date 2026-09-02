@@ -510,6 +510,11 @@ def test_only_the_latest_verdict_version_is_read(
     sort passes. Two results going false-then-true against one going
     true-then-false breaks the symmetry: 2/3 latest, 1/3 oldest, 3/3 for any
     version true.
+
+    The versions are "v9" then "v10" so that text order and write order
+    DISAGREE -- "v9" sorts after "v10" as text. Seeded "v1" then "v2" the two
+    agree, and sorting by grader_version instead of by id passes unnoticed,
+    which is the one regression _latest_reading names in its own docstring.
     """
     from beacon_storage.models.runs import Result, Run
     from beacon_storage.repository.verdicts import VerdictRepo
@@ -539,7 +544,7 @@ def test_only_the_latest_verdict_version_is_read(
         (model_a["FAIL"], (False, True)),
         (model_a["DEFER"], (False, True)),
     ):
-        for version, value in zip(("v1", "v2"), readings, strict=True):
+        for version, value in zip(("v9", "v10"), readings, strict=True):
             VerdictRepo(session).create(
                 team_id=world.acme_team_id,
                 result_id=result.id,
