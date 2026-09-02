@@ -511,10 +511,14 @@ def test_only_the_latest_verdict_version_is_read(
     true-then-false breaks the symmetry: 2/3 latest, 1/3 oldest, 3/3 for any
     version true.
 
-    The versions are "v9" then "v10" so that text order and write order
-    DISAGREE -- "v9" sorts after "v10" as text. Seeded "v1" then "v2" the two
-    agree, and sorting by grader_version instead of by id passes unnoticed,
+    Three versions, written "v9", "v10", "v2", so that write order and both
+    directions of text order pick three DIFFERENT verdicts -- as text
+    "v9" > "v2" > "v10", while by write order "v2" is last. Seeded "v1" then
+    "v2" all of them agree and sorting by grader_version passes unnoticed,
     which is the one regression _latest_reading names in its own docstring.
+    A two-version pair only relocates the blind spot: "v9"/"v10" catches
+    grader_version.desc() and lets grader_version.asc() through, because
+    "v10" is also the last write.
     """
     from beacon_storage.models.runs import Result, Run
     from beacon_storage.repository.verdicts import VerdictRepo
@@ -539,12 +543,18 @@ def test_only_the_latest_verdict_version_is_read(
             )
         )
     }
+    # Readings are (v9, v10, v2), and v2 is the one a correct read returns.
+    #   by id desc (correct)   -> v2:  False, True, True  = 2/3
+    #   by id asc  (oldest)    -> v9:  True, False, False = 1/3
+    #   by version desc        -> v9:  1/3
+    #   by version asc         -> v10: True, True, True   = 3/3
+    #   any version true       -> 3/3
     for result, readings in (
-        (model_a["PASS"], (True, False)),
-        (model_a["FAIL"], (False, True)),
-        (model_a["DEFER"], (False, True)),
+        (model_a["PASS"], (True, True, False)),
+        (model_a["FAIL"], (False, True, True)),
+        (model_a["DEFER"], (False, True, True)),
     ):
-        for version, value in zip(("v9", "v10"), readings, strict=True):
+        for version, value in zip(("v9", "v10", "v2"), readings, strict=True):
             VerdictRepo(session).create(
                 team_id=world.acme_team_id,
                 result_id=result.id,
@@ -561,8 +571,10 @@ def test_only_the_latest_verdict_version_is_read(
 
     row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
 
-    # Two of the three are true at their latest reading. Reading the oldest
-    # gives 1/3; counting any version true gives 3/3.
+    # Two of the three are true at their latest reading. Every wrong way of
+    # choosing "latest" lands somewhere else: 1/3 for the oldest and for
+    # version-string descending, 3/3 for version-string ascending and for
+    # counting any version true.
     assert row["got_facts_rate"] == pytest.approx(2 / 3)
 
 
