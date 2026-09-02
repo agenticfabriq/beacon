@@ -284,7 +284,8 @@ def test_got_facts_is_reported_beside_exact_match(
                 metric=metric,
                 criterion="correctness",
                 # everything that graded PASS or FAIL is right under both
-                # readings in this seed; they diverge in the test below
+                # readings in this seed; they diverge in
+                # test_the_strict_and_tolerant_columns_report_different_readings
                 bool_value=True,
                 value=1.0,
                 justification="seeded",
@@ -306,10 +307,11 @@ def test_the_strict_and_tolerant_columns_report_different_readings(
 ) -> None:
     """The two columns must not be able to be the same wire.
 
-    The test above seeds both metrics identically, so it proves each column is
-    not EX without proving either is not the OTHER: pointing the strict
-    column's subquery at "got_facts" passes it unchanged, and the strict column
-    then publishes the tolerant number under the strict name.
+    test_got_facts_is_reported_beside_exact_match seeds both metrics
+    identically, so it proves each column is not EX without proving either is
+    not the OTHER: pointing the strict column's numerator at the got_facts
+    verdicts passes it unchanged, and the strict column then publishes the
+    tolerant number under the strict name.
 
     So seed them apart, which is also the real case -- tolerant forgives shape,
     strict does not, and B58's 100.5% came from exactly this overlap. Right
@@ -358,10 +360,11 @@ def test_a_metric_scored_and_never_true_reads_zero_not_none(
 ) -> None:
     """Scored-and-matched-nothing is a measurement; never-scored is not.
 
-    The row above passes under either reading because it seeds no verdicts at
-    all, so the numerator and the verdict count are both zero and None is
-    right either way. This is the case that separates them: the PASS and the
-    FAIL each carry a verdict and each is false, so the metric was read and
+    test_rows_graded_before_the_second_metric_read_none_not_zero passes under
+    either reading because it seeds no verdicts at all, so the numerator and
+    the verdict count are both zero and None is right either way. This is the
+    case that separates them: the PASS and the FAIL each carry a verdict and
+    each is false, so the metric was read and
     matched nothing -- 0.0. Reporting None says it was never run. (The DEFER
     is left unscored here only to keep the seed minimal -- it is in the
     denominator either way. Nothing stops a DEFER carrying a verdict: the
@@ -496,21 +499,45 @@ def test_only_the_latest_verdict_version_is_read(
     api_client: TestClient, world: _World, seeded: Seeded, session: Session
 ) -> None:
     """Grader versions accumulate on a result as history; the matrix must
-    read the CURRENT one, not "any version true". An old true reading
-    superseded by a false one stays retired -- and the reverse counts."""
-    from beacon_storage.models.runs import Result
+    read the CURRENT one, not "any version true" and not the first one. An old
+    true reading superseded by a false one stays retired, and the reverse
+    counts.
+
+    The three readings have to land on three different numbers or the test
+    cannot tell them apart. Seeding one result true-then-false against one
+    false-then-true is symmetric -- exactly one is true under the latest
+    reading AND under the oldest, so 1/3 holds for both and reversing the
+    sort passes. Two results going false-then-true against one going
+    true-then-false breaks the symmetry: 2/3 latest, 1/3 oldest, 3/3 for any
+    version true.
+    """
+    from beacon_storage.models.runs import Result, Run
     from beacon_storage.repository.verdicts import VerdictRepo
     from sqlalchemy import select
 
-    results = [
-        r
-        for r in session.scalars(select(Result).where(Result.team_id == world.acme_team_id))
-        if str(r.outcome) in ("PASS", "FAIL")
-    ]
-    old_true_now_false, old_false_now_true = results[0], results[1]
+    # By outcome on model-a's run, not by position in an unordered select.
+    # That select spans all three seeded runs -- model-a's PASS/FAIL, model-b's
+    # two PASSes, the invalidated run's three FAILs -- so indexing it asserts
+    # 1/3 only while Postgres happens to return insertion order. Land one pick
+    # on a model-b PASS and the row reports 0.0; land both off model-a and it
+    # reports None. Both are green-or-red on storage internals, not on the
+    # behaviour named in the docstring.
+    model_a = {
+        str(r.outcome): r
+        for r in session.scalars(
+            select(Result)
+            .join(Run, Run.id == Result.run_id)
+            .where(
+                Result.team_id == world.acme_team_id,
+                Run.model_id == "model-a",
+                Run.invalidated_at.is_(None),
+            )
+        )
+    }
     for result, readings in (
-        (old_true_now_false, (True, False)),
-        (old_false_now_true, (False, True)),
+        (model_a["PASS"], (True, False)),
+        (model_a["FAIL"], (False, True)),
+        (model_a["DEFER"], (False, True)),
     ):
         for version, value in zip(("v1", "v2"), readings, strict=True):
             VerdictRepo(session).create(
@@ -529,9 +556,9 @@ def test_only_the_latest_verdict_version_is_read(
 
     row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
 
-    # Exactly one of the two results is true at its latest reading. Under
-    # "any version true" both would count and the rate would be 2/3.
-    assert row["got_facts_rate"] == pytest.approx(1 / 3)
+    # Two of the three are true at their latest reading. Reading the oldest
+    # gives 1/3; counting any version true gives 3/3.
+    assert row["got_facts_rate"] == pytest.approx(2 / 3)
 
 
 def test_a_pooled_row_shows_the_spread_it_averages(
