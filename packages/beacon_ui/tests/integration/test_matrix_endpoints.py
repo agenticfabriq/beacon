@@ -529,9 +529,8 @@ def test_only_the_latest_verdict_version_is_read(
     # rows in. The assertion below is a rate over exactly these three, so a
     # lookup drifting to another run's result would move it for reasons that
     # have nothing to do with verdict history.
-    model_a = {
-        str(r.outcome): r
-        for r in session.scalars(
+    model_a_results = list(
+        session.scalars(
             select(Result)
             .join(Run, Run.id == Result.run_id)
             .where(
@@ -540,19 +539,21 @@ def test_only_the_latest_verdict_version_is_read(
                 Run.invalidated_at.is_(None),
             )
         )
-    }
+    )
+    # Before collapsing to a dict, not after: keying by outcome discards a
+    # duplicate silently, so a check on the KEYS still reads three and passes.
+    # One result per outcome is a property of the seed, not of the query. A
+    # second model-a PASS would leave a graded result unscored and drop the
+    # rate to 2/4, and the only sign would be an unexplained 0.5 != 0.667
+    # down at the assertion.
+    assert sorted(str(r.outcome) for r in model_a_results) == ["DEFER", "FAIL", "PASS"]
+    model_a = {str(r.outcome): r for r in model_a_results}
     # Readings are (v9, v10, v2), and v2 is the one a correct read returns.
     #   by id desc (correct)   -> v2:  False, True, True  = 2/3
     #   by id asc  (oldest)    -> v9:  True, False, False = 1/3
     #   by version desc        -> v9:  1/3
     #   by version asc         -> v10: True, True, True   = 3/3
     #   any version true       -> 3/3
-    # The keying above collapses duplicates silently. One result per outcome
-    # is a property of the seed, not of the query, so it is checked here --
-    # a second model-a PASS would otherwise leave a graded result unscored
-    # and move the rate with nothing to say why.
-    assert sorted(model_a) == ["DEFER", "FAIL", "PASS"]
-
     for result, readings in (
         (model_a["PASS"], (True, True, False)),
         (model_a["FAIL"], (False, True, True)),
