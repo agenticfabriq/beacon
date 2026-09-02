@@ -40,7 +40,7 @@ CONTRACT = Path(__file__).parent / "conformance" / "grading-conformance-v2.json"
 # `shasum -a 256` both copies and compare. Nothing here can check that for you.
 # shasum and not diff: diff is silent on a match AND on the same file passed
 # twice, so a mis-paste reads as a pass. See tests/conformance/README.md.
-CONTRACT_SHA256 = "e259b1e5764c999291be6740ab3172e0d910798dea04cfd59f29f63caba84314"
+CONTRACT_SHA256 = "ee27bd6d2e251ee37504018413e64b48571a8d8033ce6c90c84680d09a00c039"
 
 
 def _contract() -> dict[str, Any]:

@@ -84,7 +84,20 @@ To change the contract:
 
 Record why in each repo's findings register.
 
-Every case came from a real disagreement or from a bound one of the two graders
-had wrong. `num-representation-noise` is the 45 correct answers beacon was
-calling wrong; `table-numeric-cell-within-tolerance` is verity applying a
-curated tolerance to a scalar and ignoring it for the same number in a table.
+Cases are of three kinds, matching the contract's own `purpose` field.
+
+**Real disagreements.** `num-representation-noise` is the 45 correct answers
+beacon was calling wrong; `text-different` is the 84 value mismatches that were
+never a tolerance question; `table-numeric-cell-within-tolerance` is verity
+applying a curated tolerance to a scalar and ignoring it for the same number in
+a table.
+
+**Bounds one of them had wrong**, which is what the v2 widening calibrated:
+`num-within-widened-rel` and `num-beyond-widened-rel` sit either side of it.
+
+**Agreement baselines that must not regress.** `num-exact` ("identical values
+match under any tolerance"), `text-identical`, `table-identical`,
+`num-whole-equal`, and `table-null-matches-null` ("both graders agree the
+answer is empty"). These came from no episode at all, which is why the older
+wording here — "every case came from a real disagreement" — was wrong in both
+this file and the `purpose` field it was copied between.
