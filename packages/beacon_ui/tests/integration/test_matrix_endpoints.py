@@ -525,8 +525,9 @@ def test_only_the_latest_verdict_version_is_read(
     from sqlalchemy import select
 
     # By outcome on model-a's run, not by position in an unordered select.
-    # That select spans all three seeded runs -- model-a's PASS/FAIL, model-b's
-    # two PASSes, the invalidated run's three FAILs -- so indexing it asserts
+    # That select spans all three seeded runs -- model-a's PASS/FAIL/DEFER,
+    # model-b's two PASSes and an ERROR, the invalidated run's three FAILs --
+    # so indexing it asserts
     # 1/3 only while Postgres happens to return insertion order. Land one pick
     # on a model-b PASS and the row reports 0.0; land both off model-a and it
     # reports None. Both are green-or-red on storage internals, not on the
@@ -571,10 +572,13 @@ def test_only_the_latest_verdict_version_is_read(
 
     row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
 
-    # Two of the three are true at their latest reading. Every wrong way of
-    # choosing "latest" lands somewhere else: 1/3 for the oldest and for
+    # Two of the three are true at their latest reading. The four orderings
+    # enumerated above land elsewhere: 1/3 for the oldest and for
     # version-string descending, 3/3 for version-string ascending and for
-    # counting any version true.
+    # counting any version true. Not every wrong rule -- ordering by
+    # created_at ties, since it is a server_default now() and now() is
+    # constant across a transaction, so DISTINCT ON would pick arbitrarily
+    # and this test would be flaky rather than red.
     assert row["got_facts_rate"] == pytest.approx(2 / 3)
 
 
