@@ -64,33 +64,29 @@ first, so a condition OR-ing an excluded outcome beside a graded one fails on
 the excluded half, and a membership test wrapped in `~` or `sa.not_` is tagged
 as the complement it is.
 
-Negation is handled on both membership gates and equalities, in the spellings
-`~`, `sa.not_(...)` and bare `not_(...)`. That list is what is COVERED, not
-what exists: `outcome.in_(_GRADED).is_(False)` and `== False` compile to the
-same complement and are NOT detected.
+Negation is handled on membership gates and equalities in four spellings: `~`,
+`sa.not_(...)`, bare `not_(...)`, and `.is_(False)` / `== False`.
 
-**Known blind spots, left open deliberately and listed so they are not
-mistaken for oversights.**
+**One known blind spot, left open deliberately.**
 
-1. Boolean structure. It records WHICH restrictions an aggregate contains, not
-   how they are combined, so an OR whose other half is not
-an outcome predicate at all -- `sa.or_(outcome == "PASS", output[...].isnot(None))`
--- is seen as `eq:PASS` and passes, while admitting every ERROR row that
-   satisfies the second disjunct.
+It records WHICH restrictions an aggregate contains, not how they are combined,
+so an OR whose other half is not an outcome predicate at all --
+`sa.or_(outcome == "PASS", output[...].isnot(None))` -- is seen as `eq:PASS`
+and passes, while admitting every ERROR row satisfying the second disjunct. A
+negated NON-gate predicate in that position is the same gap by the same
+mechanism, not a second one: the surviving acceptable tag satisfies the check
+on its own either way.
 
-2. Complement spellings beyond the three above, `.is_(False)` chief among them.
+Closing it means evaluating arbitrary SQLAlchemy boolean structure, which is a
+query planner inside a unit test -- and that reasoning does NOT extend to
+anything syntactic. It was offered once for `.is_(False)`, wrongly: that turned
+out to be five lines beside the `not_` branch, so the justification for
+stopping was doing work the code should have done. The behavioural tests cover
+today's aggregates; this is the form a NEW one could take without this file
+noticing, written down rather than left to be rediscovered one mutation at a
+time.
 
-3. A negated non-gate predicate inside an OR, where the surviving acceptable
-   tag satisfies the check on its own.
-
-All three close the same way: by evaluating arbitrary SQLAlchemy boolean
-structure, which is a query planner inside a unit test. Every increment so far
-has cost more than the last and returned less, so this is where it stops. The
-behavioural tests cover today's aggregates; these are the forms a NEW one could
-take without this file noticing, which is the whole reason to write them down
-rather than let the next reader discover them one mutation at a time.
-
-The third does NOT: it compares the unparsed condition against the literal
+The per-run check does NOT: it compares the unparsed condition against the literal
 string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
 fails it. That is deliberate -- it is pinning one known site exactly, and a
 behaviour-preserving rename there should be a decision someone makes on
@@ -159,15 +155,24 @@ def _negated_nodes(expr: ast.AST) -> set[int]:
     indistinguishable from the gate itself -- naming the constant while
     selecting exactly the rows it excludes.
 
-    Both spellings of the call: `sa.not_(...)` (an Attribute, today's idiom
-    since matrix.py does `import sqlalchemy as sa`) and a bare `not_(...)`
-    under `from sqlalchemy import not_`, which nothing stops someone writing.
+    Four spellings: `~`, `sa.not_(...)`, a bare `not_(...)` under
+    `from sqlalchemy import not_`, and `<expr>.is_(False)` / `<expr> == False`,
+    which compile to the same complement. All syntactic, so all detectable
+    here without evaluating anything.
     """
     negated: set[int] = set()
     for node in ast.walk(expr):
         operand: ast.AST | None = None
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
             operand = node.operand
+        elif (
+            isinstance(node, ast.Compare)
+            and len(node.ops) == 1
+            and isinstance(node.ops[0], ast.Eq)
+            and isinstance(node.comparators[0], ast.Constant)
+            and node.comparators[0].value is False
+        ):
+            operand = node.left
         elif isinstance(node, ast.Call) and node.args:
             func = node.func
             name = (
@@ -179,6 +184,15 @@ def _negated_nodes(expr: ast.AST) -> set[int]:
             )
             if name == "not_":
                 operand = node.args[0]
+            elif (
+                name == "is_"
+                and isinstance(func, ast.Attribute)
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value is False
+            ):
+                # `outcome.in_(_GRADED).is_(False)` is the same complement as
+                # `~`, and purely syntactic -- detectable without evaluating.
+                operand = func.value
         if operand is not None:
             negated.update(id(child) for child in ast.walk(operand))
     return negated
