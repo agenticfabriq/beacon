@@ -14,22 +14,23 @@ dist/
 
 # Database dumps -- they carry users.password_hash and api_keys.key_hash.
 #
-# The DIRECTORY is the mechanism. Anything inside beacon.dump/ is ignored
-# whatever it is called, so filing a dump there needs no thought about
-# extensions. Names inside record when the dump was TAKEN, not when it was
-# filed: a dump's whole value is which state of the database it captures.
+# File them in beacon.dump/, where any name is ignored. Name them for when the
+# dump was TAKEN: its whole value is which state of the database it captures.
 #
-# The globs below are a backstop for a dump dropped in the repo root, and they
-# CANNOT be complete. Nothing in this tree produces dumps -- no pg_dump target
-# in the Makefile, no caller anywhere -- so every name is typed by hand, and
-# pg_dump's default output format is plain SQL. `beacon.bak`, `beacon.pgdump`,
-# `beacon.custom`, `beacon.tar.gz` and `beacon.sql` all slip past these and
-# look exactly like the covered case in `git status`. Put dumps in the
-# directory; do not rely on the suffix list growing to meet you.
+# The root globs are a backstop and cannot be complete. Nothing in this tree
+# produces dumps -- no pg_dump target in the Makefile, no caller anywhere -- so
+# names are typed by hand, and pg_dump's default output format is plain SQL:
+# beacon.bak, beacon.pgdump, beacon.custom and beacon.sql all miss, as does a
+# differently-named directory like dumps/ or beacon.dumps/.
 #
-# Bare `*.sql` is deliberately absent: this is a text-to-SQL repo, a .sql file
-# is likelier to be a fixture someone means to commit, and an ignore rule that
-# silently drops a file from `git add` is this same defect pointed backwards.
+# An uncovered dump is not silent -- it shows as `?? beacon.bak` in git status,
+# and that is the only signal there is. It is also the signal that got ignored
+# for days while a 41 MB dump sat in the repo root, one `git add -A` from being
+# in history forever.
+#
+# Bare *.sql is deliberately absent: in a text-to-SQL repo a .sql file is
+# likelier to be a fixture someone means to commit, and an ignore rule that
+# silently drops a file from `git add` is this defect pointed backwards.
 beacon.dump/
 *.dump
 *.dump.*
