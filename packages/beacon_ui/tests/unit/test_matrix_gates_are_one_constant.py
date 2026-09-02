@@ -17,8 +17,8 @@ Two ways to be restricted, and both are correct:
 * `outcome.in_(_GRADED)` -- set membership naming the constant, which the
   metric aggregates use.
 * `outcome == "PASS"` -- already narrowed to a single outcome that is itself in
-  `_GRADED`, which `n_pass`, `n_fail` and `n_defer` use. Gating those by the
-  constant as well would be redundant, not safer.
+  `_GRADED`, which `n_pass`, `n_fail`, `n_defer` and `n_pass_target_engine`
+  use. Gating those by the constant as well would be redundant, not safer.
 
 `notin_` is rejected even when it names the constant.
 `outcome.notin_(_GRADED)` reads like a gate, satisfies any check that inspects
@@ -28,12 +28,30 @@ because matrix.py's module docstring states the rule as an exclusion ("ERROR
 leaves the denominator"). If one is ever genuinely wanted, this test is the
 place to argue for it.
 
+**Two checks, because neither covers the other.**
+
+`test_every_membership_gate_names_the_constant` is module-wide: any
+`outcome.in_(...)` anywhere in the file must name `_GRADED`. It is the only
+thing covering gates that are not numerators -- `_per_run_rate`'s own
+denominator among them, which a derived check never inspects because
+`.label("rate")` is not a `_rate(..., graded)` call site.
+
+`test_every_numerator_over_graded_is_restricted_to_graded_rows` is derived:
+the numerators are the `_rate(int(record.X), graded)` call sites, so an
+aggregate added tomorrow is checked the moment it is divided. It is the only
+thing covering a numerator with NO gate, which the module-wide check cannot see
+because there is nothing to inspect.
+
+An earlier version had only the first, then only the second. Each time, the
+dropped one was the only cover for a real form.
+
 **Reach, stated rather than left to be inferred.** This reads source with
 `ast`. It sees `<anything>.outcome.in_/.notin_(X)` whatever the left-hand name
 is aliased to, and equality against a string literal. It does NOT see a gate
 built dynamically -- a column in a variable, `getattr(Result, "outcome")`, a
-filter assembled in a comprehension -- nor one lifted into a helper, since it
-walks only the expression the `.label()` hangs off. It covers
+filter assembled in a comprehension. The derived check additionally cannot
+follow a gate lifted into a helper, since it walks only the expression the
+`.label()` hangs off; the module-wide check still would. Both cover
 `routes/matrix.py` alone.
 """
 
@@ -158,6 +176,37 @@ def test_every_numerator_over_graded_is_restricted_to_graded_rows() -> None:
         + f"\n\nUse `outcome.in_({GATE_CONSTANT})`, or equality against one outcome that is in "
         f"it. If a gate was lifted into a helper, this guard reads syntax and cannot follow it "
         f"-- say so here rather than deleting the test."
+    )
+
+
+def test_every_membership_gate_names_the_constant() -> None:
+    """Module-wide, and the only cover for gates that are not numerators.
+
+    `_per_run_rate` builds its own denominator with `outcome.in_(_GRADED)` and
+    labels the result "rate", so the derived check never reaches it. Swapping
+    that for a literal tuple is numerically identical today and is precisely
+    the second-guard-agreeing-by-coincidence this file exists to prevent.
+    """
+    tree = _tree()
+
+    offenders: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        func = node.func
+        if func.attr not in ("in_", "notin_"):
+            continue
+        inner = func.value
+        if not isinstance(inner, ast.Attribute) or inner.attr != "outcome":
+            continue
+        arg = ast.unparse(node.args[0]) if node.args else "<none>"
+        if func.attr == "notin_" or arg != GATE_CONSTANT:
+            offenders.append((node.lineno, f"{func.attr}({arg})"))
+
+    assert not offenders, (
+        f"Outcome membership gates that do not name {GATE_CONSTANT}: {offenders}. "
+        f"A gate agreeing with the constant by coincidence stops agreeing the day "
+        f"the convention changes, and no behavioural test would notice."
     )
 
 
