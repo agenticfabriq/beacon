@@ -64,6 +64,9 @@ first, so a condition OR-ing an excluded outcome beside a graded one fails on
 the excluded half, and a membership test wrapped in `~` or `sa.not_` is tagged
 as the complement it is.
 
+Negation is handled on both membership gates and equalities, in all three
+spellings: `~`, `sa.not_(...)` and a bare `not_(...)`.
+
 **Known blind spot, left open deliberately.** It records WHICH restrictions an
 aggregate contains, not how they are combined, so an OR whose other half is not
 an outcome predicate at all -- `sa.or_(outcome == "PASS", output[...].isnot(None))`
@@ -135,6 +138,38 @@ def _numerators_over_graded(tree: ast.Module) -> set[str]:
     return found
 
 
+def _negated_nodes(expr: ast.AST) -> set[int]:
+    """ids of every node under a `~` or a `not_(...)`.
+
+    `ast.walk` descends into both, so without this `~outcome.in_(_GRADED)` is
+    indistinguishable from the gate itself -- naming the constant while
+    selecting exactly the rows it excludes.
+
+    Both spellings of the call: `sa.not_(...)` (an Attribute, today's idiom
+    since matrix.py does `import sqlalchemy as sa`) and a bare `not_(...)`
+    under `from sqlalchemy import not_`, which nothing stops someone writing.
+    """
+    negated: set[int] = set()
+    for node in ast.walk(expr):
+        operand: ast.AST | None = None
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            operand = node.operand
+        elif isinstance(node, ast.Call) and node.args:
+            func = node.func
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else func.id
+                if isinstance(func, ast.Name)
+                else None
+            )
+            if name == "not_":
+                operand = node.args[0]
+        if operand is not None:
+            negated.update(id(child) for child in ast.walk(operand))
+    return negated
+
+
 def _restrictions_of(expr: ast.AST) -> list[str]:
     """EVERY way this expression restricts `outcome`, tagged.
 
@@ -144,32 +179,14 @@ def _restrictions_of(expr: ast.AST) -> list[str]:
     denominator still excludes them: `ex_rate` over 100%, B68 verbatim.
     """
     found: list[str] = []
-
-    # Nodes sitting under a `~` or `sa.not_(...)`. `ast.walk` descends into both,
-    # so `~outcome.in_(_GRADED)` would otherwise be tagged `in_:_GRADED` and
-    # accepted -- a gate naming the constant and selecting exactly the rows it
-    # excludes, which is the complement the module docstring says is rejected.
-    negated: set[int] = set()
-    for node in ast.walk(expr):
-        operand: ast.AST | None = None
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
-            operand = node.operand
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "not_"
-            and node.args
-        ):
-            operand = node.args[0]
-        if operand is not None:
-            negated.update(id(child) for child in ast.walk(operand))
+    negated = _negated_nodes(expr)
 
     for node in ast.walk(expr):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             func = node.func
             inner = func.value
             if isinstance(inner, ast.Attribute) and inner.attr == "outcome":
-                if id(node) in negated:
+                if func.attr in ("in_", "notin_") and id(node) in negated:
                     found.append("negated:" + func.attr)
                 elif func.attr == "notin_":
                     found.append("notin_")
@@ -184,7 +201,11 @@ def _restrictions_of(expr: ast.AST) -> list[str]:
                 and isinstance(right, ast.Constant)
                 and isinstance(right.value, str)
             ):
-                found.append("eq:" + right.value)
+                # Negation matters here as much as on a membership gate:
+                # `~(outcome == "PASS")` counts FAIL, DEFER and ERROR while the
+                # denominator excludes ERROR -- ex_rate over 100%.
+                tag = "negated:eq" if id(node) in negated else "eq:"
+                found.append(tag + right.value if tag == "eq:" else tag)
     return found
 
 
@@ -258,6 +279,7 @@ def test_every_membership_gate_names_the_constant() -> None:
 
     offenders: list[tuple[int, str]] = []
     seen = 0
+    negated = _negated_nodes(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
@@ -269,7 +291,13 @@ def test_every_membership_gate_names_the_constant() -> None:
             continue
         seen += 1
         arg = ast.unparse(node.args[0]) if node.args else "<none>"
-        if func.attr == "notin_" or arg != GATE_CONSTANT:
+        # Negation-aware, because this is the SOLE cover for the `n_graded`
+        # gate: it is not a `_rate(..., graded)` numerator and not inside
+        # `_per_run_rate`, so `~outcome.in_(_GRADED)` there would leave the
+        # denominator behind every rate counting ERROR rows only.
+        if id(node) in negated:
+            offenders.append((node.lineno, f"~{func.attr}({arg})"))
+        elif func.attr == "notin_" or arg != GATE_CONSTANT:
             offenders.append((node.lineno, f"{func.attr}({arg})"))
 
     assert seen, (
