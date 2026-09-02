@@ -42,28 +42,23 @@ COPY --from=build --chown=beacon:beacon /app /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 USER beacon
 EXPOSE 8000
-# --forwarded-allow-ips=* is required, and it is only safe because of how this
-# image is deployed. uvicorn honours X-Forwarded-Proto only from addresses in
-# that list, which defaults to 127.0.0.1; Caddy reaches this container over the
-# compose network, not loopback, so without it every request looks like plain
-# http to the app. `request.url_for("oidc_callback")` in routes/auth.py builds
-# the redirect_uri from that scheme, so the IdP would be handed an http:// URI
-# on an https-only site. Inert while oidc_issuer is empty -- it breaks on the
-# day OIDC is switched on, which is the worst day to discover it.
+# --proxy-headers only. The TRUST LIST is deliberately not set here.
 #
-# `*` trusts BOTH forwarded headers from anyone who can reach port 8000, so
-# this container MUST stay unpublished. Two consequences, not one:
-#   - X-Forwarded-Proto: any client could claim https.
-#   - X-Forwarded-For: uvicorn's always-trust path takes the LEFTMOST entry,
-#     which is fully client-supplied, as request.client. Nothing under
-#     beacon_ui/api reads request.client today, so the blast radius is the
-#     access log -- but any future client-IP check inherits an
-#     attacker-chosen value.
+# uvicorn honours X-Forwarded-Proto only from addresses in
+# --forwarded-allow-ips, which defaults to $FORWARDED_ALLOW_IPS or 127.0.0.1.
+# Behind a reverse proxy on a container network that default drops the header,
+# and `request.url_for("oidc_callback")` in routes/auth.py would hand the IdP
+# an http:// redirect_uri for an https-only site. Inert while oidc_issuer is
+# empty; scheduled to break on the day someone enables single sign-on.
 #
-# The compensating control is not in this repo: the deployment's compose file
-# (beacon-internal, deploy/compose.yaml) gives this service `expose:` and never
-# `ports:`, with Caddy alone on that network. The local `docker-compose.yml`
-# here defines only postgres and does NOT run this image -- so anyone starting
-# it by hand with `-p 8000:8000` has removed the control this flag depends on.
+# So the deployment sets FORWARDED_ALLOW_IPS to the proxy's subnet, next to the
+# network that defines it (beacon-internal, deploy/compose.yaml). NOT `*` here:
+# `*` puts uvicorn on its always-trust path, where the client address becomes
+# the LEFTMOST X-Forwarded-For entry -- appended to by the proxy, so
+# attacker-chosen even in a correct deployment -- instead of walking the chain
+# back past trusted hops. A CIDR gets the scheme fixed and keeps the walk.
+#
+# Unset, this image trusts loopback only. That is the right default for an
+# image that can also be run directly.
 CMD ["uvicorn", "beacon_ui.api.app:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+     "--proxy-headers"]
