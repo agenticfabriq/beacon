@@ -524,20 +524,11 @@ def test_only_the_latest_verdict_version_is_read(
     from beacon_storage.repository.verdicts import VerdictRepo
     from sqlalchemy import select
 
-    # Keyed by outcome, over a select restricted to model-a's live run.
-    #
-    # What this replaces: indexing an unordered `select(Result)` spanning all
-    # three seeded runs -- model-a's PASS/FAIL/DEFER, model-b's two PASSes and
-    # an ERROR, the invalidated run's three FAILs. Picking results[0..2] out of
-    # that held only while Postgres happened to return insertion order; a pick
-    # landing on another run seeds version history the assertion never reads,
-    # and leaves a model-a result unscored, so the rate moved to whatever that
-    # left -- green or red on storage internals rather than on the behaviour
-    # named in the docstring.
-    #
-    # The filter below makes order irrelevant: one result per outcome, so the
-    # three lookups are total functions of the seed. No order_by is needed and
-    # adding one would suggest otherwise.
+    # Keyed by outcome over model-a's live run, so which result each reading
+    # lands on is fixed by the seed rather than by the order Postgres returns
+    # rows in. The assertion below is a rate over exactly these three, so a
+    # lookup drifting to another run's result would move it for reasons that
+    # have nothing to do with verdict history.
     model_a = {
         str(r.outcome): r
         for r in session.scalars(
@@ -556,6 +547,12 @@ def test_only_the_latest_verdict_version_is_read(
     #   by version desc        -> v9:  1/3
     #   by version asc         -> v10: True, True, True   = 3/3
     #   any version true       -> 3/3
+    # The keying above collapses duplicates silently. One result per outcome
+    # is a property of the seed, not of the query, so it is checked here --
+    # a second model-a PASS would otherwise leave a graded result unscored
+    # and move the rate with nothing to say why.
+    assert sorted(model_a) == ["DEFER", "FAIL", "PASS"]
+
     for result, readings in (
         (model_a["PASS"], (True, True, False)),
         (model_a["FAIL"], (False, True, True)),
