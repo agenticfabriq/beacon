@@ -260,8 +260,13 @@ def test_the_questions_listing_filters_by_difficulty(
 def test_got_facts_is_reported_beside_exact_match(
     api_client: TestClient, world: _World, seeded: Seeded, session: Session
 ) -> None:
-    """The second metric: right data, tolerant shape. A FAIL on exact match
-    whose got_facts verdict is true raises got_facts above EX."""
+    """The two readings beside EX, and neither one is EX.
+
+    Both are seeded true on the PASS and the FAIL, so both read 2/3 where EX
+    reads 1/3. That gap is the assertion: a reading whose numerator counts only
+    PASSes is `ex_rate` under another name, and the whole point of these
+    columns is that they mean the same thing on every row while EX does not.
+    """
     from beacon_storage.models.runs import Result
     from beacon_storage.repository.verdicts import VerdictRepo
     from sqlalchemy import select
@@ -270,26 +275,29 @@ def test_got_facts_is_reported_beside_exact_match(
     for result in results:
         if str(result.outcome) not in ("PASS", "FAIL"):
             continue
-        VerdictRepo(session).create(
-            team_id=world.acme_team_id,
-            result_id=result.id,
-            grader="execution_grounded_sql",
-            grader_version="v1",
-            metric="got_facts",
-            criterion="correctness",
-            # everything that graded PASS or FAIL got the facts in this seed
-            bool_value=True,
-            value=1.0,
-            justification="seeded",
-            raw_output=None,
-        )
+        for metric in ("got_facts", "exact_match"):
+            VerdictRepo(session).create(
+                team_id=world.acme_team_id,
+                result_id=result.id,
+                grader="execution_grounded_sql",
+                grader_version="v1",
+                metric=metric,
+                criterion="correctness",
+                # everything that graded PASS or FAIL got the facts in this seed
+                bool_value=True,
+                value=1.0,
+                justification="seeded",
+                raw_output=None,
+            )
     session.commit()
 
     row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
 
     assert row["ex_rate"] == pytest.approx(1 / 3)
-    # PASS + FAIL both carry true got_facts verdicts; the DEFER does not
+    # PASS + FAIL both carry true verdicts; the DEFER does not. A numerator
+    # gated on PASS would read 1/3 for both and look entirely plausible.
     assert row["got_facts_rate"] == pytest.approx(2 / 3)
+    assert row["exact_rate"] == pytest.approx(2 / 3)
 
 
 def test_rows_graded_before_the_second_metric_read_none_not_zero(
