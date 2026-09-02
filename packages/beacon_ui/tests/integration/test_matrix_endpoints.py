@@ -310,8 +310,9 @@ def test_a_metric_scored_and_never_true_reads_zero_not_none(
     right either way. This is the case that separates them: the PASS and the
     FAIL each carry a verdict and each is false, so the metric was read and
     matched nothing -- 0.0. Reporting None says it was never run. (The DEFER
-    stays unscored, as it is in the corpus: a refusal has no output to
-    compare. It is in the denominator either way.)
+    is left unscored here only to keep the seed minimal -- it is in the
+    denominator either way. Nothing stops a DEFER carrying a verdict: the
+    composer runs the grader loop before its DEFER branch and says so.)
 
     Both readings are asserted, not just the tolerant one. Guarding only
     got_facts leaves exact_rate free to be reverted to the numerator gate with
@@ -359,7 +360,9 @@ def test_a_verdict_on_an_excluded_result_does_not_make_the_row_look_measured(
     unscored row report 0.0 -- "measured, matched nothing" -- on the strength
     of a verdict attached to a result no rate counts.
 
-    model-b is PASS, PASS, ERROR. Only the ERROR is scored here.
+    model-b is PASS, PASS, ERROR. Only the ERROR is scored here, and both
+    readings are asserted -- guarding one metric leaves the other free to
+    regress, which is how the first version of this fix shipped.
     """
     from beacon_storage.models.runs import Result
     from beacon_storage.repository.verdicts import VerdictRepo
@@ -369,24 +372,71 @@ def test_a_verdict_on_an_excluded_result_does_not_make_the_row_look_measured(
     for result in errored:
         if str(result.outcome) != "ERROR":
             continue
-        VerdictRepo(session).create(
-            team_id=world.acme_team_id,
-            result_id=result.id,
-            grader="execution_grounded_sql",
-            grader_version="v1",
-            metric="got_facts",
-            criterion="correctness",
-            bool_value=False,
-            value=0.0,
-            justification="seeded",
-            raw_output=None,
-        )
+        for metric in ("got_facts", "exact_match"):
+            VerdictRepo(session).create(
+                team_id=world.acme_team_id,
+                result_id=result.id,
+                grader="execution_grounded_sql",
+                grader_version="v1",
+                metric=metric,
+                criterion="correctness",
+                bool_value=False,
+                value=0.0,
+                justification="seeded",
+                raw_output=None,
+            )
     session.commit()
 
     row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-b")
 
     assert row["n_errors"] == 1
     assert row["got_facts_rate"] is None
+    assert row["exact_rate"] is None
+
+
+def test_a_true_verdict_on_an_excluded_result_cannot_push_a_rate_over_100(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """A numerator that counts what the denominator threw out.
+
+    ERROR leaves the rate denominator but keeps its verdicts, so counting
+    every true reading against `n_graded` divides three by two. The UI has no
+    defence -- it formats whatever arrives -- so the row reads "150%" for a
+    system that answered two questions.
+
+    model-b is PASS, PASS, ERROR: all three scored true, denominator 2.
+    """
+    from beacon_storage.models.runs import Result
+    from beacon_storage.repository.verdicts import VerdictRepo
+    from sqlalchemy import select
+
+    results = session.scalars(select(Result).where(Result.team_id == world.acme_team_id)).all()
+    run_ids = {r.run_id for r in results if str(r.outcome) == "ERROR"}
+    for result in results:
+        if result.run_id not in run_ids:
+            continue
+        for metric in ("got_facts", "exact_match"):
+            VerdictRepo(session).create(
+                team_id=world.acme_team_id,
+                result_id=result.id,
+                grader="execution_grounded_sql",
+                grader_version="v1",
+                metric=metric,
+                criterion="correctness",
+                bool_value=True,
+                value=1.0,
+                justification="seeded",
+                raw_output=None,
+            )
+    session.commit()
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-b")
+
+    assert row["n_graded"] == 2
+    assert row["n_errors"] == 1
+    # Two graded results, both true. The ERROR's true verdict is not a third.
+    assert row["got_facts_rate"] == pytest.approx(1.0)
+    assert row["exact_rate"] == pytest.approx(1.0)
 
 
 def test_only_the_latest_verdict_version_is_read(

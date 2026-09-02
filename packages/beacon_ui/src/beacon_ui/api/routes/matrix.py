@@ -184,23 +184,27 @@ def results_matrix(
             # are one row per result by construction; DISTINCT stays anyway --
             # the guarantee belongs in the query, not in a comment about
             # today's shape.
+            #
+            # _GRADED on the numerators too, and for the same reason the
+            # denominator has it. A verdict outlives an ERROR composite, so
+            # without this a true reading on an excluded result counts into a
+            # rate that excluded the result -- 3 over 2 on a PASS/PASS/ERROR
+            # row, which the UI renders as "150%".
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(got_facts_now.c.bool_value.is_(True))
+            .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.is_(True))
             .label("n_got_facts"),
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(exact_now.c.bool_value.is_(True))
+            .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.is_(True))
             .label("n_exact"),
             # How many results the metric was READ on, true or false. The
             # numerator cannot answer that: a system that matched nothing and
             # a metric that never ran both count zero, and only one of them is
             # a measurement. These decide None vs 0.0 below.
             #
-            # Restricted to _GRADED, matching the denominator they gate.
-            # Verdicts survive an ERROR composite -- the composer returns the
-            # ones earlier graders already emitted, and every one is
-            # persisted -- so counting any outcome would let a row whose
-            # graded results were never scored report 0.0 on the strength of
-            # verdicts attached to results the rate excludes.
+            # Restricted to _GRADED, matching the denominator they gate and
+            # the numerators above. Without it, a row whose graded results
+            # were never scored reports 0.0 on the strength of a verdict
+            # attached to a result the rate excludes.
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.isnot(None))
             .label("n_got_facts_scored"),
