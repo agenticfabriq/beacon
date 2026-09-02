@@ -190,6 +190,7 @@ def test_every_membership_gate_names_the_constant() -> None:
     tree = _tree()
 
     offenders: list[tuple[int, str]] = []
+    seen = 0
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
@@ -199,14 +200,68 @@ def test_every_membership_gate_names_the_constant() -> None:
         inner = func.value
         if not isinstance(inner, ast.Attribute) or inner.attr != "outcome":
             continue
+        seen += 1
         arg = ast.unparse(node.args[0]) if node.args else "<none>"
         if func.attr == "notin_" or arg != GATE_CONSTANT:
             offenders.append((node.lineno, f"{func.attr}({arg})"))
 
+    assert seen, (
+        f"No outcome membership gate found anywhere in matrix.py. Either the rates "
+        f"stopped filtering by outcome -- in which case B68 is back -- or they were "
+        f"rewritten in a form this walk cannot see. Either way this test is now "
+        f"checking nothing; read the file rather than trusting the green."
+    )
     assert not offenders, (
         f"Outcome membership gates that do not name {GATE_CONSTANT}: {offenders}. "
         f"A gate agreeing with the constant by coincidence stops agreeing the day "
         f"the convention changes, and no behavioural test would notice."
+    )
+
+
+def test_the_per_run_denominator_still_has_its_gate() -> None:
+    """Checking gates that EXIST cannot see one removed, and this is the one.
+
+    `_per_run_rate` builds the denominator behind `ex_rate_min` and
+    `ex_rate_max`. Rewriting its filter to `outcome != "ERROR"` -- or deleting
+    it, which puts ERROR straight back into that denominator, B68 verbatim --
+    leaves no `in_`/`notin_` node to inspect, so the module-wide check finds
+    nothing wrong, and the derived check never reaches it because the
+    expression is labelled "rate" rather than divided by `graded`. Both stay
+    green on a broken metric. Hence a check that asserts presence, by name.
+    """
+    tree = _tree()
+
+    func = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_per_run_rate"
+        ),
+        None,
+    )
+    assert func is not None, (
+        "`_per_run_rate` is gone from matrix.py. If the per-run spread moved, move "
+        "this check with it; if it was deleted, delete this test deliberately."
+    )
+
+    # Presence, not first-match: this function holds BOTH an `outcome == "PASS"`
+    # numerator and the `in_(_GRADED)` denominator, and a first-match helper
+    # returns whichever it walks into first.
+    gates = [
+        ast.unparse(node.args[0]) if node.args else "<none>"
+        for node in ast.walk(func)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "in_"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "outcome"
+    ]
+
+    assert GATE_CONSTANT in gates, (
+        f"`_per_run_rate` has no `outcome.in_({GATE_CONSTANT})` gate. Found: {gates}. "
+        f"Its denominator feeds ex_rate_min and ex_rate_max, and nothing else in this "
+        f"file checks it -- the module-wide test inspects gates that exist, so a "
+        f"removed or reshaped one is invisible to it."
     )
 
 
