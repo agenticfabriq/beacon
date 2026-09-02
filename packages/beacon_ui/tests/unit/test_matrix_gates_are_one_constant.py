@@ -53,7 +53,10 @@ form, and each gap was found by mutation rather than by reading.
 `ast`, and all three cover `routes/matrix.py` alone.
 
 The first two see `<anything>.outcome.in_/.notin_(X)` whatever the left-hand
-name is aliased to, and equality against a string literal.
+name is aliased to. Equality against a string literal is read by the DERIVED
+check only: the module-wide walk skips any node whose attribute is not `in_` or
+`notin_` and never inspects a comparison, so an `outcome == "..."` outside the
+numerators is seen by nothing here.
 
 The third does NOT: it compares the unparsed condition against the literal
 string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
