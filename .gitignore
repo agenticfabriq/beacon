@@ -11,3 +11,12 @@ __pycache__/
 *.egg-info/
 dist/
 .coverage
+
+# Database dumps. beacon.dump/ holds pg_dump output named by the time the dump
+# was TAKEN, not the time it was filed -- a dump's value is entirely in which
+# state of the database it captures. These carry api_keys.key_hash and
+# users.password_hash, so the bare glob is here too: the loose file sat
+# untracked and unignored in the repo root for days, one `git add -A` from
+# being in history forever.
+beacon.dump/
+*.dump
