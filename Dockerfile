@@ -42,4 +42,18 @@ COPY --from=build --chown=beacon:beacon /app /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 USER beacon
 EXPOSE 8000
-CMD ["uvicorn", "beacon_ui.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# --forwarded-allow-ips=* is required, and it is only safe because of how this
+# image is deployed. uvicorn honours X-Forwarded-Proto only from addresses in
+# that list, which defaults to 127.0.0.1; Caddy reaches this container over the
+# compose network, not loopback, so without it every request looks like plain
+# http to the app. `request.url_for("oidc_callback")` in routes/auth.py builds
+# the redirect_uri from that scheme, so the IdP would be handed an http:// URI
+# on an https-only site. Inert while oidc_issuer is empty -- it breaks on the
+# day OIDC is switched on, which is the worst day to discover it.
+#
+# `*` trusts the header from anyone who can reach port 8000, so this container
+# MUST stay unpublished: compose gives it `expose:`, never `ports:`, and Caddy
+# is the only thing on that network. Publishing it directly would let any
+# client claim https.
+CMD ["uvicorn", "beacon_ui.api.app:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]
