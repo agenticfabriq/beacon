@@ -53,10 +53,15 @@ form, and each gap was found by mutation rather than by reading.
 `ast`, and all three cover `routes/matrix.py` alone.
 
 The first two see `<anything>.outcome.in_/.notin_(X)` whatever the left-hand
-name is aliased to. Equality against a string literal is read by the DERIVED
-check only: the module-wide walk skips any node whose attribute is not `in_` or
-`notin_` and never inspects a comparison, so an `outcome == "..."` outside the
-numerators is seen by nothing here.
+name is aliased to. Equality against a string literal is read by the derived
+check, and exactly by the per-run one. The module-wide walk skips any node
+whose attribute is not `in_` or `notin_` and never inspects a comparison, so an
+`outcome == "..."` that is neither a numerator over `graded` nor inside
+`_per_run_rate`'s divisor is seen by nothing here.
+
+The derived check collects EVERY restriction in an aggregate rather than the
+first, so a condition OR-ing an excluded outcome beside a graded one fails on
+the excluded half.
 
 The third does NOT: it compares the unparsed condition against the literal
 string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
@@ -120,17 +125,24 @@ def _numerators_over_graded(tree: ast.Module) -> set[str]:
     return found
 
 
-def _restriction_of(expr: ast.AST) -> str | None:
-    """How this expression restricts `outcome`, tagged, or None if it does not."""
+def _restrictions_of(expr: ast.AST) -> list[str]:
+    """EVERY way this expression restricts `outcome`, tagged.
+
+    All of them, not the first. Returning the first lets a numerator OR-ed with
+    an excluded outcome -- `sa.or_(outcome == "PASS", outcome == "ERROR")` --
+    read as `eq:PASS` and pass, which puts ERROR rows into `n_pass` while the
+    denominator still excludes them: `ex_rate` over 100%, B68 verbatim.
+    """
+    found: list[str] = []
     for node in ast.walk(expr):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             func = node.func
             inner = func.value
             if isinstance(inner, ast.Attribute) and inner.attr == "outcome":
                 if func.attr == "notin_":
-                    return "notin_"
-                if func.attr == "in_":
-                    return "in_:" + (ast.unparse(node.args[0]) if node.args else "<none>")
+                    found.append("notin_")
+                elif func.attr == "in_":
+                    found.append("in_:" + (ast.unparse(node.args[0]) if node.args else "<none>"))
         if isinstance(node, ast.Compare) and len(node.ops) == 1:
             left, right = node.left, node.comparators[0]
             if (
@@ -140,8 +152,8 @@ def _restriction_of(expr: ast.AST) -> str | None:
                 and isinstance(right, ast.Constant)
                 and isinstance(right.value, str)
             ):
-                return "eq:" + right.value
-    return None
+                found.append("eq:" + right.value)
+    return found
 
 
 def _labelled_aggregates(tree: ast.Module) -> dict[str, ast.AST]:
@@ -176,15 +188,19 @@ def test_every_numerator_over_graded_is_restricted_to_graded_rows() -> None:
         if expr is None:
             problems.append(f"{name}: divided by {DENOMINATOR} but no `.label({name!r})` found")
             continue
-        form = _restriction_of(expr)
-        if form is None:
+        forms = _restrictions_of(expr)
+        if not forms:
             problems.append(f"{name}: no outcome restriction -- this is B68")
-        elif form == "notin_":
-            problems.append(f"{name}: uses notin_, which selects the excluded rows")
-        elif form.startswith("in_:") and form[4:] != GATE_CONSTANT:
-            problems.append(f"{name}: gated on {form[4:]!r} rather than {GATE_CONSTANT}")
-        elif form.startswith("eq:") and form[3:] not in graded:
-            problems.append(f"{name}: narrowed to {form[3:]!r}, which is not in {GATE_CONSTANT}")
+        # EVERY restriction must be acceptable, not just one. An aggregate
+        # OR-ing an excluded outcome beside a graded one carries both, and
+        # checking only the first waves it through.
+        for form in forms:
+            if form == "notin_":
+                problems.append(f"{name}: uses notin_, which selects the excluded rows")
+            elif form.startswith("in_:") and form[4:] != GATE_CONSTANT:
+                problems.append(f"{name}: gated on {form[4:]!r} rather than {GATE_CONSTANT}")
+            elif form.startswith("eq:") and form[3:] not in graded:
+                problems.append(f"{name}: admits {form[3:]!r}, not in {GATE_CONSTANT}")
 
     assert not problems, (
         "Numerators divided by the graded denominator must count only graded rows:\n  "
