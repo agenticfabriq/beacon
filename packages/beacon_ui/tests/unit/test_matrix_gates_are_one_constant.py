@@ -61,7 +61,17 @@ whose attribute is not `in_` or `notin_` and never inspects a comparison, so an
 
 The derived check collects EVERY restriction in an aggregate rather than the
 first, so a condition OR-ing an excluded outcome beside a graded one fails on
-the excluded half.
+the excluded half, and a membership test wrapped in `~` or `sa.not_` is tagged
+as the complement it is.
+
+**Known blind spot, left open deliberately.** It records WHICH restrictions an
+aggregate contains, not how they are combined, so an OR whose other half is not
+an outcome predicate at all -- `sa.or_(outcome == "PASS", output[...].isnot(None))`
+-- is seen as `eq:PASS` and passes, while admitting every ERROR row that
+satisfies the second disjunct. Closing it means evaluating arbitrary
+SQLAlchemy boolean structure, which is a query planner in a unit test. The
+behavioural tests cover today's aggregates; this is the cost of that choice,
+recorded so the next person weighs it rather than assumes it was not noticed.
 
 The third does NOT: it compares the unparsed condition against the literal
 string `Result.outcome.in_(_GRADED)`, so renaming the model import to `res`
@@ -134,12 +144,34 @@ def _restrictions_of(expr: ast.AST) -> list[str]:
     denominator still excludes them: `ex_rate` over 100%, B68 verbatim.
     """
     found: list[str] = []
+
+    # Nodes sitting under a `~` or `sa.not_(...)`. `ast.walk` descends into both,
+    # so `~outcome.in_(_GRADED)` would otherwise be tagged `in_:_GRADED` and
+    # accepted -- a gate naming the constant and selecting exactly the rows it
+    # excludes, which is the complement the module docstring says is rejected.
+    negated: set[int] = set()
+    for node in ast.walk(expr):
+        operand: ast.AST | None = None
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Invert):
+            operand = node.operand
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "not_"
+            and node.args
+        ):
+            operand = node.args[0]
+        if operand is not None:
+            negated.update(id(child) for child in ast.walk(operand))
+
     for node in ast.walk(expr):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             func = node.func
             inner = func.value
             if isinstance(inner, ast.Attribute) and inner.attr == "outcome":
-                if func.attr == "notin_":
+                if id(node) in negated:
+                    found.append("negated:" + func.attr)
+                elif func.attr == "notin_":
                     found.append("notin_")
                 elif func.attr == "in_":
                     found.append("in_:" + (ast.unparse(node.args[0]) if node.args else "<none>"))
@@ -195,8 +227,11 @@ def test_every_numerator_over_graded_is_restricted_to_graded_rows() -> None:
         # OR-ing an excluded outcome beside a graded one carries both, and
         # checking only the first waves it through.
         for form in forms:
-            if form == "notin_":
-                problems.append(f"{name}: uses notin_, which selects the excluded rows")
+            if form == "notin_" or form.startswith("negated:"):
+                problems.append(
+                    f"{name}: {form} -- a complement selects the rows the denominator "
+                    f"excludes, whatever it names"
+                )
             elif form.startswith("in_:") and form[4:] != GATE_CONSTANT:
                 problems.append(f"{name}: gated on {form[4:]!r} rather than {GATE_CONSTANT}")
             elif form.startswith("eq:") and form[3:] not in graded:
