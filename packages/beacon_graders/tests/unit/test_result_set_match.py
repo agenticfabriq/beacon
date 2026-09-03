@@ -662,3 +662,13 @@ def test_an_exact_match_on_a_LATER_accepted_result_claims_no_narrowed_scope() ->
     assert "benchmark-scored columns only" not in facts.justification
     assert facts.raw_output is not None
     assert "scored_columns" not in facts.raw_output
+
+    # BOTH rows must name the accepted result that carried the verdict. The
+    # got-facts row reported the first variant to facts-match by PROJECTION
+    # (0), while the exact row reported the one that matched (1) -- two rows
+    # for one result attributing it to different golds, and suppressing
+    # `scored_columns` had removed the only marker that distinguished the two
+    # readings, so the mislabel was all a reader saw.
+    assert exact.raw_output is not None
+    assert exact.raw_output["matched_accepted_index"] == 1
+    assert facts.raw_output["matched_accepted_index"] == 1

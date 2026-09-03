@@ -263,6 +263,7 @@ def _facts_raw(
     passed: bool,
     variants: list[_GoldVariant],
     facts_index: int | None,
+    matched_index: int | None,
     *,
     via_projection: bool,
 ) -> dict[str, object]:
@@ -273,12 +274,19 @@ def _facts_raw(
     recording one would misdescribe the reading.
     """
     raw: dict[str, object] = {"exact_match": passed}
-    if facts_index is not None:
-        raw["matched_accepted_index"] = facts_index
-        scored = _scored_columns(variants[facts_index]) if via_projection else None
+    # The index that CARRIED this verdict. When the exact reading did, that is
+    # `matched_index`, not the first variant to facts-match by projection --
+    # reporting the latter had the got-facts row name accepted result 0 while
+    # the exact row named 1, for one result, with nothing explaining why. And
+    # suppressing `scored_columns` (correctly) removed the only marker that
+    # had distinguished the two readings, so the mislabel was all a reader saw.
+    carrier = matched_index if passed and matched_index is not None else facts_index
+    if carrier is not None:
+        raw["matched_accepted_index"] = carrier
+        scored = _scored_columns(variants[carrier]) if via_projection else None
         if scored is not None:
             raw["scored_columns"] = scored
-            raw["condition_cols"] = list(variants[facts_index].condition_cols)
+            raw["condition_cols"] = list(variants[carrier].condition_cols)
     return raw
 
 
@@ -293,7 +301,15 @@ class ResultSetMatchGrader:
     # and a subset-scored got-facts verdict now names the columns it compared.
     # The first changes the emitted bool on a reachable input, so two verdicts
     # stamped v5 could otherwise disagree on the same rows.
-    version = "v6"
+    # v7: `_project_gold` dedupes `condition_cols`, which changes the bool on
+    # the same terms -- `[0, 0]` on a 2-column gold answered False for a
+    # candidate carrying that one column once, and now answers True. Bumped
+    # because v6 was stamped one commit before the dedupe landed, so the rule
+    # in the v6 note applies to v6 itself. `scripts/regrade_suite.py` treats a
+    # verdict at the current version as `current` and skips it, so a stale
+    # v6 row would never be refreshed and never say so. Nothing stored is
+    # affected: v6 never reached the deployed image, which still serves v5.
+    version = "v7"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"
@@ -351,13 +367,6 @@ class ResultSetMatchGrader:
         facts = False
         matched_index: int | None = None
         facts_index: int | None = None
-        # Set AFTER the loop from the aggregate `passed`, not per variant. An
-        # earlier attempt recorded `not passed_v` at the moment `facts_index`
-        # was first assigned, which fails open the moment the variants
-        # disagree: an earlier variant facts-matching by projection and a later
-        # one matching EXACTLY still narrated the narrowed scope. Restricted
-        # spider2 items routinely publish several accepted results differing
-        # only in column order, so that shape is ordinary, not exotic.
         mismatches: list[Mismatch | None] = []
         for index, variant in enumerate(variants):
             gold = variant.result_set
@@ -489,7 +498,11 @@ class ResultSetMatchGrader:
                     facts, variants, facts_index, via_projection=facts_via_projection
                 ),
                 raw_output=_facts_raw(
-                    passed, variants, facts_index, via_projection=facts_via_projection
+                    passed,
+                    variants,
+                    facts_index,
+                    matched_index,
+                    via_projection=facts_via_projection,
                 ),
             ),
         ]
