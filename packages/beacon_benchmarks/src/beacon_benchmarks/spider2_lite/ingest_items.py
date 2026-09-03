@@ -160,10 +160,11 @@ def _check_condition_col_range(
     broadcast on the grounds that one index list across tables of differing
     arity makes an out-of-range index inherent to the shape -- and cited this
     loader's own broadcast fixture as evidence. That was wrong: both of
-    `local001`'s accepted results are 1-column, so that fixture's `[1]` is out
-    of range for EVERY variant, which is the all-invalid case rather than the
-    differing-arity one. The exemption rested on evidence the repo did not
-    contain.
+    `local001`'s accepted results WERE 1-column at the time, so that fixture's
+    `[1]` was out of range for EVERY variant -- the all-invalid case rather
+    than the differing-arity one, and the exemption rested on evidence the repo
+    did not contain. The fixture is 2-column now (`n,label` / `total,label`),
+    so it pins broadcasting rather than a bad annotation.
 
     Upstream settles it. `evaluation_suite/evaluate_utils.py`'s
     ``compare_pandas_table`` does ``gold_cols = gold.iloc[:, condition_cols]``,

@@ -578,13 +578,8 @@ def test_a_REPEATED_condition_col_still_discloses_its_narrowed_scope() -> None:
     never looked at TOTAL -- failing open on precisely the input it exists to
     describe.
 
-    Note what `_project_gold` does with the repeat: it DUPLICATES the column,
-    so gold becomes (MONTH, MONTH) and the candidate needs two positions
-    matching the month. That is stricter than upstream, whose
-    `compare_pandas_table` lets one prediction column satisfy several gold
-    columns (no injectivity -- the match loop breaks without consuming). A
-    second divergence on the same input, latent for the same reason: 0 of the
-    restricted items in the corpus repeat an index.
+    `_project_gold` dedupes too, and that is a reading decision rather than
+    tidiness -- see its own comment and the sibling test below.
     """
     item = _item(
         {
@@ -604,3 +599,66 @@ def test_a_REPEATED_condition_col_still_discloses_its_narrowed_scope() -> None:
     assert facts.raw_output["scored_columns"] == ["MONTH"]
     assert "MONTH" in facts.justification
     assert "TOTAL" not in facts.justification
+
+
+def test_a_REPEATED_condition_col_does_not_deny_a_candidate_that_carries_it() -> None:
+    """The false negative the duplicate projection produced.
+
+    `_project_gold` used to duplicate a repeated index, so `condition_cols
+    [0, 0]` on a 2-column gold projected to arity 2 (MONTH, MONTH). A candidate
+    returning that one scored column ONCE, with the right values, then tripped
+    `gold_arity > candidate_arity` and got "Gold's data is not present in the
+    candidate, in any column projection" -- a false statement about a candidate
+    that carried exactly the scored data. It also graded stricter than the
+    benchmark, whose match loop consumes nothing, so one prediction column
+    satisfies both copies. Deduping agrees with upstream and removes both.
+    """
+    item = _item(
+        {
+            "condition_cols": [[0, 0]],
+            "accepted_results": [
+                {"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618], ["2020-02", 409593]]}
+            ],
+        }
+    )
+    result = _result({"rows": [["2020-01"], ["2020-02"]]})
+
+    facts = next(v for v in ResultSetMatchGrader().grade(item, result) if v.metric == "got_facts")
+
+    assert facts.bool_value is True
+    assert facts.raw_output is not None
+    assert facts.raw_output["scored_columns"] == ["MONTH"]
+
+
+def test_an_exact_match_on_a_LATER_accepted_result_claims_no_narrowed_scope() -> None:
+    """The cross-variant fail-open, which is the same bug one variant over.
+
+    The gate was recorded per variant, at the moment `facts_index` was first
+    assigned. So when an EARLIER accepted result facts-matched by projection
+    and a LATER one matched the full table exactly, the verdict still narrated
+    the narrowed scope. Restricted spider2 items routinely publish several
+    accepted results differing only in column order, so this shape is ordinary.
+    The gate now reads the aggregate `passed` after the loop.
+    """
+    rows = [["2020-01", 356618], ["2020-02", 409593]]
+    flipped = [[r[1], r[0]] for r in rows]
+    item = _item(
+        {
+            "condition_cols": [[0], [0]],
+            "accepted_results": [
+                {"columns": ["MONTH", "TOTAL"], "rows": rows},
+                {"columns": ["TOTAL", "MONTH"], "rows": flipped},
+            ],
+        }
+    )
+    result = _result({"rows": flipped})
+
+    verdicts = ResultSetMatchGrader().grade(item, result)
+    exact = next(v for v in verdicts if v.metric != "got_facts")
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+
+    assert exact.bool_value is True
+    assert facts.bool_value is True
+    assert "benchmark-scored columns only" not in facts.justification
+    assert facts.raw_output is not None
+    assert "scored_columns" not in facts.raw_output

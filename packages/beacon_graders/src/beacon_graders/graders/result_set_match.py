@@ -166,7 +166,16 @@ def _project_gold(gold: ResultSet, condition_cols: tuple[int, ...]) -> ResultSet
     if not condition_cols:
         return gold
     arity = len(gold.rows[0]) if gold.rows else len(gold.columns)
-    keep = [i for i in condition_cols if 0 <= i < arity]
+    # DISTINCT, and this matters for the reading rather than the tidiness.
+    # Duplicating a repeated index made the projected gold arity 2 for
+    # `condition_cols [0, 0]`, so a candidate returning that one scored column
+    # ONCE tripped `gold_arity > candidate_arity` and got "Gold's data is not
+    # present in the candidate, in any column projection" -- a false statement
+    # about a candidate that carried the scored data. It also graded stricter
+    # than the benchmark: upstream's `t_gold_list` holds the duplicate twice
+    # and its match loop consumes nothing, so ONE prediction column satisfies
+    # both. Deduping agrees with upstream and removes the false negative.
+    keep = sorted({i for i in condition_cols if 0 <= i < arity})
     return ResultSet(
         columns=[gold.columns[i] for i in keep if i < len(gold.columns)],
         rows=[tuple(row[i] for i in keep) for row in gold.rows],
@@ -342,11 +351,13 @@ class ResultSetMatchGrader:
         facts = False
         matched_index: int | None = None
         facts_index: int | None = None
-        # Whether the got-facts TRUE came from the restricted projection rather
-        # than from the full table matching. Only the former has a scope worth
-        # disclosing; claiming one for an exact match describes the wrong
-        # reading.
-        facts_via_projection = False
+        # Set AFTER the loop from the aggregate `passed`, not per variant. An
+        # earlier attempt recorded `not passed_v` at the moment `facts_index`
+        # was first assigned, which fails open the moment the variants
+        # disagree: an earlier variant facts-matching by projection and a later
+        # one matching EXACTLY still narrated the narrowed scope. Restricted
+        # spider2 items routinely publish several accepted results differing
+        # only in column order, so that shape is ordinary, not exotic.
         mismatches: list[Mismatch | None] = []
         for index, variant in enumerate(variants):
             gold = variant.result_set
@@ -394,11 +405,15 @@ class ResultSetMatchGrader:
                 matched_index = index
             if facts_v and facts_index is None:
                 facts_index = index
-                facts_via_projection = not passed_v
             passed = passed or passed_v
             facts = facts or facts_v
             if passed and facts:
                 break
+
+        # A restriction is worth disclosing only when the tolerant reading is
+        # what carried the verdict. If ANY accepted result matched the full
+        # table, got-facts is true by exact match and no restriction applied.
+        facts_via_projection = facts and not passed
 
         # Evidence in raw reads from the CLOSEST gold: the one that matched
         # exactly, else the one the facts matched (its mismatch names what

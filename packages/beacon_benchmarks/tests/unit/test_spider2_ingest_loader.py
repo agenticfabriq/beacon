@@ -222,8 +222,12 @@ def test_positional_condition_cols_out_of_range_refuses(tmp_path: Path) -> None:
     Both forms are checked. An earlier version exempted broadcast, citing the
     sibling broadcast fixture as having tables of differing arity; it did not --
     both were 1-column, so that fixture pinned an out-of-range annotation. The
-    fixture now uses 2-column tables so it pins BROADCASTING, and upstream's
-    ``gold.iloc[:, condition_cols]`` raises on out-of-range in either form.
+    fixture now uses 2-column tables so it pins BROADCASTING.
+
+    Upstream raises on a POSITIVE overshoot in either annotation form, since
+    the flat list is broadcast before `iloc` sees it. It does NOT raise on a
+    negative index -- see the sibling negative-index test, and
+    `_check_condition_col_range` for why that case is refused anyway.
     """
     repo = _repo(tmp_path)
     _write_eval_annotations(
