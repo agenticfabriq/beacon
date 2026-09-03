@@ -89,10 +89,10 @@ def _push(
     run_id: str,
     item_id: str,
     # `list[Any]`, not `list[list[Any]]`: this helper models the WIRE, where
-    # `rows` is a JSON array whose entries the server is what validates. Typing
-    # it as well-formed rows made the malformed-payload tests -- the ones that
-    # pin the gate -- unexpressible without a cast that mypy would have to be
-    # told to ignore.
+    # `rows` is a JSON array and the SERVER is what validates its entries.
+    # Typing the parameter as already well-formed made the malformed-payload
+    # tests -- the ones that pin the gate -- unexpressible without a cast that
+    # mypy would have to be told to ignore.
     rows: list[Any],
     **over: Any,
 ) -> Any:
