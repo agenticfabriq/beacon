@@ -170,6 +170,108 @@ def test_the_grader_is_result_set_match_and_emits_got_facts(
     assert by_metric["got_facts"]["passed"] is True
 
 
+def _seed_accepted_results(session: Session, world: _World) -> tuple[str, str]:
+    """A run plus an item whose gold is `accepted_results` -- spider2's shape.
+
+    Two of the three live suites store gold this way: `accepted_results` is a
+    SET of acceptable result sets, of which BIRD's single `rows`/`columns` is
+    the one-element case. `gold_variants` in the grader handles both by
+    design; the ingest gate historically checked only for `rows`.
+    """
+    solution = SolutionRepo(session).create(
+        team_id=world.acme_team_id,
+        solution_id="accepted-sut",
+        version="0.1",
+        owner_team=world.acme_team_id,
+        summary="",
+        supported_modes=["EVAL"],
+        layers=[],
+        created_by=world.alice_id,
+    )
+    item = EvalItemRepo(session).create(
+        tier=EvalItemTier.HUMAN_VERIFIED,
+        suite=SUITE,
+        team_id=world.acme_team_id,
+        dataset_version="v1",
+        item_input={"question": "monthly totals?"},
+        gold_answer={
+            # No top-level "rows". This is the whole point of the case.
+            "sql": "",
+            "condition_cols": [],
+            "accepted_results": [
+                {"columns": ["month", "total"], "rows": [["01", 10.0], ["02", 20.0]]}
+            ],
+        },
+        item_metadata={},
+        created_by=world.alice_id,
+    )
+    suite = SuiteRepo(session).create(
+        team_id=world.acme_team_id,
+        name=SUITE,
+        description="",
+        method="manual",
+        suite_metadata={},
+        created_by=world.alice_id,
+    )
+    run = RunRepo(session).create(
+        team_id=world.acme_team_id,
+        suite_id=suite.id,
+        solution_id=solution.id,
+        suite=SUITE,
+        dataset_version="v1",
+        mode=HarnessMode.EVAL,
+        pass_idx=0,
+        config={},
+        created_by=world.alice_id,
+    )
+    session.commit()
+    return str(run.id), str(item.item_id)
+
+
+def test_gold_as_accepted_results_is_gradeable_not_refused(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The gate must admit every shape the grader it selects can read.
+
+    `_composer_for` refused unless `gold["rows"]` existed and then handed the
+    item to `ResultSetMatchGrader`, whose `applicable` is
+    `bool(gold_variants(...))` -- and `gold_variants` reads
+    `accepted_results` first. The precondition checked a different field than
+    the grader it guarded, so `spider2_lite_local_v1` (135 items) and
+    `fs_payments_v1` (24 gradeable) could not accept a SQL push at all while
+    carrying gold the selected grader was built to read.
+    """
+    run_id, item_id = _seed_accepted_results(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [["02", 20.0], ["01", 10.0]])
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "PASS"
+
+
+def test_an_item_with_no_gold_of_either_shape_is_still_refused(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """Widening the gate must not make it vacuous.
+
+    An empty `accepted_results` is how the five unanswerable fs_payments items
+    are stored -- genuinely no gold to compare against -- and a SQL push on one
+    must still be refused rather than composed blind.
+    """
+    run_id, item_id = _seed_accepted_results(session, world)
+    from beacon_storage.models.eval_items import EvalItem
+    from sqlalchemy import select
+
+    row = session.scalars(select(EvalItem).where(EvalItem.item_id == UUID(item_id))).one()
+    row.gold_answer = {"sql": "", "accepted_results": []}
+    session.commit()
+
+    response = _push(api_client, world, run_id, item_id, [["01", 10.0]])
+
+    assert response.status_code == 422, response.text
+    assert "gold" in response.text.lower()
+
+
 def test_a_sql_push_without_rows_is_refused(
     api_client: TestClient, world: _World, session: Session
 ) -> None:

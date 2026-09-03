@@ -13,6 +13,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from beacon_graders.composer import VerdictComposer
 from beacon_graders.graders import DabstepAnswerMatcher, ResultSetMatchGrader
+from beacon_graders.graders.result_set_match import gold_variants
 from beacon_graders.types import VerdictOutcome
 from beacon_iam.permissions import Permission
 from beacon_runner.persistence import persist_result
@@ -59,12 +60,24 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
         # before any grader runs.
         return VerdictComposer(graders=[DabstepAnswerMatcher()])
 
-    gold = item.ground_truth or {}
-    if gold.get("rows") is None:
+    # The grader's own predicate, not a narrower one. This gate selects
+    # ResultSetMatchGrader, whose `applicable` is `bool(gold_variants(...))` --
+    # and `gold_variants` reads `accepted_results` first, treating BIRD's single
+    # `rows`/`columns` as the one-element case. Checking `gold["rows"]` here
+    # asked a different question than the grader it guards: it refused every
+    # SQL push for `spider2_lite_local_v1` (135 items) and `fs_payments_v1`
+    # (24 gradeable), both of which store gold as `accepted_results` and both
+    # of which this grader was built to read. Only BIRD passed, because BIRD is
+    # the shape the check was written against.
+    #
+    # Widening cannot regress BIRD: it reaches `gold_variants` either way.
+    if not gold_variants(item.ground_truth or {}):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"item {item.item_id} has no materialized gold answer; run "
-            "scripts/materialize_gold.py for this suite before grading SQL pushes",
+            f"item {item.item_id} carries no gold result set: neither "
+            "`accepted_results` nor `rows`. If the item has gold SQL, run "
+            "scripts/materialize_gold.py to execute it; if it has neither, it "
+            "is a curation gap and no SQL push can be graded against it.",
         )
     if not isinstance(body.output.get("rows"), list):
         raise HTTPException(

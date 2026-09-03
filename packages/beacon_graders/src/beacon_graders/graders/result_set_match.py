@@ -103,7 +103,7 @@ class _GoldVariant:
     condition_cols: tuple[int, ...]
 
 
-def _gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
+def gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
     """Every acceptable gold for the item, in one canonical shape.
 
     A set of ``accepted_results`` -- any of which passes -- is the general
@@ -193,12 +193,12 @@ class ResultSetMatchGrader:
             return False
         if _rows_from(result.output.get("rows")) is None:
             return False
-        return bool(_gold_variants(item.ground_truth or {}))
+        return bool(gold_variants(item.ground_truth or {}))
 
     def grade(self, item: EvalItem, result: ExecutionResult) -> list[Verdict]:
         """Compare pushed rows against materialized gold rows, any accepted gold."""
         gold_answer = item.ground_truth or {}
-        variants = _gold_variants(gold_answer)  # applicable() guarantees at least one
+        variants = gold_variants(gold_answer)  # applicable() guarantees at least one
 
         pushed_rows_payload = result.output.get("rows")
         pushed_columns = _explicit_columns(result.output.get("columns"))
