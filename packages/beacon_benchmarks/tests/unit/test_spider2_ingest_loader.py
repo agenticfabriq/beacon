@@ -53,8 +53,11 @@ def _repo(tmp_path: Path) -> Path:
         "SELECT count(*) FROM track", encoding="utf-8"
     )
     exec_dir = repo / "evaluation_suite" / "gold" / "exec_result"
-    (exec_dir / "local001_a.csv").write_text("n\n3527\n", encoding="utf-8")
-    (exec_dir / "local001_b.csv").write_text("total\n3527\n", encoding="utf-8")
+    # Two columns, so a broadcast `[1]` is a VALID index on both accepted
+    # results. With 1-column tables the broadcast test was pinning an
+    # out-of-range annotation rather than broadcasting.
+    (exec_dir / "local001_a.csv").write_text("n,label\n3527,a\n", encoding="utf-8")
+    (exec_dir / "local001_b.csv").write_text("total,label\n3527,a\n", encoding="utf-8")
     (exec_dir / "local002.csv").write_text("orders\n830\n", encoding="utf-8")
     _write_eval_annotations(
         repo,
@@ -79,8 +82,8 @@ def test_every_accepted_result_is_carried_not_just_the_first(tmp_path: Path) -> 
 
     first = next(t for t in tasks if t.instance_id == "local001")
     assert len(first.accepted_results) == 2
-    assert first.accepted_results[0] == {"columns": ["n"], "rows": [[3527]]}
-    assert first.accepted_results[1] == {"columns": ["total"], "rows": [[3527]]}
+    assert first.accepted_results[0] == {"columns": ["n", "label"], "rows": [[3527, "a"]]}
+    assert first.accepted_results[1] == {"columns": ["total", "label"], "rows": [[3527, "a"]]}
 
 
 def test_the_reference_document_is_loaded_as_evidence(tmp_path: Path) -> None:
@@ -216,14 +219,34 @@ def test_positional_condition_cols_out_of_range_refuses(tmp_path: Path) -> None:
     gold, but a guard there turns a bad annotation into a silent FAIL -- wrong
     place, wrong answer. The annotation is what is wrong; say so at import.
 
-    Broadcast (flat) annotations are deliberately exempt: one index list across
-    tables of differing arity makes an out-of-range index inherent to the
-    shape, and the sibling broadcast test pins that.
+    Both forms are checked. An earlier version exempted broadcast, citing the
+    sibling broadcast fixture as having tables of differing arity; it did not --
+    both were 1-column, so that fixture pinned an out-of-range annotation. The
+    fixture now uses 2-column tables so it pins BROADCASTING, and upstream's
+    ``gold.iloc[:, condition_cols]`` raises on out-of-range in either form.
     """
     repo = _repo(tmp_path)
     _write_eval_annotations(
         repo,
         [{"instance_id": "local001", "condition_cols": [[0], [4]], "ignore_order": True}],
+    )
+
+    with pytest.raises(ValueError, match="names column"):
+        load_spider2_tasks(repo)
+
+
+def test_a_NEGATIVE_condition_col_refuses(tmp_path: Path) -> None:
+    """The other bound, and the one an upper-bound-only test leaves open.
+
+    `_project_gold` filters on `0 <= i < arity`, so a negative index is dropped
+    exactly as silently as an oversized one -- and with a single-entry
+    annotation that drop projects gold to zero columns. Checking only the upper
+    bound left `0 <= ` deletable with the whole suite green.
+    """
+    repo = _repo(tmp_path)
+    _write_eval_annotations(
+        repo,
+        [{"instance_id": "local001", "condition_cols": [[0], [-1]], "ignore_order": True}],
     )
 
     with pytest.raises(ValueError, match="names column"):

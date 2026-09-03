@@ -185,13 +185,77 @@ def _distinct_rows(rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
     return out
 
 
+def _scored_columns(variant: _GoldVariant) -> list[str] | None:
+    """The gold column NAMES this variant's restriction scores, or None if all.
+
+    Names, not indices: a reader of one verdict should not have to fetch the
+    gold to learn that "the facts are present" meant one label column.
+    """
+    if not variant.condition_cols:
+        return None
+    arity = (
+        len(variant.result_set.rows[0])
+        if variant.result_set.rows
+        else len(variant.result_set.columns)
+    )
+    kept = [i for i in variant.condition_cols if 0 <= i < arity]
+    if len(kept) >= arity:
+        return None
+    return [
+        variant.result_set.columns[i] if i < len(variant.result_set.columns) else f"col{i}"
+        for i in kept
+    ]
+
+
+def _facts_justification(facts: bool, variants: list[_GoldVariant], facts_index: int | None) -> str:
+    """Say WHICH columns the tolerant reading compared when it compared a subset.
+
+    `condition_cols` restricts got-facts to the benchmark's scored columns, so
+    on 45 of spider2's 135 items this metric asks about a strict subset of gold
+    -- 20 of them a single column. Reported as a bare boolean it reads as "the
+    facts are there" either way, and `local300` is why that matters: the
+    candidate returned a running total (2120567.0 against gold 356618) and
+    passed because only the MONTH column is scored. The scope was already
+    recorded, but on the EXACT-MATCH verdict, whose reading it does not affect.
+    """
+    if not facts:
+        return "Gold's data is not present in the candidate, in any column projection."
+    scored = _scored_columns(variants[facts_index]) if facts_index is not None else None
+    if scored is None:
+        return "Gold's data is present in the candidate (shape-tolerant)."
+    return (
+        "Gold's data is present in the candidate (shape-tolerant), compared on the "
+        f"benchmark-scored columns only: {', '.join(scored)}. Other gold columns were "
+        "not compared, so this is not a claim about them."
+    )
+
+
+def _facts_raw(
+    passed: bool, variants: list[_GoldVariant], facts_index: int | None
+) -> dict[str, object]:
+    """The got-facts verdict's own scope, so one row is self-describing."""
+    raw: dict[str, object] = {"exact_match": passed}
+    if facts_index is not None:
+        raw["matched_accepted_index"] = facts_index
+        scored = _scored_columns(variants[facts_index])
+        if scored is not None:
+            raw["scored_columns"] = scored
+            raw["condition_cols"] = list(variants[facts_index].condition_cols)
+    return raw
+
+
 class ResultSetMatchGrader:
     name = "result_set_match"
     # v4: gold may be a set of accepted results (pass against any), with
     # per-accepted-result condition_cols honoured on the got-facts reading.
     # v5: duplicate_rows_insignificant honoured -- BIRD's published set()
     # comparison, declared per item, collapsing duplicates in both metrics.
-    version = "v5"
+    # v6: a gold projected to ZERO columns is no longer got-facts (it matched
+    # empty tuples row-for-row and passed anything with the right row count),
+    # and a subset-scored got-facts verdict now names the columns it compared.
+    # The first changes the emitted bool on a reachable input, so two verdicts
+    # stamped v5 could otherwise disagree on the same rows.
+    version = "v6"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"
@@ -371,11 +435,7 @@ class ResultSetMatchGrader:
                 criterion="correctness",
                 bool_value=facts,
                 value=1.0 if facts else 0.0,
-                justification=(
-                    "Gold's data is present in the candidate (shape-tolerant)."
-                    if facts
-                    else "Gold's data is not present in the candidate, in any column projection."
-                ),
-                raw_output={"exact_match": passed},
+                justification=_facts_justification(facts, variants, facts_index),
+                raw_output=_facts_raw(passed, variants, facts_index),
             ),
         ]

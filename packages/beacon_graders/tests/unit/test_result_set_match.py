@@ -461,3 +461,81 @@ def test_a_partially_out_of_range_restriction_keeps_the_valid_columns() -> None:
 
     assert projected.rows == [("2020-01",), ("2020-02",)]
     assert got_facts(exact, projected, Tolerance()) is True
+
+
+def test_a_subset_scored_got_facts_verdict_names_the_columns_it_compared() -> None:
+    """local300's shape: got-facts true on a candidate whose value is 6x off.
+
+    `condition_cols` restricts the tolerant reading to the benchmark's scored
+    columns, so on 45 of spider2's 135 items this metric asks about a strict
+    subset of gold. Reported as a bare boolean it reads as "the facts are
+    there" either way. The scope WAS recorded -- on the exact-match verdict,
+    whose reading it does not affect -- so a reader of the verdict that
+    actually carries the metric had to fetch the gold to learn what was
+    compared.
+    """
+    item = _item(
+        {
+            "condition_cols": [[0]],
+            "accepted_results": [
+                {"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618], ["2020-02", 409593]]}
+            ],
+        }
+    )
+    result = _result({"rows": [["2020-01", 2120567.0], ["2020-02", 5636091.0]]})
+
+    verdicts = ResultSetMatchGrader().grade(item, result)
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+
+    assert facts.bool_value is True
+    assert "MONTH" in facts.justification
+    assert "not a claim about them" in facts.justification
+    assert facts.raw_output is not None
+    assert facts.raw_output["scored_columns"] == ["MONTH"]
+    assert facts.raw_output["condition_cols"] == [0]
+
+
+def test_a_restriction_naming_EVERY_column_does_not_claim_a_scope() -> None:
+    """The no-op restriction: present, but covering the whole table.
+
+    Four of spider2's 135 items are like this -- `condition_cols` naming every
+    column, so nothing is actually narrowed. Saying "compared on the
+    benchmark-scored columns only: MONTH, TOTAL" there would assert a
+    restriction the item does not impose, and the reader would discount a
+    verdict that is in fact a full-table claim.
+
+    This is the case the sibling no-condition_cols test does NOT reach: it
+    returns early on the empty check and never exercises the arity comparison,
+    so deleting `if len(kept) >= arity` left every other test green.
+    """
+    item = _item(
+        {
+            "condition_cols": [[0, 1]],
+            "accepted_results": [{"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618]]}],
+        }
+    )
+    result = _result({"rows": [["2020-01", 356618]]})
+
+    verdicts = ResultSetMatchGrader().grade(item, result)
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+
+    assert facts.bool_value is True
+    assert "benchmark-scored columns only" not in facts.justification
+    assert facts.raw_output is not None
+    assert "scored_columns" not in facts.raw_output
+
+
+def test_an_unrestricted_got_facts_verdict_does_not_claim_a_scope() -> None:
+    """No condition_cols at all means the whole table was compared."""
+    item = _item(
+        {"accepted_results": [{"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618]]}]}
+    )
+    result = _result({"rows": [["2020-01", 356618]]})
+
+    verdicts = ResultSetMatchGrader().grade(item, result)
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+
+    assert facts.bool_value is True
+    assert "benchmark-scored columns only" not in facts.justification
+    assert facts.raw_output is not None
+    assert "scored_columns" not in facts.raw_output

@@ -156,19 +156,29 @@ def _check_condition_col_range(
     annotation into a silent FAIL, which is the wrong place and the wrong
     answer. The annotation is wrong; say so at import, once, by name.
 
-    POSITIONAL form only. A flat list is BROADCAST to every accepted result,
-    and those results have different arities -- the loader's own broadcast test
-    fixture has a 2-column and a 1-column table sharing one `[1]` -- so an
-    index beyond the narrowest table is inherent to that shape rather than an
-    authoring mistake, and whether upstream treats it as an error is not
-    something this repo can establish. A positional entry is authored against
-    one specific table, so there the index either names a column that table has
-    or the annotation is wrong.
+    BOTH annotation forms, positional and broadcast. An earlier version exempted
+    broadcast on the grounds that one index list across tables of differing
+    arity makes an out-of-range index inherent to the shape -- and cited this
+    loader's own broadcast fixture as evidence. That was wrong: both of
+    `local001`'s accepted results are 1-column, so that fixture's `[1]` is out
+    of range for EVERY variant, which is the all-invalid case rather than the
+    differing-arity one. The exemption rested on evidence the repo did not
+    contain.
+
+    Upstream settles it. `evaluation_suite/evaluate_utils.py`'s
+    ``compare_pandas_table`` does ``gold_cols = gold.iloc[:, condition_cols]``,
+    and pandas ``iloc`` RAISES on an out-of-range index -- in both forms, since
+    the flat list is broadcast before that line. So an out-of-range index is an
+    error upstream too, and refusing it here is not stricter than the
+    benchmark. (Confirmed 2026-09-03 by the mnemiq session reading its spider2
+    checkout; not verifiable from this repo, which vendors no copy.)
 
     Measured 2026-09-03 on the live corpus: 0 of 132 restricted variants carry
     an out-of-range index, so this refuses nothing that exists today. It exists
     because the shape checks above validate the ENVELOPE -- entry count and
-    element types -- and never the numbers inside it.
+    element types -- and never the numbers inside it. Both bounds are checked:
+    a NEGATIVE index would otherwise import cleanly and then be dropped in
+    silence by ``_project_gold``, which filters on ``0 <= i < arity``.
     """
     for index, entry in enumerate(normalized):
         if index >= len(accepted):
@@ -210,13 +220,12 @@ def _normalize_condition_cols(
                 f"{accepted_count} accepted results -- annotation/CSV mismatch"
             )
         normalized = [[int(i) for i in entry] for entry in raw]
-        # Positional only -- see _check_condition_col_range on why broadcast is
-        # exempt.
-        _check_condition_col_range(instance_id, normalized, accepted)
-        return normalized
-    if all(isinstance(entry, int) and not isinstance(entry, bool) for entry in raw):
-        return [[int(i) for i in raw] for _ in range(accepted_count)]
-    raise ValueError(f"{instance_id}: mixed condition_cols shape: {raw!r}")
+    elif all(isinstance(entry, int) and not isinstance(entry, bool) for entry in raw):
+        normalized = [[int(i) for i in raw] for _ in range(accepted_count)]
+    else:
+        raise ValueError(f"{instance_id}: mixed condition_cols shape: {raw!r}")
+    _check_condition_col_range(instance_id, normalized, accepted)
+    return normalized
 
 
 def load_spider2_tasks(
