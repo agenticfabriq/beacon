@@ -539,3 +539,68 @@ def test_an_unrestricted_got_facts_verdict_does_not_claim_a_scope() -> None:
     assert "benchmark-scored columns only" not in facts.justification
     assert facts.raw_output is not None
     assert "scored_columns" not in facts.raw_output
+
+
+def test_an_EXACT_match_on_a_restricted_item_claims_no_narrowed_scope() -> None:
+    """The mirror of the local300 over-claim, and it shipped in the same change.
+
+    `facts_v = passed_v or got_facts(...)`, so got-facts is true whenever the
+    full table matched -- and `facts_index` is then set on a variant that
+    happens to carry a restriction. Narrating "compared on the benchmark-scored
+    columns only: MONTH. Other gold columns were not compared" for a candidate
+    equal to gold on EVERY column describes the wrong reading, and 45 of the
+    restricted items would have had every exact-match pass narrated that way.
+    """
+    item = _item(
+        {
+            "condition_cols": [[0]],
+            "accepted_results": [{"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618]]}],
+        }
+    )
+    result = _result({"rows": [["2020-01", 356618]]})
+
+    verdicts = ResultSetMatchGrader().grade(item, result)
+    exact = next(v for v in verdicts if v.metric != "got_facts")
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+
+    assert exact.bool_value is True
+    assert facts.bool_value is True
+    assert "benchmark-scored columns only" not in facts.justification
+    assert facts.raw_output is not None
+    assert "scored_columns" not in facts.raw_output
+
+
+def test_a_REPEATED_condition_col_still_discloses_its_narrowed_scope() -> None:
+    """`[0, 0]` on a 2-column gold scores ONE distinct column, not two.
+
+    Coverage is a set question. Counting the raw list made `len(kept) >= arity`
+    true, so the disclosure returned None and said nothing about a reading that
+    never looked at TOTAL -- failing open on precisely the input it exists to
+    describe.
+
+    Note what `_project_gold` does with the repeat: it DUPLICATES the column,
+    so gold becomes (MONTH, MONTH) and the candidate needs two positions
+    matching the month. That is stricter than upstream, whose
+    `compare_pandas_table` lets one prediction column satisfy several gold
+    columns (no injectivity -- the match loop breaks without consuming). A
+    second divergence on the same input, latent for the same reason: 0 of the
+    restricted items in the corpus repeat an index.
+    """
+    item = _item(
+        {
+            "condition_cols": [[0, 0]],
+            "accepted_results": [
+                {"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618], ["2020-02", 409593]]}
+            ],
+        }
+    )
+    result = _result({"rows": [["2020-01", "2020-01"], ["2020-02", "2020-02"]]})
+
+    verdicts = ResultSetMatchGrader().grade(item, result)
+    facts = next(v for v in verdicts if v.metric == "got_facts")
+
+    assert facts.bool_value is True
+    assert facts.raw_output is not None
+    assert facts.raw_output["scored_columns"] == ["MONTH"]
+    assert "MONTH" in facts.justification
+    assert "TOTAL" not in facts.justification

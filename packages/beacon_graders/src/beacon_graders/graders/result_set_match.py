@@ -198,7 +198,13 @@ def _scored_columns(variant: _GoldVariant) -> list[str] | None:
         if variant.result_set.rows
         else len(variant.result_set.columns)
     )
-    kept = [i for i in variant.condition_cols if 0 <= i < arity]
+    # DISTINCT indices, because coverage is a set question. `condition_cols
+    # [0, 0]` on a 2-column gold has len 2 and covers ONE column: counting the
+    # list read that as full coverage and disclosed nothing, while
+    # `_project_gold` still compared column 0 alone (twice). The disclosure
+    # would have failed open on exactly the input it exists to describe.
+    # Latent -- 0 of the restricted items in the corpus repeat an index.
+    kept = sorted({i for i in variant.condition_cols if 0 <= i < arity})
     if len(kept) >= arity:
         return None
     return [
@@ -207,7 +213,13 @@ def _scored_columns(variant: _GoldVariant) -> list[str] | None:
     ]
 
 
-def _facts_justification(facts: bool, variants: list[_GoldVariant], facts_index: int | None) -> str:
+def _facts_justification(
+    facts: bool,
+    variants: list[_GoldVariant],
+    facts_index: int | None,
+    *,
+    via_projection: bool,
+) -> str:
     """Say WHICH columns the tolerant reading compared when it compared a subset.
 
     `condition_cols` restricts got-facts to the benchmark's scored columns, so
@@ -220,7 +232,15 @@ def _facts_justification(facts: bool, variants: list[_GoldVariant], facts_index:
     """
     if not facts:
         return "Gold's data is not present in the candidate, in any column projection."
-    scored = _scored_columns(variants[facts_index]) if facts_index is not None else None
+    # `facts_v = passed_v or got_facts(...)`, so facts can come from the FULL
+    # table matching exactly. Narrating "compared on the benchmark-scored
+    # columns only" there is false and is the mirror of the over-claim this
+    # disclosure exists to fix: the exact reading compared every column.
+    scored = (
+        _scored_columns(variants[facts_index])
+        if via_projection and facts_index is not None
+        else None
+    )
     if scored is None:
         return "Gold's data is present in the candidate (shape-tolerant)."
     return (
@@ -231,13 +251,22 @@ def _facts_justification(facts: bool, variants: list[_GoldVariant], facts_index:
 
 
 def _facts_raw(
-    passed: bool, variants: list[_GoldVariant], facts_index: int | None
+    passed: bool,
+    variants: list[_GoldVariant],
+    facts_index: int | None,
+    *,
+    via_projection: bool,
 ) -> dict[str, object]:
-    """The got-facts verdict's own scope, so one row is self-describing."""
+    """The got-facts verdict's own scope, so one row is self-describing.
+
+    `via_projection` gates the scope for the same reason the justification does:
+    when the full table matched exactly, no restriction was applied and
+    recording one would misdescribe the reading.
+    """
     raw: dict[str, object] = {"exact_match": passed}
     if facts_index is not None:
         raw["matched_accepted_index"] = facts_index
-        scored = _scored_columns(variants[facts_index])
+        scored = _scored_columns(variants[facts_index]) if via_projection else None
         if scored is not None:
             raw["scored_columns"] = scored
             raw["condition_cols"] = list(variants[facts_index].condition_cols)
@@ -313,6 +342,11 @@ class ResultSetMatchGrader:
         facts = False
         matched_index: int | None = None
         facts_index: int | None = None
+        # Whether the got-facts TRUE came from the restricted projection rather
+        # than from the full table matching. Only the former has a scope worth
+        # disclosing; claiming one for an exact match describes the wrong
+        # reading.
+        facts_via_projection = False
         mismatches: list[Mismatch | None] = []
         for index, variant in enumerate(variants):
             gold = variant.result_set
@@ -360,6 +394,7 @@ class ResultSetMatchGrader:
                 matched_index = index
             if facts_v and facts_index is None:
                 facts_index = index
+                facts_via_projection = not passed_v
             passed = passed or passed_v
             facts = facts or facts_v
             if passed and facts:
@@ -435,7 +470,11 @@ class ResultSetMatchGrader:
                 criterion="correctness",
                 bool_value=facts,
                 value=1.0 if facts else 0.0,
-                justification=_facts_justification(facts, variants, facts_index),
-                raw_output=_facts_raw(passed, variants, facts_index),
+                justification=_facts_justification(
+                    facts, variants, facts_index, via_projection=facts_via_projection
+                ),
+                raw_output=_facts_raw(
+                    passed, variants, facts_index, via_projection=facts_via_projection
+                ),
             ),
         ]

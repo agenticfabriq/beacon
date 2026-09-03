@@ -242,11 +242,36 @@ def test_a_NEGATIVE_condition_col_refuses(tmp_path: Path) -> None:
     exactly as silently as an oversized one -- and with a single-entry
     annotation that drop projects gold to zero columns. Checking only the upper
     bound left `0 <= ` deletable with the whole suite green.
+
+    It is the worse of the two bounds, not the milder one: upstream's
+    `gold.iloc[:, [-1]]` does NOT raise, it selects the last column, so a
+    negative index makes beacon and the benchmark score DIFFERENT columns on
+    the same annotation with nothing reporting it. An IndexError would at least
+    be loud on one side.
     """
     repo = _repo(tmp_path)
     _write_eval_annotations(
         repo,
         [{"instance_id": "local001", "condition_cols": [[0], [-1]], "ignore_order": True}],
+    )
+
+    with pytest.raises(ValueError, match="names column"):
+        load_spider2_tasks(repo)
+
+
+def test_a_BROADCAST_condition_col_out_of_range_refuses(tmp_path: Path) -> None:
+    """The half of the guard the positional tests do not reach.
+
+    Both refusal tests above use positional annotations, and the broadcast
+    test's `[1]` is in range on the 2-column fixture -- so moving the range
+    check back inside the `all(isinstance(entry, list))` branch left the whole
+    suite green while the change's headline behaviour was gone. A flat list is
+    broadcast to every accepted result BEFORE upstream's `iloc` sees it, so it
+    is out of range there for exactly the same reason.
+    """
+    repo = _repo(tmp_path)
+    _write_eval_annotations(
+        repo, [{"instance_id": "local001", "condition_cols": [7], "ignore_order": True}]
     )
 
     with pytest.raises(ValueError, match="names column"):

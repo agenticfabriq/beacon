@@ -167,11 +167,25 @@ def _check_condition_col_range(
 
     Upstream settles it. `evaluation_suite/evaluate_utils.py`'s
     ``compare_pandas_table`` does ``gold_cols = gold.iloc[:, condition_cols]``,
-    and pandas ``iloc`` RAISES on an out-of-range index -- in both forms, since
-    the flat list is broadcast before that line. So an out-of-range index is an
-    error upstream too, and refusing it here is not stricter than the
-    benchmark. (Confirmed 2026-09-03 by the mnemiq session reading its spider2
-    checkout; not verifiable from this repo, which vendors no copy.)
+    and the two bounds behave DIFFERENTLY there -- measured on the image's own
+    pandas against a 2-column frame:
+
+        iloc[:, [5]]   IndexError
+        iloc[:, [-1]]  selects the LAST column, silently
+        iloc[:, [-3]]  IndexError
+
+    So a positive overshoot is an error upstream and refusing it here is not
+    stricter than the benchmark. A negative index is worse than an error: it
+    scores a column counted from the END, while ``_project_gold`` filters on
+    ``0 <= i < arity`` and DROPS it. beacon and the benchmark would then score
+    different columns on the same annotation, with nothing anywhere saying so
+    -- and if the drop leaves nothing, beacon scores no columns at all. That
+    silent divergence, not the IndexError, is the reason both bounds are
+    refused here rather than reconciled.
+
+    (Upstream confirmed 2026-09-03 by the mnemiq session from its spider2
+    checkout, which also caught this docstring claiming `iloc` raises on both
+    bounds. Not verifiable from this repo, which vendors no copy.)
 
     Measured 2026-09-03 on the live corpus: 0 of 132 restricted variants carry
     an out-of-range index, so this refuses nothing that exists today. It exists
