@@ -253,6 +253,16 @@ def got_facts(
     candidate_arity = len(candidate.rows[0]) if candidate.rows else len(candidate.columns)
     if gold_arity > candidate_arity:
         return False
+    # A gold with no columns is not a weak claim, it is no claim -- and it
+    # passed everything. `_project_gold` drops out-of-range `condition_cols`
+    # silently, so an annotation whose indices ALL fall outside the gold's
+    # arity arrives here as rows of empty tuples; the projection loop then
+    # takes the single empty combination and matches () against () row for
+    # row, so got-facts reduced to "did you return the right NUMBER of rows"
+    # and said nothing about content. Refusing is right on both readings:
+    # nothing was compared, so nothing was shown present.
+    if gold_arity == 0:
+        return False
 
     gold_sorted = _sort_cells(gold.rows)
     for index, keep in enumerate(combinations(range(candidate_arity), gold_arity)):
@@ -280,6 +290,9 @@ def got_facts_contained(
     gold_arity = len(gold.rows[0]) if gold.rows else len(gold.columns)
     candidate_arity = len(candidate.rows[0]) if candidate.rows else len(candidate.columns)
     if gold_arity > candidate_arity:
+        return False
+    # See got_facts: a zero-column gold shows nothing present.
+    if gold_arity == 0:
         return False
     gold_cells_sorted = _sort_cells(gold.rows)
     for index, keep in enumerate(combinations(range(candidate_arity), gold_arity)):

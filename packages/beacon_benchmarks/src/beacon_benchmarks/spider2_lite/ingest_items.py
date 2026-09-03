@@ -134,8 +134,58 @@ def _read_eval_annotations(repo_dir: Path) -> dict[str, dict[str, object]]:
     return annotations
 
 
+def _accepted_arity(table: dict[str, object]) -> int:
+    """The column count of one accepted result, rows first then the header."""
+    rows = table.get("rows")
+    if isinstance(rows, list) and rows and isinstance(rows[0], (list, tuple)):
+        return len(rows[0])
+    columns = table.get("columns")
+    return len(columns) if isinstance(columns, list) else 0
+
+
+def _check_condition_col_range(
+    instance_id: str, normalized: list[list[int]], accepted: list[dict[str, object]]
+) -> None:
+    """Refuse an index that names a column its accepted result does not have.
+
+    Nothing downstream can report this: ``_project_gold`` keeps only the
+    in-range indices, so a partly-invalid annotation silently grades on fewer
+    columns than it names, and an entirely-invalid one projects gold to ZERO
+    columns. The tolerant readings now refuse a zero-column gold rather than
+    matching empty tuples row-for-row -- but a guard in the grader turns a bad
+    annotation into a silent FAIL, which is the wrong place and the wrong
+    answer. The annotation is wrong; say so at import, once, by name.
+
+    POSITIONAL form only. A flat list is BROADCAST to every accepted result,
+    and those results have different arities -- the loader's own broadcast test
+    fixture has a 2-column and a 1-column table sharing one `[1]` -- so an
+    index beyond the narrowest table is inherent to that shape rather than an
+    authoring mistake, and whether upstream treats it as an error is not
+    something this repo can establish. A positional entry is authored against
+    one specific table, so there the index either names a column that table has
+    or the annotation is wrong.
+
+    Measured 2026-09-03 on the live corpus: 0 of 132 restricted variants carry
+    an out-of-range index, so this refuses nothing that exists today. It exists
+    because the shape checks above validate the ENVELOPE -- entry count and
+    element types -- and never the numbers inside it.
+    """
+    for index, entry in enumerate(normalized):
+        if index >= len(accepted):
+            continue
+        arity = _accepted_arity(accepted[index])
+        bad = [i for i in entry if not 0 <= i < arity]
+        if bad:
+            raise ValueError(
+                f"{instance_id}: condition_cols{entry} names column(s) {bad} on an "
+                f"accepted result with {arity} column(s) (accepted_results[{index}]). "
+                f"Out-of-range indices are dropped when grading, so this would "
+                f"silently score fewer columns than the annotation claims."
+            )
+
+
 def _normalize_condition_cols(
-    instance_id: str, raw: object, accepted_count: int
+    instance_id: str, raw: object, accepted: list[dict[str, object]]
 ) -> list[list[int]]:
     """Mirror the benchmark evaluator's own normalization, one list per gold.
 
@@ -144,7 +194,11 @@ def _normalize_condition_cols(
     applies to every accepted result. ``None``/``[]``/``[[]]``/``[None]`` all
     mean "every column counts". Anything else would restrict the wrong table's
     columns in silence, so it refuses instead.
+
+    Takes the accepted TABLES, not just their count, because the indices have
+    to be checked against the arity of the table each one restricts.
     """
+    accepted_count = len(accepted)
     if raw in (None, [], [[]], [None]):
         return []
     if not isinstance(raw, list):
@@ -155,7 +209,11 @@ def _normalize_condition_cols(
                 f"{instance_id}: {len(raw)} condition_cols entries for "
                 f"{accepted_count} accepted results -- annotation/CSV mismatch"
             )
-        return [[int(i) for i in entry] for entry in raw]
+        normalized = [[int(i) for i in entry] for entry in raw]
+        # Positional only -- see _check_condition_col_range on why broadcast is
+        # exempt.
+        _check_condition_col_range(instance_id, normalized, accepted)
+        return normalized
     if all(isinstance(entry, int) and not isinstance(entry, bool) for entry in raw):
         return [[int(i) for i in raw] for _ in range(accepted_count)]
     raise ValueError(f"{instance_id}: mixed condition_cols shape: {raw!r}")
@@ -219,7 +277,7 @@ def load_spider2_tasks(
                 accepted_results=accepted,
                 ignore_order=bool(ignore_order) if ignore_order is not None else None,
                 condition_cols=_normalize_condition_cols(
-                    instance_id, note.get("condition_cols"), len(accepted)
+                    instance_id, note.get("condition_cols"), accepted
                 ),
             )
         )

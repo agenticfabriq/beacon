@@ -202,3 +202,29 @@ def test_a_case_with_no_published_result_still_loads(tmp_path: Path) -> None:
     # Loading must not hide it -- the runner reports it as an ERROR rather than
     # silently passing a case nothing can grade.
     assert task.accepted_results == []
+
+
+def test_positional_condition_cols_out_of_range_refuses(tmp_path: Path) -> None:
+    """An index naming a column its own accepted result does not have.
+
+    The shape checks validate the ENVELOPE -- entry count, element types -- and
+    never the numbers inside it, so this used to import cleanly and then grade
+    on fewer columns than the annotation named: `_project_gold` keeps only the
+    in-range indices. When NONE survive it projects gold to zero columns, and
+    the tolerant readings compared empty tuples row-for-row and passed any
+    candidate with the right row count. The grader now refuses a zero-column
+    gold, but a guard there turns a bad annotation into a silent FAIL -- wrong
+    place, wrong answer. The annotation is what is wrong; say so at import.
+
+    Broadcast (flat) annotations are deliberately exempt: one index list across
+    tables of differing arity makes an out-of-range index inherent to the
+    shape, and the sibling broadcast test pins that.
+    """
+    repo = _repo(tmp_path)
+    _write_eval_annotations(
+        repo,
+        [{"instance_id": "local001", "condition_cols": [[0], [4]], "ignore_order": True}],
+    )
+
+    with pytest.raises(ValueError, match="names column"):
+        load_spider2_tasks(repo)

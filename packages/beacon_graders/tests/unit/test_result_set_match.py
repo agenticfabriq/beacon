@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from beacon_graders.graders.result_set_match import ResultSetMatchGrader
+from beacon_graders.comparison import ResultSet, got_facts, got_facts_contained
+from beacon_graders.graders.result_set_match import ResultSetMatchGrader, _project_gold
+from beacon_graders.tolerance import Tolerance
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 
 
@@ -427,3 +429,35 @@ def test_a_preview_with_insignificant_duplicates_grades_by_containment() -> None
 
     assert exact.bool_value is True
     assert facts.bool_value is True
+
+
+def test_a_gold_projected_to_zero_columns_is_not_got_facts() -> None:
+    """A claim about no columns is not a claim, and it used to pass everything.
+
+    `_project_gold` drops out-of-range indices silently, so an annotation whose
+    indices ALL fall outside the gold's arity yields a zero-column gold. The
+    tolerant readings then compared empty tuples row-for-row and returned True
+    for any candidate with the right row count -- got-facts reduced to "did you
+    return the right NUMBER of rows", on content it never looked at. Latent on
+    today's corpus (measured 2026-09-03: 0 of 132 restricted variants carry an
+    out-of-range index) and fail-open, which is the combination worth a guard.
+    """
+    gold = ResultSet(columns=["MONTH", "TOTAL"], rows=[("2020-01", 356618), ("2020-02", 409593)])
+    candidate = ResultSet(columns=["a", "b"], rows=[("wildly", 1.0), ("wrong", 2.0)])
+
+    projected = _project_gold(gold, (7, 9))
+
+    assert projected.rows == [(), ()]
+    assert got_facts(candidate, projected, Tolerance()) is False
+    assert got_facts_contained(candidate, projected, Tolerance()) is False
+
+
+def test_a_partially_out_of_range_restriction_keeps_the_valid_columns() -> None:
+    """The guard must not punish a usable annotation: only ALL-invalid is vacuous."""
+    gold = ResultSet(columns=["MONTH", "TOTAL"], rows=[("2020-01", 356618), ("2020-02", 409593)])
+    exact = ResultSet(columns=["m", "t"], rows=[("2020-01", 356618), ("2020-02", 409593)])
+
+    projected = _project_gold(gold, (0, 9))
+
+    assert projected.rows == [("2020-01",), ("2020-02",)]
+    assert got_facts(exact, projected, Tolerance()) is True
