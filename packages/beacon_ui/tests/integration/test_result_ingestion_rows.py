@@ -88,7 +88,12 @@ def _push(
     world: _World,
     run_id: str,
     item_id: str,
-    rows: list[list[Any]],
+    # `list[Any]`, not `list[list[Any]]`: this helper models the WIRE, where
+    # `rows` is a JSON array whose entries the server is what validates. Typing
+    # it as well-formed rows made the malformed-payload tests -- the ones that
+    # pin the gate -- unexpressible without a cast that mypy would have to be
+    # told to ignore.
+    rows: list[Any],
     **over: Any,
 ) -> Any:
     output: dict[str, Any] = {
@@ -249,14 +254,94 @@ def test_gold_as_accepted_results_is_gradeable_not_refused(
     assert response.json()["outcome"] == "PASS"
 
 
+def _seed_unanswerable(session: Session, world: _World) -> tuple[str, str]:
+    """An item declaring itself unanswerable: gold empty, exactly as ingested.
+
+    `fs_payments/ingest_items.py` stores `accepted_results: [gold_table] if
+    gold_table else []`, so the five unanswerable items carry `[]` -- there is
+    nothing to compare against, which is the point of the band.
+    """
+    from beacon_storage.models.eval_items import EvalItem
+    from sqlalchemy import select
+
+    run_id, item_id = _seed_accepted_results(session, world)
+    row = session.scalars(select(EvalItem).where(EvalItem.item_id == UUID(item_id))).one()
+    row.gold_answer = {"sql": "", "accepted_results": []}
+    row.item_input = {"question": "unanswerable from this corpus?", "answerable": False}
+    session.commit()
+    return run_id, item_id
+
+
+def test_a_flat_list_of_scalars_is_refused_not_composed_as_ERROR(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """`isinstance(rows, list)` passes this payload; the grader rejects it.
+
+    That gap is the gate's own failure mode in miniature: `[1, 2, 3]` is a
+    list, so the old check admitted it, then `applicable` returned False,
+    nothing emitted a verdict, and the composer fell through to ERROR -- an
+    instrument-failure label on a malformed push. A refusal names the caller's
+    mistake; ERROR blames the harness and buries it in the run.
+    """
+    run_id, item_id = _seed_accepted_results(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [1, 2, 3])
+
+    assert response.status_code == 422, response.text
+    assert "list of scalars" in response.text
+
+
+def test_over_answering_a_declared_unanswerable_item_records_FAIL(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The band's whole purpose, and the gate used to make it unrecordable.
+
+    An item declaring `answerable: false` legitimately has no gold -- the five
+    fs_payments ones store `accepted_results: []` for exactly that reason. The
+    composer short-circuits them before any grader runs: deferring is PASS,
+    answering anyway is FAIL. Refusing the push at the gate meant an
+    over-answer could never be RECORDED over HTTP, and since
+    `load_eval_reports.py` calls `raise_for_status`, one such item aborted the
+    entire load.
+    """
+    run_id, item_id = _seed_unanswerable(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [["01", 10.0]])
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "FAIL"
+
+
+def test_over_answering_an_unanswerable_item_WITHOUT_rows_records_FAIL(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The half the sibling test missed, and the likelier half in practice.
+
+    `ingest_payload` writes `output["rows"]` only when the harness captured
+    engine rows, while `output_kind` is unconditionally "sql". So the realistic
+    over-answer on an unanswerable item -- a SUT that emitted SQL and an answer
+    but whose rows were never captured -- carries NEITHER gold nor rows. An
+    exemption covering only the gold gate leaves the rows gate to 422 it, and
+    `raise_for_status` still aborts the load. Pinning the rows-bearing case
+    alone would have let that through green.
+    """
+    run_id, item_id = _seed_unanswerable(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [], output_over={"rows": None})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "FAIL"
+
+
 def test_an_item_with_no_gold_of_either_shape_is_still_refused(
     api_client: TestClient, world: _World, session: Session
 ) -> None:
     """Widening the gate must not make it vacuous.
 
-    An empty `accepted_results` is how the five unanswerable fs_payments items
-    are stored -- genuinely no gold to compare against -- and a SQL push on one
-    must still be refused rather than composed blind.
+    Undeclared missing gold is an ingest defect and stays refused. The
+    DECLARED case is different and is exempt -- see the test above -- because
+    "no gold because unanswerable" and "no gold because ingest failed" are two
+    different absences, and only the declared one is benign.
     """
     run_id, item_id = _seed_accepted_results(session, world)
     from beacon_storage.models.eval_items import EvalItem

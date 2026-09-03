@@ -52,8 +52,17 @@ _ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 from beacon_runner.transport import MAX_PUSHED_ROWS as MAX_PUSHED_ROWS  # noqa: E402, PLC0414
 
 
-def _rows_from(payload: Any, columns: list[str] | None = None) -> list[tuple[Any, ...]] | None:
+def rows_from(payload: Any, columns: list[str] | None = None) -> list[tuple[Any, ...]] | None:
     """Parse a pushed or materialized ``rows`` value into canonical row tuples.
+
+    Public because the ingest gate must ask THIS question about a pushed
+    `rows` payload rather than a lookalike. ``isinstance(rows, list)`` is the
+    natural-looking check and is WIDER than this one: `[1, 2, 3]` is a list,
+    so it clears the gate, and then ``applicable`` returns False here, no
+    grader emits anything, and the composer falls through to ERROR -- the
+    blind grading the gate exists to prevent, wearing an instrument-failure
+    label. A gate must ask the grader's own question; see ``gold_variants``
+    for the same lesson on the gold side.
 
     Accepts a list of lists (the wire shape) or a list of dicts (mnemiq's
     report shape, column name -> value). Dict rows are ordered by ``columns``
@@ -118,7 +127,7 @@ def gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
         for index, entry in enumerate(accepted):
             if not isinstance(entry, dict):
                 continue
-            rows = _rows_from(entry.get("rows"), _explicit_columns(entry.get("columns")))
+            rows = rows_from(entry.get("rows"), _explicit_columns(entry.get("columns")))
             if rows is None:
                 continue
             restriction = restrictions[index] if index < len(restrictions) else []
@@ -133,7 +142,7 @@ def gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
                 )
             )
         return variants
-    rows = _rows_from(gold_answer.get("rows"), _explicit_columns(gold_answer.get("columns")))
+    rows = rows_from(gold_answer.get("rows"), _explicit_columns(gold_answer.get("columns")))
     if rows is None:
         return []
     return [
@@ -191,7 +200,7 @@ class ResultSetMatchGrader:
         """Apply when the push carries rows and the item's gold is materialized."""
         if result.output_kind != "sql":
             return False
-        if _rows_from(result.output.get("rows")) is None:
+        if rows_from(result.output.get("rows")) is None:
             return False
         return bool(gold_variants(item.ground_truth or {}))
 
@@ -202,7 +211,7 @@ class ResultSetMatchGrader:
 
         pushed_rows_payload = result.output.get("rows")
         pushed_columns = _explicit_columns(result.output.get("columns"))
-        candidate_rows = _rows_from(pushed_rows_payload, pushed_columns) or []
+        candidate_rows = rows_from(pushed_rows_payload, pushed_columns) or []
         truncated_at_cap = len(candidate_rows) > MAX_PUSHED_ROWS
         if truncated_at_cap:
             candidate_rows = candidate_rows[:MAX_PUSHED_ROWS]

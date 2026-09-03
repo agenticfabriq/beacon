@@ -13,7 +13,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from beacon_graders.composer import VerdictComposer
 from beacon_graders.graders import DabstepAnswerMatcher, ResultSetMatchGrader
-from beacon_graders.graders.result_set_match import gold_variants
+from beacon_graders.graders.result_set_match import gold_variants, rows_from
 from beacon_graders.types import VerdictOutcome
 from beacon_iam.permissions import Permission
 from beacon_runner.persistence import persist_result
@@ -60,8 +60,32 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
         # before any grader runs.
         return VerdictComposer(graders=[DabstepAnswerMatcher()])
 
-    # The grader's own predicate, not a narrower one. This gate selects
-    # ResultSetMatchGrader, whose `applicable` is `bool(gold_variants(...))` --
+    # An item DECLARING itself unanswerable is judged on its REFUSAL, not on a
+    # result set, so neither gate below applies to it -- and this is not a
+    # loophole, it is the one case where absent gold and absent rows are both
+    # legitimate. The composer short-circuits such items ahead of pass/fail:
+    # deferring is PASS, answering anyway is FAIL.
+    #
+    # Both gates have to be skipped, not just the gold one. `ingest_payload`
+    # writes `output["rows"]` only when the harness captured engine rows, while
+    # `output_kind` is unconditionally "sql" -- so a SUT that over-answers an
+    # unanswerable item WITHOUT captured rows carries neither half, and gating
+    # on either one refuses the push. `load_eval_reports.py` calls
+    # `raise_for_status`, so one such item aborts the entire load, and the band
+    # whose stated purpose is detecting over-answering is the band that cannot
+    # record one.
+    #
+    # Graders still run as evidence where gold happens to exist; the composer
+    # reaches its answerable branch before consulting their verdicts.
+    #
+    # Missing gold WITHOUT that declaration stays an ingest defect and is still
+    # refused -- two different absences, and only the declared one is benign.
+    if (item.query or {}).get("answerable") is False:
+        return VerdictComposer(graders=[ResultSetMatchGrader()])
+
+    # Both predicates below are the grader's own, not lookalikes. This gate
+    # selects ResultSetMatchGrader, whose `applicable` is
+    # `rows_from(...) is not None and bool(gold_variants(...))` --
     # and `gold_variants` reads `accepted_results` first, treating BIRD's single
     # `rows`/`columns` as the one-element case. Checking `gold["rows"]` here
     # asked a different question than the grader it guards: it refused every
@@ -75,16 +99,27 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"item {item.item_id} carries no gold result set: neither "
-            "`accepted_results` nor `rows`. If the item has gold SQL, run "
-            "scripts/materialize_gold.py to execute it; if it has neither, it "
-            "is a curation gap and no SQL push can be graded against it.",
+            "`accepted_results` nor `rows`, and it does not declare itself "
+            "unanswerable. This is a curation gap in the item. Materializing "
+            "is only meaningful where the suite treats gold SQL as "
+            "authoritative -- it is not for spider2_lite, whose `sql` is "
+            "documentation only -- and scripts/materialize_gold.py sweeps a "
+            "whole SUITE, rewriting every item it can execute, so do not reach "
+            "for it to repair one item.",
         )
-    if not isinstance(body.output.get("rows"), list):
+    # The grader's own predicate again, on the output side. `isinstance(...,
+    # list)` is WIDER than this: `[1, 2, 3]` is a list and clears it, then
+    # ResultSetMatchGrader.applicable rejects the same payload, nothing emits a
+    # verdict, and the composer falls through to ERROR -- which reads as a
+    # crashed harness rather than a malformed push.
+    if rows_from(body.output.get("rows")) is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "a SQL push must carry the rows its engine returned in output.rows "
             "(with output.row_count when they are a bounded preview); beacon "
-            "grades by comparison and does not execute SQL",
+            "grades by comparison and does not execute SQL. Each row must be a "
+            "list of values or an object keyed by column name -- a flat list of "
+            "scalars is not a row set.",
         )
     return VerdictComposer(graders=[ResultSetMatchGrader()])
 
