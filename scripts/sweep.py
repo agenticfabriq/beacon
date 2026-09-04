@@ -101,6 +101,22 @@ def _per_k(entry: object, field_name: str) -> float:
     return 0.0
 
 
+def _per_k_count(entry: object, field_name: str) -> int | None:
+    """Read a COUNT out of a per-k entry, as an int or as absent.
+
+    Separate from ``_per_k`` because that returns ``float`` and falls back to
+    ``0.0``. For a count both halves are wrong: it prints ``2.0`` beside the
+    integer columns, and a missing value renders as ``0.0`` -- the same value
+    that means "nothing was compared". None keeps absent distinguishable from
+    zero, which is the whole point of recording these.
+    """
+    if isinstance(entry, Mapping):
+        value = entry.get(field_name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
 @dataclass
 class FakeSweepRunner:
     """Minimal runner adapter for deterministic DummySUT recovery validation.
@@ -265,7 +281,9 @@ def main() -> int:
                         "ci_high": _per_k(row.delta_pass_at_k.get(headline_key), "ci_high"),
                         # The sample the three numbers above came over. Printing a
                         # delta without it is the omission B64 is about.
-                        "n_compared": _per_k(row.delta_pass_at_k.get(headline_key), "n_compared"),
+                        "n_compared": _per_k_count(
+                            row.delta_pass_at_k.get(headline_key), "n_compared"
+                        ),
                         "n_items_submitted": row.n_items_submitted,
                         "n_baseline_excluded": row.n_baseline_excluded,
                         "n_ablated_excluded": row.n_ablated_excluded,
