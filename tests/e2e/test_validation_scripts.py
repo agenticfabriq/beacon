@@ -105,14 +105,15 @@ def test_sweep_script_runs_dummy_nightly_loo(db_url: str, session: Session) -> N
     assert session.scalar(select(func.count()).select_from(Attribution)) == 2
 
     # What the delta was measured over, in the output a human reads (B64). The
-    # count must be an INT: read through the float helper beside it, it prints
-    # 2.0, and an absent one prints 0.0 -- indistinguishable from "nothing was
-    # compared". Nothing else in the suite executes these scripts, so without
-    # this, swapping the reader back leaves every test green.
+    # count must be an INT: read through the float helper beside it, this
+    # payload's 5 prints as 5.0, and an absent count prints 0.0 --
+    # indistinguishable from "nothing was compared". Nothing else in the suite
+    # executes these scripts, so without this, swapping the reader back leaves
+    # every test green. (The bool half of the contract is not checkable here,
+    # since `== 5` already excludes it; see test_per_k_count.py.)
     for layer, summary in payload["layers"].items():
         assert summary["n_items_submitted"] == 5, layer
         assert summary["n_compared"] == 5, layer
         assert isinstance(summary["n_compared"], int), layer
-        assert not isinstance(summary["n_compared"], bool), layer
         assert summary["n_baseline_excluded"] == 0, layer
         assert summary["n_ablated_excluded"] == 0, layer

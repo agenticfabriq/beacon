@@ -343,3 +343,41 @@ def test_a_K1_sweep_does_not_get_a_real_sample_size_for_a_fabricated_delta(
     assert ontology["n_baseline_excluded"] is None
     assert ontology["n_ablated_excluded"] is None
     assert ontology["n_items_submitted"] == 10, "k-independent, so still reported"
+
+
+def test_the_promoted_column_answers_when_the_per_k_entry_does_not(
+    api_client: TestClient,
+    world: _World,
+    session: Session,
+) -> None:
+    """The only input that separates the fallback from reading the entry alone.
+
+    A `"3"` entry that carries no `n_compared` while the column holds one --
+    which is every row graded before the per-k counts existed and re-derived
+    since. The sibling tests cover entry-present (the entry wins) and
+    both-absent (None either way); neither can tell `return from_entry` from
+    `return column if from_entry is None else from_entry`.
+    """
+    from beacon_storage.models.attribution import Attribution
+    from sqlalchemy import select
+
+    suite_id = _seed_attributions(session, world)
+    row = session.scalars(select(Attribution).where(Attribution.layer_name == "ontology")).one()
+    row.n_items_submitted = 10
+    row.n_compared = 8
+    headline = cast("dict[str, object]", row.delta_pass_at_k["3"])
+    row.delta_pass_at_k = {
+        **row.delta_pass_at_k,
+        "3": {k: v for k, v in headline.items() if k != "n_compared"},
+    }
+    session.commit()
+
+    response = api_client.get(
+        f"/v1/suites/{suite_id}/attribution",
+        headers={"X-API-Key": world.alice_key},
+        params={"sut": str(world.acme_solution_id)},
+    )
+
+    assert response.status_code == 200, response.text
+    ontology = next(row for row in response.json()["layers"] if row["layer"] == "ontology")
+    assert ontology["n_compared"] == 8, "the promoted column is the fallback"
