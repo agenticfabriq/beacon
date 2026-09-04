@@ -276,6 +276,101 @@ def test_completing_a_run_closes_it(
     assert response.json()["n_results"] == 1
 
 
+def test_a_pusher_can_close_its_own_run_as_FAILED(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The authority to say "I am done and it went badly" belongs with EVAL_RUN.
+
+    A pusher that hits a refusal it cannot recover from has no way to end its
+    run: `complete` says it succeeded, and `invalidate` needs EVAL_MANAGE,
+    which a TEAM_MEMBER pusher does not have. So the run was left RUNNING for
+    ever -- B71's stranding. Closing YOUR OWN run as failed is the same
+    authority as closing it as complete; marking someone else's run invalid is
+    the manage-level action, and conflating them forced every pusher to
+    over-privilege.
+    """
+    run_id, item_id = _seed(session, world)
+    _push(api_client, world, run_id, _payload(item_id, "yes"))
+
+    response = api_client.post(
+        f"/v1/runs/{run_id}/complete",
+        headers={"X-API-Key": world.alice_key},
+        json={"error": "3 items refused: no gold published for local275"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "failed"
+    assert response.json()["n_results"] == 1
+
+
+def test_a_failed_close_records_the_reason(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """A failure with no explanation is a completion with extra steps.
+
+    The reason is the point of the row: the next reader has to learn WHY the
+    load stopped without re-running it.
+    """
+    from beacon_storage.models.runs import Run
+
+    run_id, item_id = _seed(session, world)
+    _push(api_client, world, run_id, _payload(item_id, "yes"))
+    reason = "item 06a7 refused: carries no gold result set"
+
+    api_client.post(
+        f"/v1/runs/{run_id}/complete",
+        headers={"X-API-Key": world.alice_key},
+        json={"error": reason},
+    )
+
+    session.expire_all()
+    run = session.get(Run, UUID(run_id))
+    assert run is not None
+    assert run.error == reason
+    assert run.completed_at is not None
+
+
+def test_closing_with_a_blank_reason_is_refused(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """Whitespace is not a reason, and an empty one must not read as success.
+
+    Accepting it would let a pusher mark a run failed with nothing to act on,
+    which is worse than completing it: the run leaves the aggregates and takes
+    no explanation with it.
+    """
+    run_id, item_id = _seed(session, world)
+    _push(api_client, world, run_id, _payload(item_id, "yes"))
+
+    response = api_client.post(
+        f"/v1/runs/{run_id}/complete",
+        headers={"X-API-Key": world.alice_key},
+        json={"error": "   "},
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_closing_without_a_body_still_completes(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The body is optional: every existing pusher posts none.
+
+    This is the compatibility half. `client.complete(run_id)` in
+    scripts/load_eval_reports.py sends no body at all, and so does the web UI.
+    """
+    run_id, item_id = _seed(session, world)
+    _push(api_client, world, run_id, _payload(item_id, "yes"))
+
+    response = api_client.post(
+        f"/v1/runs/{run_id}/complete",
+        headers={"X-API-Key": world.alice_key},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+
+
 def test_a_closed_run_refuses_further_results(
     api_client: TestClient, world: _World, session: Session
 ) -> None:

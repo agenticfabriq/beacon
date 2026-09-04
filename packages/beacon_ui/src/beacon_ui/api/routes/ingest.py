@@ -29,7 +29,12 @@ from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
-from beacon_ui.api.schemas.ingest import ResultIngestIn, ResultIngestOut, RunCompleteOut
+from beacon_ui.api.schemas.ingest import (
+    ResultIngestIn,
+    ResultIngestOut,
+    RunCompleteIn,
+    RunCompleteOut,
+)
 
 router = APIRouter(prefix="/v1", tags=["ingest"])
 
@@ -335,15 +340,34 @@ def complete_run(
         Depends(require_permission(Permission.EVAL_RUN, scope_kind="run")),
     ],
     session: Annotated[Session, Depends(get_session)],
+    body: RunCompleteIn | None = None,
 ) -> RunCompleteOut:
-    """Close a run once its pusher has no more results to send."""
+    """Close a run, as complete or -- with a reason -- as FAILED.
+
+    The failure path exists because a pusher had no way to end a run badly.
+    `invalidate` records a reason and stops a run mid-flight, but it requires
+    EVAL_MANAGE and a TEAM_MEMBER pusher holds only EVAL_RUN, so a load that
+    hit an unrecoverable refusal could either claim success or leave the run
+    RUNNING for ever. It left it RUNNING (B71).
+
+    Closing YOUR OWN run as failed is the same authority as closing it as
+    complete, which is why it lives here under EVAL_RUN rather than becoming a
+    second manage-level endpoint. Retiring somebody ELSE'S run is what
+    `invalidate` is for, and that stays EVAL_MANAGE.
+    """
     run = RunRepo(session).get(run_id)
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
 
     n_results = len(ResultRepo(session).list_for_run(run_id))
+    # Only from a status that was still accepting results: a run someone has
+    # already closed must not be reopened and re-closed under a new verdict.
     if _status_value(run.status) in {_status_value(s) for s in _INGESTABLE_STATUSES}:
-        RunRepo(session).mark_completed(run_id)
+        failure = body.error if body is not None else None
+        if failure is not None:
+            RunRepo(session).mark_failed(run_id, failure)
+        else:
+            RunRepo(session).mark_completed(run_id)
         session.commit()
     refreshed = RunRepo(session).get(run_id)
     assert refreshed is not None

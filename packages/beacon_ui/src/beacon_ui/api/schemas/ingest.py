@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ResultIngestIn(BaseModel):
@@ -50,6 +50,34 @@ class ResultIngestOut(BaseModel):
     # False when this exact payload was already ingested, so a retrying client
     # that lost our response can push again without a spurious failure.
     created: bool
+
+
+class RunCompleteIn(BaseModel):
+    """The optional body of a run close, carrying WHY if it went badly.
+
+    Optional in full: every pusher that exists posts no body, and closing a
+    run cleanly must not start requiring one. Present with an `error`, it
+    closes the run as FAILED instead -- which is the authority a pusher needs
+    and did not have. `invalidate` does the same job but requires
+    EVAL_MANAGE, so a TEAM_MEMBER pusher could push results and then had no
+    way to end its own run except claiming success (B71).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    error: str | None = None
+
+    @field_validator("error")
+    @classmethod
+    def _reason_must_say_something(cls, value: str | None) -> str | None:
+        """A blank reason is worse than none: it fails the run and explains nothing."""
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError(
+                "error must say why the run failed, or be omitted to close it as complete"
+            )
+        return value.strip()
 
 
 class RunCompleteOut(BaseModel):

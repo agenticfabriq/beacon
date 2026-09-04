@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -27,6 +28,7 @@ from load_eval_reports import (  # noqa: E402
     check_corpus,
     ingest_payload,
     load_manifest,
+    load_one,
     parse_report,
     read_meta,
     run_config,
@@ -256,3 +258,153 @@ def test_portability_rides_along_in_the_output() -> None:
 
     assert payload["output"]["portable_to_gold_engine"] is False
     assert payload["output"]["engine"] == "duckdb"
+
+
+class _StubClient:
+    """A BeaconClient that refuses whichever case ids it is told to.
+
+    `load_one` is otherwise untested -- every case in this file exercises
+    parsing, payloads or the cross-tabulation -- so the push loop's behaviour
+    on a refusal had nothing holding it.
+    """
+
+    def __init__(self, refuse: dict[str, int]) -> None:
+        self.refuse = refuse
+        self.pushed: list[str] = []
+        self.completed_with: object = "not called"
+
+    def create_run(self, **_: object) -> str:
+        return "run-1"
+
+    def push(self, _run_id: str, payload: dict[str, object]) -> str:
+        item = str(payload["item_id"])
+        status = self.refuse.get(item)
+        if status is not None:
+            request = httpx.Request("POST", "http://x/v1/runs/run-1/results")
+            response = httpx.Response(
+                status, json={"detail": f"item {item} carries no gold result set"}, request=request
+            )
+            raise httpx.HTTPStatusError("refused", request=request, response=response)
+        self.pushed.append(item)
+        return "PASS"
+
+    def complete(self, _run_id: str, *, error: str | None = None) -> dict[str, object]:
+        self.completed_with = error
+        return {}
+
+
+def _report(tmp_path: Path, cases: list[str]) -> Path:
+    path = tmp_path / "r.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps({"case_id": c, "outcome": "correct", "db_id": "d", "answer": "a"})
+            for c in cases
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _index(cases: list[str]) -> dict[str, ItemRef]:
+    return {c.rsplit("-", 1)[-1]: ItemRef(item_id=f"item-{c}", db_id="d") for c in cases}
+
+
+def _spec() -> ReportSpec:
+    return ReportSpec(file="r.jsonl", model="m", config_label="c", engine="duckdb")
+
+
+def test_one_refused_item_no_longer_kills_the_whole_load(tmp_path: Path) -> None:
+    """B71: `raise_for_status` propagated out of main and took the load with it.
+
+    A 135-item load died on its first curation gap, and because the exception
+    escaped before `client.complete`, the run was left RUNNING with partial
+    results and no terminal state -- for ever. Recording and continuing is not
+    swallowing: the refusal is printed per item, the run carries it, and the
+    process exits non-zero.
+    """
+    cases = ["local-1", "local-2", "local-3"]
+    client = _StubClient({"item-local-2": 422})
+
+    _, comparison = load_one(
+        client,  # type: ignore[arg-type]
+        _spec(),
+        path=_report(tmp_path, cases),
+        index=_index(cases),
+        solution_id="s",
+        suite_id="u",
+    )
+
+    assert client.pushed == ["item-local-1", "item-local-3"]
+    assert [c for c, _ in comparison.refused] == ["local-2"]
+    assert comparison.agreed == 2
+
+
+def test_a_refused_item_closes_the_run_as_FAILED_with_the_reason(tmp_path: Path) -> None:
+    """The run must end terminal AND explained, not merely end."""
+    cases = ["local-1", "local-2"]
+    client = _StubClient({"item-local-2": 422})
+
+    load_one(
+        client,  # type: ignore[arg-type]
+        _spec(),
+        path=_report(tmp_path, cases),
+        index=_index(cases),
+        solution_id="s",
+        suite_id="u",
+    )
+
+    assert isinstance(client.completed_with, str)
+    assert "1 item(s) refused" in client.completed_with
+    assert "local-2" in client.completed_with
+    assert "no gold result set" in client.completed_with
+
+
+def test_a_clean_load_still_closes_the_run_as_COMPLETE(tmp_path: Path) -> None:
+    """The compatibility half: no refusals means no error body at all."""
+    cases = ["local-1", "local-2"]
+    client = _StubClient({})
+
+    load_one(
+        client,  # type: ignore[arg-type]
+        _spec(),
+        path=_report(tmp_path, cases),
+        index=_index(cases),
+        solution_id="s",
+        suite_id="u",
+    )
+
+    assert client.completed_with is None
+
+
+@pytest.mark.parametrize("status", [409, 500, 401])
+def test_a_status_that_is_not_about_this_item_still_aborts(tmp_path: Path, status: int) -> None:
+    """A closed run, an auth failure or a server fault is not a curation gap.
+
+    Continuing would push the remaining items into a run that cannot take
+    them, so only 400/404/422 -- beacon judging THIS item -- are recorded and
+    skipped. Without this split, "record and continue" would paper over a
+    broken deployment.
+    """
+    cases = ["local-1", "local-2"]
+    client = _StubClient({"item-local-1": status})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        load_one(
+            client,  # type: ignore[arg-type]
+            _spec(),
+            path=_report(tmp_path, cases),
+            index=_index(cases),
+            solution_id="s",
+            suite_id="u",
+        )
+
+
+def test_the_refusals_are_named_in_the_report_not_just_counted() -> None:
+    """A count cannot be acted on; the operator needs which item and why."""
+    comparison = Comparison()
+    comparison.refused.append(("local-275", "no gold result published"))
+
+    lines = comparison.report_lines()
+
+    assert "refused=1" in lines[0]
+    assert any("REFUSED local-275: no gold result published" in line for line in lines)

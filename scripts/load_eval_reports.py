@@ -131,6 +131,11 @@ class Comparison:
     disagreed: int = 0
     skipped: int = 0
     cross: dict[tuple[str, str], int] = field(default_factory=dict)
+    # Items beacon REFUSED, as (case_id, reason). A refusal is a curation
+    # signal, not a transport failure: the gate declined to grade blind. It is
+    # kept per item because a count alone cannot be acted on -- the operator
+    # needs to know WHICH item and why.
+    refused: list[tuple[str, str]] = field(default_factory=list)
 
     def record(self, record: ReportRecord, computed: str) -> None:
         """Count one item against what beacon computed for it."""
@@ -153,7 +158,12 @@ class Comparison:
 
     def report_lines(self) -> list[str]:
         """Render the cross-tabulation, disagreements marked."""
-        lines = [f"agreed={self.agreed} disagreed={self.disagreed} skipped={self.skipped}"]
+        lines = [
+            f"agreed={self.agreed} disagreed={self.disagreed} "
+            f"skipped={self.skipped} refused={len(self.refused)}"
+        ]
+        for case_id, reason in self.refused:
+            lines.append(f"  REFUSED {case_id}: {reason}")
         for (reported, computed), count in sorted(self.cross.items(), key=lambda kv: -kv[1]):
             differs = "  <-- differs" if OUTCOME_MEANING.get(reported) != computed else ""
             lines.append(f"  {reported:<20} -> {computed:<6} {count:>5}{differs}")
@@ -310,6 +320,34 @@ class ItemRef:
     db_id: str
 
 
+# Statuses that are beacon judging THIS item and declining it: a malformed
+# payload (400), an item the suite does not have (404), or the ingest gate
+# refusing to grade blind (422). Everything else is about the run or the
+# server, so it aborts.
+_ITEM_REFUSED = frozenset({400, 404, 422})
+
+
+def _refusal_reason(exc: httpx.HTTPStatusError) -> str:
+    """The server's own explanation, which is the actionable part."""
+    try:
+        detail = exc.response.json().get("detail")
+    except ValueError:
+        detail = None
+    return str(detail) if detail else f"HTTP {exc.response.status_code}"
+
+
+def _refusal_summary(refused: list[tuple[str, str]]) -> str:
+    """One line for the run's error field, naming items rather than counting.
+
+    Truncated at three because RunRepo.mark_failed caps the column at 4000
+    characters and a wall of identical reasons buries the count. The full list
+    is on stdout.
+    """
+    head = "; ".join(f"{case_id}: {reason}" for case_id, reason in refused[:3])
+    more = f" (+{len(refused) - 3} more)" if len(refused) > 3 else ""
+    return f"{len(refused)} item(s) refused by beacon -- {head}{more}"
+
+
 class CorpusMismatchError(Exception):
     """Raised when a report's cases do not belong to the suite being loaded."""
 
@@ -398,9 +436,18 @@ class BeaconClient:
         response.raise_for_status()
         return str(response.json()["outcome"])
 
-    def complete(self, run_id: str) -> dict[str, Any]:
-        """Close the run."""
-        response = self.http.post(f"{self.base}/v1/runs/{run_id}/complete")
+    def complete(self, run_id: str, *, error: str | None = None) -> dict[str, Any]:
+        """Close the run -- as failed, with a reason, when one is given.
+
+        The body is omitted entirely when there is no error, because that is
+        the shape every other caller sends and the endpoint treats a missing
+        body as a clean close.
+        """
+        url = f"{self.base}/v1/runs/{run_id}/complete"
+        if error is None:
+            response = self.http.post(url)
+        else:
+            response = self.http.post(url, json={"error": error})
         response.raise_for_status()
         result: Any = response.json()
         return dict(result)
@@ -436,9 +483,25 @@ def load_one(
             comparison.skipped += 1
             continue
         payload = ingest_payload(record, item_id=ref.item_id, engine=spec.engine)
-        computed = client.push(run_id, payload)
+        try:
+            computed = client.push(run_id, payload)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _ITEM_REFUSED:
+                # Not a judgement on this item -- a closed run (409), an auth
+                # failure, or a server fault. Continuing would push the rest
+                # into a run that cannot take them, so this still aborts.
+                raise
+            comparison.refused.append((record.case_id, _refusal_reason(exc)))
+            continue
         comparison.record(record, computed)
-    client.complete(run_id)
+    # A refusal ends the run as FAILED, with the reasons, rather than either
+    # claiming success or leaving it RUNNING for ever (B71). Recording and
+    # continuing is not swallowing: every refusal is printed per item, the run
+    # carries the summary, and main() exits non-zero.
+    if comparison.refused:
+        client.complete(run_id, error=_refusal_summary(comparison.refused))
+    else:
+        client.complete(run_id)
     return run_id, comparison
 
 
@@ -522,6 +585,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             totals.agreed += comparison.agreed
             totals.disagreed += comparison.disagreed
             totals.skipped += comparison.skipped
+            totals.refused.extend(comparison.refused)
             for key, count in comparison.cross.items():
                 totals.cross[key] = totals.cross.get(key, 0) + count
     finally:
@@ -530,6 +594,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("\n=== all reports ===")
     for line in totals.report_lines():
         print(line)
+    if totals.refused:
+        # Non-zero, because a load that could not push every item did not
+        # succeed. The runs themselves are already closed as FAILED with their
+        # reasons; this is what stops a caller or a CI step reading a partial
+        # load as a complete one.
+        print(
+            f"\n{len(totals.refused)} item(s) were refused; "
+            "their runs are closed as failed. See the REFUSED lines above.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
