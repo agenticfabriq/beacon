@@ -134,3 +134,56 @@ def test_the_dry_run_branch_RAISES_rather_than_returning() -> None:
     assert not any(isinstance(node, ast.Return) for node in ast.walk(ast.Module(body, []))), (
         "a return inside session_scope COMMITS, which is the opposite of a dry run"
     )
+
+
+def test_an_already_current_result_still_has_its_OUTCOME_re_derived() -> None:
+    """A current verdict is not a current outcome, and the skip conflated them.
+
+    The outcome derives from the suite's headline metric, which changes
+    independently of the grader version -- and did: spider2_lite_local_v1
+    declares got_facts while the ingest path composed under exact_match until
+    it was taught to read the declaration (B74). Any result graded in between
+    carries a verdict at the current version and an outcome from the old
+    derivation.
+
+    Measured on the deployment before the fix: 93 results disagreed with the
+    headline derivation, the regrade could reach 3, and the other 90 -- three
+    whole live runs -- counted as `current` and were skipped. The summary said
+    "3 flipped", which is true and reads as complete.
+
+    Structural because the behaviour needs a database and three grader
+    versions to reproduce; what it pins is that the branch does not bail
+    before deriving.
+    """
+    import ast
+
+    source = (Path(__file__).resolve().parents[1] / "scripts" / "regrade_suite.py").read_text(
+        encoding="utf-8"
+    )
+    main = next(
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    # The `if already:` branch, found by its counter rather than by line number.
+    branches = [
+        node
+        for node in ast.walk(main)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "already"
+    ]
+    assert len(branches) == 1, "expected exactly one already-at-this-version branch"
+
+    body = ast.Module(branches[0].body, [])
+    assigned = {
+        target.attr
+        for node in ast.walk(body)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Attribute)
+    }
+    assert "outcome" in assigned, (
+        "the already-current branch must re-derive result.outcome: a verdict at the "
+        "current version says nothing about which metric its outcome was derived from"
+    )

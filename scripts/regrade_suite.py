@@ -105,6 +105,7 @@ def main() -> int:
 
             verdict_repo = VerdictRepo(session)
             graded = skipped = flipped = orderless = current = 0
+            rederived = 0
             true_counts: dict[str, int] = {}
             for run in runs:
                 for result in session.scalars(sa.select(Result).where(Result.run_id == run.id)):
@@ -142,6 +143,43 @@ def main() -> int:
                     )
                     if already:
                         current += 1
+                        # A CURRENT VERDICT IS NOT A CURRENT OUTCOME. The
+                        # outcome derives from the suite's headline metric,
+                        # which changes independently of the grader version --
+                        # and did: spider2_lite_local_v1 declares got_facts
+                        # while the ingest path composed under exact_match
+                        # until it was taught to read the declaration (B74).
+                        #
+                        # Returning here left 90 results on three live runs
+                        # carrying an outcome derived under the wrong metric,
+                        # and INVISIBLY, because they counted as `current` and
+                        # the summary said "3 flipped" -- 3 of 93. A green run
+                        # certifying stale data is worse than no run.
+                        #
+                        # The grade is still skipped: the unique index forbids
+                        # a duplicate, and re-grading identical inputs at the
+                        # same version yields an identical verdict. The
+                        # DERIVATION is not skipped -- it reads the verdict
+                        # already stored for the headline metric.
+                        if not outcome_is_the_graders_to_restate(
+                            dict(item_row.item_input or {}), str(result.outcome)
+                        ):
+                            continue
+                        stored = session.scalar(
+                            sa.select(Verdict).where(
+                                Verdict.result_id == result.id,
+                                Verdict.grader == grader.name,
+                                Verdict.grader_version == grader.version,
+                                Verdict.metric == headline,
+                            )
+                        )
+                        if stored is None or stored.bool_value is None:
+                            continue
+                        derived = VerdictOutcome.PASS if stored.bool_value else VerdictOutcome.FAIL
+                        if str(result.outcome) != derived.value:
+                            result.outcome = derived
+                            flipped += 1
+                            rederived += 1
                         continue
                     shim_item = RunnerItem(
                         item_id=str(item_row.item_id),
@@ -208,7 +246,11 @@ def main() -> int:
             )
             for metric in sorted(true_counts):
                 print(f"  {metric:12s} {true_counts[metric]} true")
-            print(f"outcomes  {flipped} flipped under the headline derivation")
+            print(
+                f"outcomes  {flipped} flipped under the headline derivation "
+                f"({rederived} of them from a verdict already at this version, "
+                f"where only the derivation was stale)"
+            )
             if args.dry_run:
                 # Raised INSIDE session_scope, whose except branch rolls back.
                 # Returning early would commit: the scope commits on success,
