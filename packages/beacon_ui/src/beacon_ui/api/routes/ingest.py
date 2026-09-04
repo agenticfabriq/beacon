@@ -340,16 +340,24 @@ def _stamped_output(output: dict[str, Any], *, deferred: bool = False) -> dict[s
     """
     stamped = dict(output)
     rows = output.get("rows")
-    # Usable to the GRADER, not merely present: a truthy `columns` the grader
-    # cannot read (`[0, 1]`) would suppress the stamp and store evidence that
-    # looks declared and regrades on insertion order. Stamping over it loses
-    # nothing -- the grader ignores it either way -- and recovers the wire
-    # order while it still exists.
     if (
         isinstance(rows, list)
         and rows
-        and isinstance(rows[0], dict)
+        and all(isinstance(row, dict) for row in rows)
+        # Usable to the GRADER, not merely present: a truthy `columns` the
+        # grader cannot read (`[0, 1]`) would suppress the stamp and store
+        # evidence that looks declared and regrades on insertion order.
+        # Stamping over it loses nothing -- the grader ignores it either way --
+        # and recovers the wire order while it still exists.
         and explicit_columns(output.get("columns")) is None
+        # Row zero's keys become THE columns and `rows_from` reads every row
+        # through them BY NAME, so rows differing in key ORDER are exactly what
+        # the stamp repairs and must not disqualify it. A differing key SET is
+        # the opposite: `entry.get(c)` fabricates None for a key a later row
+        # lacks and drops ones it adds, inventing a rectangle. Left unstamped
+        # the grader reads each row's own values, ragged and honest, and
+        # nothing claims an order we do not have.
+        and len({frozenset(row) for row in rows}) == 1
     ):
         stamped["columns"] = list(rows[0].keys())
     if deferred:

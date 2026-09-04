@@ -433,12 +433,12 @@ def _suite_id_of(session: Session, run_id: str) -> object:
     ("supplied", "expected", "why"),
     [
         (["month", "total"], ["month", "total"], "usable: kept as pushed"),
-        (None, ["a", "b"], "absent: stamped from wire order"),
-        ([], ["a", "b"], "empty: stamped"),
-        ([0, 1], ["a", "b"], "truthy but not strings: stamped over"),
-        ([{"name": "a"}], ["a", "b"], "truthy but not strings: stamped over"),
-        ("ab", ["a", "b"], "truthy but not a list: stamped over"),
-        (["a", 2], ["a", "b"], "mixed types: stamped over"),
+        (None, ["b", "a"], "absent: stamped from wire order"),
+        ([], ["b", "a"], "empty: stamped"),
+        ([0, 1], ["b", "a"], "truthy but not strings: stamped over"),
+        ([{"name": "a"}], ["b", "a"], "truthy but not strings: stamped over"),
+        ("ab", ["b", "a"], "truthy but not a list: stamped over"),
+        (["a", 2], ["b", "a"], "mixed types: stamped over"),
     ],
 )
 def test_the_stamp_asks_whether_the_GRADER_can_read_the_columns(
@@ -459,8 +459,43 @@ def test_the_stamp_asks_whether_the_GRADER_can_read_the_columns(
     """
     from beacon_ui.api.routes.ingest import _stamped_output
 
-    output: dict[str, object] = {"rows": [{"a": 1, "b": 2}]}
+    # Keys deliberately NOT in sorted order. The stamp exists to preserve the
+    # WIRE order against JSONB's canonicalization, and an alphabetical fixture
+    # cannot tell `list(keys)` from `sorted(keys)` -- the mutation that stores
+    # exactly the canonicalized order the stamp was added to defeat.
+    output: dict[str, object] = {"rows": [{"b": 1, "a": 2}]}
     if supplied is not None:
         output["columns"] = supplied
 
     assert _stamped_output(output, deferred=False)["columns"] == expected, why
+
+
+def test_the_stamp_turns_on_the_key_SET_not_the_key_ORDER() -> None:
+    """Differing order is what the stamp repairs; differing keys is what it cannot.
+
+    `rows_from` reads every row through the stamped array BY NAME, so rows
+    carrying the same keys in a different order are precisely the case the
+    stamp exists for -- stamped they read [(1, 2), (4, 3)], unstamped they fall
+    to `tuple(entry.values())` and read [(1, 2), (3, 4)], which is the column
+    scramble. Disqualifying them would manufacture the defect.
+
+    A differing key SET is the opposite. `entry.get(c)` fabricates None for a
+    key a later row lacks and drops ones it adds, inventing a rectangle out of
+    ragged evidence -- and a stamp would also hide the result from the
+    regrade's mixed-arity refusal, which fires only on evidence carrying no
+    usable `columns`.
+    """
+    from beacon_ui.api.routes.ingest import _stamped_output
+
+    reordered = {"rows": [{"b": 1, "a": 2}, {"a": 3, "b": 4}]}
+    assert _stamped_output(reordered, deferred=False)["columns"] == ["b", "a"], (
+        "same keys in a different order is what the stamp repairs, by name"
+    )
+
+    disagreeing = {"rows": [{"b": 1, "a": 2}, {"b": 3}]}
+    assert "columns" not in _stamped_output(disagreeing, deferred=False), (
+        "row zero's keys are not THE columns when a later row has others"
+    )
+
+    uniform = {"rows": [{"b": 1, "a": 2}, {"b": 3, "a": 4}]}
+    assert _stamped_output(uniform, deferred=False)["columns"] == ["b", "a"]
