@@ -119,6 +119,20 @@ def main() -> int:
                     # evidence cannot be regraded -- refusing beats mangling.
                     # (Found the hard way: a regrade over orderless rows flipped
                     # 699 outcomes on scrambled columns before being reverted.)
+                    #
+                    # EXCEPT AT ONE COLUMN, where there is no order to lose. A
+                    # single-key row has exactly one possible ordering, so the
+                    # thing being protected against cannot happen. Refusing it
+                    # was over-broad by nearly three quarters: of
+                    # bird_minidev_v2's 9957 orderless results, 7217 (72.5%)
+                    # are single-column, and none of them could be regraded --
+                    # so every grader improvement skipped most of that corpus
+                    # while reporting the skips only as a count.
+                    #
+                    # Checked across ALL rows, not just the first. A result
+                    # whose rows disagree on arity is exactly the shape whose
+                    # order cannot be trusted, and reading row zero alone would
+                    # admit it.
                     stored_rows = (result.output or {}).get("rows")
                     stored_columns = (result.output or {}).get("columns")
                     if (
@@ -126,6 +140,11 @@ def main() -> int:
                         and stored_rows
                         and isinstance(stored_rows[0], dict)
                         and not stored_columns
+                        and max(
+                            (len(row) for row in stored_rows if isinstance(row, dict)),
+                            default=0,
+                        )
+                        > 1
                     ):
                         orderless += 1
                         continue
