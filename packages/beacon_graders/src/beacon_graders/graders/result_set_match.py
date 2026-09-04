@@ -103,6 +103,32 @@ def explicit_columns(payload: Any) -> list[str] | None:
     return None
 
 
+def column_order_for(rows: Any) -> list[str] | None:
+    """The one column order these dict rows share, or None if they share none.
+
+    Stamped at arrival by every write path, while the order is still the wire's
+    -- JSONB canonicalizes object keys at rest and column order is part of
+    exact match.
+
+    The condition is the key SET, and inverting it inverts the fix. Rows whose
+    keys differ only in ORDER are exactly what a stamp repairs, because
+    ``rows_from`` reads through the array BY NAME. Rows whose key SETS differ
+    are the opposite: ``entry.get(c)`` would fabricate None for a key a later
+    row lacks and drop ones it adds, inventing a rectangle out of ragged
+    evidence. Better to record no order than a false one.
+
+    Shared so the push path and the importer cannot drift apart on the rule;
+    they were introduced together and had already diverged once.
+    """
+    if not isinstance(rows, list) or not rows:
+        return None
+    if not all(isinstance(row, dict) for row in rows):
+        return None
+    if len({frozenset(row) for row in rows}) != 1:
+        return None
+    return [str(key) for key in rows[0]]
+
+
 def _columns_from(payload: Any, rows_payload: Any) -> list[str]:
     if isinstance(payload, list) and all(isinstance(c, str) for c in payload):
         return list(payload)

@@ -40,7 +40,7 @@ from beacon_benchmarks.spider2_lite.ingest_items import (
     ingest_spider2_tasks,
     load_spider2_tasks,
 )
-from beacon_graders.graders.result_set_match import ResultSetMatchGrader
+from beacon_graders.graders.result_set_match import ResultSetMatchGrader, column_order_for
 from beacon_iam.auth.oidc import OidcClaims
 from beacon_iam.service.users import UserService
 from beacon_runner.types import EvalItem as RunnerItem
@@ -279,15 +279,12 @@ def main() -> int:
                     # columns array is stamped HERE, while dict order is still
                     # the wire order -- JSONB scrambles object keys at rest, and
                     # without this the SELECT order (part of exact match) is
-                    # unrecoverable from storage.
+                    # unrecoverable from storage. Through the SAME rule the push
+                    # path uses: this stamped row zero's keys unconditionally,
+                    # which on ragged rows invents a rectangle the grader then
+                    # reads as fabricated nulls.
                     "rows": engine_rows,
-                    "columns": (
-                        list(engine_rows[0].keys())
-                        if isinstance(engine_rows, list)
-                        and engine_rows
-                        and isinstance(engine_rows[0], dict)
-                        else None
-                    ),
+                    "columns": column_order_for(engine_rows),
                     "row_count": row.get("engine_row_count"),
                     "engine_row_count": row.get("engine_row_count"),
                     "gold_row_count": row.get("gold_row_count"),

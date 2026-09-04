@@ -501,3 +501,10 @@ def test_the_stamp_turns_on_the_key_SET_not_the_key_ORDER() -> None:
 
     uniform = {"rows": [{"b": 1, "a": 2}, {"b": 3, "a": 4}]}
     assert _stamped_output(uniform, deferred=False)["columns"] == ["b", "a"]
+
+    # SAME arity, different keys -- the case that separates a key-set rule from
+    # an arity one. Every other fixture here differs in both at once, so an
+    # arity check passes them all while stamping this one `["a"]` and grading
+    # it (1,), (None,): the fabricated-null mangling the rule exists to stop.
+    same_arity_different_keys = {"rows": [{"a": 1}, {"b": 2}]}
+    assert "columns" not in _stamped_output(same_arity_different_keys, deferred=False)
