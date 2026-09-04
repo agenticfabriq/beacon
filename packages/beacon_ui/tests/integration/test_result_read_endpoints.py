@@ -379,6 +379,22 @@ def test_a_metrics_readings_come_back_newest_version_first(
         justification="regraded at v9",
         raw_output={},
     )
+    # A SECOND metric, inserted last, so dropping `Verdict.metric` from the
+    # ordering is observable here. Without it the fixture holds one metric and
+    # the grouping assertion below cannot fail -- a global `id DESC` would
+    # leave both assertions green.
+    VerdictRepo(session).create(
+        team_id=world.acme_team_id,
+        result_id=result.id,
+        grader="execution_grounded_sql",
+        grader_version="v9",
+        criterion="correctness",
+        metric="got_facts",
+        bool_value=True,
+        value=1.0,
+        justification="tolerant reading at v9",
+        raw_output={},
+    )
     session.commit()
 
     body = api_client.get(
@@ -390,6 +406,9 @@ def test_a_metrics_readings_come_back_newest_version_first(
         "the newest reading of a metric must come first, or the panel can show "
         "an older version than the matrix counts"
     )
-    # Metric grouping preserved: the first verdict overall is still exact_match,
-    # which is what callers reading verdicts[0] rely on.
-    assert body["verdicts"][0]["metric"] == "exact_match"
+    # Grouping: each metric's readings sit together rather than interleaving by
+    # insertion id. `got_facts` was inserted LAST, so a global `id DESC` would
+    # put it first and split the two `exact_match` readings around it.
+    metrics = [v["metric"] for v in body["verdicts"]]
+    assert metrics == sorted(metrics), f"readings must group by metric, got {metrics}"
+    assert metrics.count("exact_match") == 2, metrics

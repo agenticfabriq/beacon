@@ -145,7 +145,11 @@ def test_wrong_rows_grade_fail_with_named_mismatch(
         f"/v1/runs/{run_id}/results/{item_id}",
         headers={"X-API-Key": world.alice_key},
     ).json()
-    evidence = detail["verdicts"][0]["evidence"]
+    # By METRIC, not by position: the verdict list is ordered
+    # (metric, id DESC), so position across metrics is alphabetical rather
+    # than semantic. Reading `[0]` worked only because "exact_match" sorts
+    # before "got_facts".
+    evidence = next(v for v in detail["verdicts"] if v["metric"] == "exact_match")["evidence"]
     assert evidence["mismatch"]["kind"] == "values"
     assert evidence["engine"] == "duckdb"
 

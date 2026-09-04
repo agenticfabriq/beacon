@@ -442,3 +442,14 @@ def test_the_drilldown_attributes_each_reading_to_a_version_and_a_conclusion() -
     assert "${reading" in template, (
         "the derived conclusion must be interpolated into the rendered line"
     )
+
+    # The MAPPING, not just the mention. Swapping the ternary arms renders
+    # every conclusion backwards on the one surface that shows it, and there is
+    # no JS-execution harness here to catch that behaviourally -- so the
+    # literal is what gets pinned.
+    assert 'v.passed === true ? "PASS"' in line, (
+        "a passing verdict must render PASS, not the other arm"
+    )
+    assert 'v.passed === false ? "FAIL"' in line, (
+        "a failing verdict must render FAIL, not the other arm"
+    )

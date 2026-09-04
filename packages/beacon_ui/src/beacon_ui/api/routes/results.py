@@ -105,9 +105,16 @@ def _verdicts_by_result(session: Session, result_ids: list[UUID]) -> dict[UUID, 
     #
     # But ordering by id alone also reorders the METRICS against each other --
     # `exact_match` and `got_facts` from one grading run differ only by
-    # insertion id -- which scrambles the presentation for no reason and breaks
-    # any caller reading `verdicts[0]`. Sorting by metric first keeps that
-    # stable and puts the version ordering where it belongs.
+    # insertion id -- so readings of one metric would no longer sit together.
+    # Sorting by metric first groups them and puts the version ordering where
+    # it belongs, INSIDE a metric.
+    #
+    # What this does NOT give is "the primary reading first". That would need
+    # the suite's headline metric, which this query does not have; the order
+    # across metrics is alphabetical, so today's `exact_match` before
+    # `got_facts` is the alphabet and not a contract. A metric named `ex` or
+    # `accuracy` would displace it. Callers must therefore select by metric
+    # rather than by position -- `verdicts[0]` means nothing in particular.
     rows = session.scalars(
         sa.select(Verdict)
         .where(Verdict.result_id.in_(result_ids))
