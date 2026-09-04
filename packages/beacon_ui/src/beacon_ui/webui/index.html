@@ -946,7 +946,12 @@ const openItem = guard(async (runId, itemId) => {
       </div>
     </div>` +
     verdicts.map((v) =>
-      `<p class="sub">${esc(v.grader)}${v.metric ? ` [${esc(v.metric)}]` : ""}: ${esc(v.justification || "")}</p>`).join("");
+      // The grader VERSION belongs beside the reading it produced. Graders are
+      // versioned and append -- a result can hold readings from several -- so
+      // "got_facts true" is not a fact about the row without it. The API has
+      // always sent it; this panel used to drop it, which made two readings of
+      // the same metric at different versions render identically.
+      `<p class="sub">${esc(v.grader)}${v.grader_version ? ` <span class="dim">${esc(v.grader_version)}</span>` : ""}${v.metric ? ` [${esc(v.metric)}]` : ""}: ${esc(v.justification || "")}</p>`).join("");
   const anchor = document.querySelector(`#run-items tr[data-item="${itemId}"]`);
   if (!anchor) return;
   const detailRow = document.createElement("tr");

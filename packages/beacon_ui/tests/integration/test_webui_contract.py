@@ -397,3 +397,21 @@ def test_the_benchmarks_loader_makes_ONE_request() -> None:
     )
     assert "Promise.all" not in text
     assert "run_count" in text
+
+
+def test_the_drilldown_shows_which_GRADER_VERSION_produced_each_reading() -> None:
+    """A reading without its grader version is not a fact about the row.
+
+    Verdicts are append-only and versioned, unique per
+    `(result, metric, grader, version)`, so one result can hold several
+    readings of the same metric from different graders. The API has always
+    sent `grader_version` on every verdict; this panel dropped it, which
+    rendered two readings that disagree -- one per version -- as identical
+    lines. That is the reading-provenance problem the grading-provenance note
+    is about, in the one surface where the provenance was already on the wire.
+    """
+    page = _page()
+
+    assert "v.grader_version" in page, (
+        "the verdict line must render the grader version it came from"
+    )
