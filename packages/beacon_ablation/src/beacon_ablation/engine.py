@@ -96,6 +96,11 @@ class _PerKEntry(TypedDict):
     ci_low: float
     ci_high: float
     p: float
+    # The paired task count these three were computed over. `bootstrap_paired_ci`
+    # and `mcnemar_exact` both reduce to the INTERSECTION of task ids, and both
+    # answer "no effect" for an empty one -- (0.0, 0.0, 0.0) and p=1.0. Without
+    # this, a delta of zero over nothing is indistinguishable from a real tie.
+    n_compared: int
 
 
 class AttributionEngine:
@@ -179,6 +184,7 @@ class AttributionEngine:
                 ablated_results=results_by_label[label],
                 baseline_run_id=runs_by_label["baseline"][0],
                 ablated_run_id=runs_by_label[label][0],
+                n_items_submitted=len(items),
             )
             self.session.add(row)
             attributions.append(row)
@@ -205,6 +211,7 @@ class AttributionEngine:
         ablated_results: list[object],
         baseline_run_id: UUID,
         ablated_run_id: UUID,
+        n_items_submitted: int,
     ) -> Attribution:
         pass_at_k_baseline: dict[str, float | None] = {}
         pass_at_k_ablated: dict[str, float | None] = {}
@@ -212,6 +219,11 @@ class AttributionEngine:
         pass_hat_k_baseline: dict[str, float | None] = {}
         pass_hat_k_ablated: dict[str, float | None] = {}
         delta_pass_hat_k: dict[str, _PerKEntry] = {}
+        # Per k, because `restrict_to_k_attempts` drops a different set at each
+        # one. `per_task_pass_at_k` and `per_task_pass_hat_k` both key off
+        # `_group_by_task`, so their task ids are identical at a given k and one
+        # set of counts describes both readings.
+        sample_at_k: dict[str, tuple[int, int, int]] = {}
 
         # An ERROR is the harness or the endpoint failing, not the layer. Left in,
         # an endpoint blip during one arm depresses that arm and manufactures a
@@ -224,6 +236,12 @@ class AttributionEngine:
             ablated_k = restrict_to_k_attempts(ablated_graded, k=k)
             baseline_at_k = per_task_pass_at_k(baseline_k, k=k)
             ablated_at_k = per_task_pass_at_k(ablated_k, k=k)
+            n_compared = len(set(baseline_at_k) & set(ablated_at_k))
+            sample_at_k[str(k)] = (
+                n_items_submitted - len(baseline_at_k),
+                n_items_submitted - len(ablated_at_k),
+                n_compared,
+            )
             pass_at_k_baseline[str(k)] = suite_pass_at_k(baseline_k, k=k)
             pass_at_k_ablated[str(k)] = suite_pass_at_k(ablated_k, k=k)
             delta, ci_low, ci_high = bootstrap_paired_ci(
@@ -238,6 +256,7 @@ class AttributionEngine:
                 "ci_low": ci_low,
                 "ci_high": ci_high,
                 "p": p,
+                "n_compared": n_compared,
             }
 
             baseline_hat_k = per_task_pass_hat_k(baseline_k, k=k)
@@ -256,6 +275,7 @@ class AttributionEngine:
                 "ci_low": hat_ci_low,
                 "ci_high": hat_ci_high,
                 "p": p_hat,
+                "n_compared": n_compared,
             }
 
         # Cost is measured on attempts that did the work; an errored attempt
@@ -269,7 +289,9 @@ class AttributionEngine:
             median_runtime_ms(ablated_graded),
         )
 
-        headline = delta_pass_at_k[str(min(3, K))]
+        headline_k = str(min(3, K))
+        headline = delta_pass_at_k[headline_k]
+        baseline_excluded, ablated_excluded, headline_compared = sample_at_k[headline_k]
         return Attribution(
             attribution_id=uuid7(),
             sweep_id=sweep_id,
@@ -290,6 +312,10 @@ class AttributionEngine:
             pass_hat_k_baseline=pass_hat_k_baseline,
             pass_hat_k_ablated=pass_hat_k_ablated,
             delta_pass_hat_k=delta_pass_hat_k,
+            n_items_submitted=n_items_submitted,
+            n_baseline_excluded=baseline_excluded,
+            n_ablated_excluded=ablated_excluded,
+            n_compared=headline_compared,
             token_delta_pct=token_delta_pct,
             runtime_delta_pct=runtime_delta_pct,
             mcnemar_p=headline["p"],

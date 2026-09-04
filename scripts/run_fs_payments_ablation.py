@@ -296,6 +296,12 @@ def main(argv: list[str] | None = None) -> int:
                     "delta_pass_at_k": _per_k(row.delta_pass_at_k.get(headline_k), "delta"),
                     "ci_low": _per_k(row.delta_pass_at_k.get(headline_k), "ci_low"),
                     "ci_high": _per_k(row.delta_pass_at_k.get(headline_k), "ci_high"),
+                    # The sample the three numbers above came over. Printing a
+                    # delta without it is the omission B64 is about.
+                    "n_compared": _per_k(row.delta_pass_at_k.get(headline_k), "n_compared"),
+                    "n_items_submitted": row.n_items_submitted,
+                    "n_baseline_excluded": row.n_baseline_excluded,
+                    "n_ablated_excluded": row.n_ablated_excluded,
                     "mcnemar_p": row.mcnemar_p,
                     "bh_adjusted_p": row.bh_adjusted_p,
                     "pass_at_k_baseline": _rate(row.pass_at_k_baseline.get(headline_k)),

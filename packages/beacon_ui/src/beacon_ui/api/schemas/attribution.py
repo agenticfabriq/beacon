@@ -18,6 +18,17 @@ class AttributionLayerOut(BaseModel):
     mcnemar_p: float
     bh_p: float
     median_token_delta_pct: float | None = None
+    # What the delta was measured over. Recording the exclusion without
+    # publishing it leaves the rate lying by omission, which was the finding:
+    # a layer whose ablation breaks the endpoint reports a confident delta over
+    # a sample it quietly shrank, and an uneven shrink means the two arms are
+    # no longer the same set of tasks. `None` for a row computed before the
+    # counts existed -- absent, not zero, because zero would claim nothing was
+    # excluded.
+    n_compared: int | None = None
+    n_items_submitted: int | None = None
+    n_baseline_excluded: int | None = None
+    n_ablated_excluded: int | None = None
 
 
 class AttributionSnapshotOut(BaseModel):
