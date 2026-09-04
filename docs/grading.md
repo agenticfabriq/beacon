@@ -127,8 +127,8 @@ canonicalizes object keys at rest, and column order is part of exact match.
 So pushed and imported evidence is stamped with an ordered `columns` array at
 arrival and the grader reads dict rows through it. Both write paths -- the
 push API and the spider2 importer -- stamp through one shared rule
-(`column_order_for`), having once drifted apart. Two exceptions to it, and
-neither is an oversight. Rows that disagree on their KEY SET are not stamped: the read
+(`column_order_for`), having once drifted apart. Two shapes fall outside the
+stamp-then-refuse pairing, and neither is an oversight. Rows that disagree on their KEY SET are not stamped: the read
 is by name, so row zero's keys would fabricate a null for a key a later row
 lacks and drop ones it adds, inventing a rectangle. (Rows that disagree only
 on key ORDER are stamped -- that is exactly what the stamp repairs.) And a

@@ -102,6 +102,38 @@ def _verdict(outcome: str, *, strict: bool) -> VerdictOutcome:
     return _OUTCOME.get(outcome, VerdictOutcome.ERROR)
 
 
+def result_output(row: dict[str, Any], outcome: str) -> dict[str, Any]:
+    """The stored evidence for one imported case.
+
+    The ordered ``columns`` array is stamped HERE, while dict order is still
+    the wire order -- JSONB scrambles object keys at rest, and without it the
+    SELECT order (part of exact match) is unrecoverable from storage. Through
+    ``column_order_for``, the same rule the push path uses: this once stamped
+    row zero's keys unconditionally, which on ragged rows invents a rectangle
+    the grader reads back as fabricated nulls.
+
+    A function rather than a dict literal inside the import loop so the stamp
+    can be tested on a payload. Inline, nothing exercised it: passing the wrong
+    key to ``column_order_for`` returns None for every case, drops the stamp
+    from every imported result, and leaves the whole suite unregradeable behind
+    a green import -- invisible to a test suite that never imports this module.
+    """
+    engine_rows = row.get("engine_rows")
+    output: dict[str, Any] = {
+        "sql": row.get("sql", ""),
+        "answer": row.get("answer", ""),
+        "db_id": row.get("db_id"),
+        # mnemiq's row preview (dicts, first N rows) plus the true count.
+        "rows": engine_rows,
+        "columns": column_order_for(engine_rows),
+        "row_count": row.get("engine_row_count"),
+        "engine_row_count": row.get("engine_row_count"),
+        "gold_row_count": row.get("gold_row_count"),
+        "mnemiq_outcome": outcome,
+    }
+    return output
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", required=True, help="mnemiq spider2 results .jsonl")
@@ -269,27 +301,7 @@ def main() -> int:
                     )
                 outcome = str(row.get("outcome", "error"))
                 counts[outcome] = counts.get(outcome, 0) + 1
-                engine_rows = row.get("engine_rows")
-                output: dict[str, Any] = {
-                    "sql": row.get("sql", ""),
-                    "answer": row.get("answer", ""),
-                    "db_id": row.get("db_id"),
-                    # The pushed evidence beacon grades: mnemiq's row preview
-                    # (dicts, first N rows) plus the true count. The ordered
-                    # columns array is stamped HERE, while dict order is still
-                    # the wire order -- JSONB scrambles object keys at rest, and
-                    # without this the SELECT order (part of exact match) is
-                    # unrecoverable from storage. Through the SAME rule the push
-                    # path uses: this stamped row zero's keys unconditionally,
-                    # which on ragged rows invents a rectangle the grader then
-                    # reads as fabricated nulls.
-                    "rows": engine_rows,
-                    "columns": column_order_for(engine_rows),
-                    "row_count": row.get("engine_row_count"),
-                    "engine_row_count": row.get("engine_row_count"),
-                    "gold_row_count": row.get("gold_row_count"),
-                    "mnemiq_outcome": outcome,
-                }
+                output: dict[str, Any] = result_output(row, outcome)
                 # The runner's claim that this SQL already ran on the gold engine
                 # (for the local slice, sqlite-native means it always did). The
                 # matrix's EX* reads it from output; absent means "never claimed".
