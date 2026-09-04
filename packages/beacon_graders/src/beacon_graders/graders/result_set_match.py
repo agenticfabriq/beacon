@@ -88,8 +88,16 @@ def rows_from(payload: Any, columns: list[str] | None = None) -> list[tuple[Any,
     return canonicalize_rows(rows)
 
 
-def _explicit_columns(payload: Any) -> list[str] | None:
-    """An ordered columns declaration, if the record carries one."""
+def explicit_columns(payload: Any) -> list[str] | None:
+    """An ordered columns declaration, if the record carries a USABLE one.
+
+    Public because callers outside the grader must be able to ask the grader's
+    own question. A truthiness test on ``columns`` is the natural-looking
+    substitute and it is WIDER: ``[0, 1]`` and ``[{"name": "a"}]`` are truthy
+    and answer None here, so a gate written that way clears while ``rows_from``
+    falls back to dict insertion order -- the scrambled-column path the gate
+    exists to prevent. Same lesson as ``rows_from`` and ``gold_variants``.
+    """
     if isinstance(payload, list) and payload and all(isinstance(c, str) for c in payload):
         return list(payload)
     return None
@@ -127,7 +135,7 @@ def gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
         for index, entry in enumerate(accepted):
             if not isinstance(entry, dict):
                 continue
-            rows = rows_from(entry.get("rows"), _explicit_columns(entry.get("columns")))
+            rows = rows_from(entry.get("rows"), explicit_columns(entry.get("columns")))
             if rows is None:
                 continue
             restriction = restrictions[index] if index < len(restrictions) else []
@@ -142,7 +150,7 @@ def gold_variants(gold_answer: dict[str, Any]) -> list[_GoldVariant]:
                 )
             )
         return variants
-    rows = rows_from(gold_answer.get("rows"), _explicit_columns(gold_answer.get("columns")))
+    rows = rows_from(gold_answer.get("rows"), explicit_columns(gold_answer.get("columns")))
     if rows is None:
         return []
     return [
@@ -377,7 +385,7 @@ class ResultSetMatchGrader:
         variants = gold_variants(gold_answer)  # applicable() guarantees at least one
 
         pushed_rows_payload = result.output.get("rows")
-        pushed_columns = _explicit_columns(result.output.get("columns"))
+        pushed_columns = explicit_columns(result.output.get("columns"))
         candidate_rows = rows_from(pushed_rows_payload, pushed_columns) or []
         truncated_at_cap = len(candidate_rows) > MAX_PUSHED_ROWS
         if truncated_at_cap:

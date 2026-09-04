@@ -427,3 +427,40 @@ def _suite_id_of(session: Session, run_id: str) -> object:
     from sqlalchemy import select
 
     return session.scalars(select(Run.suite_id).where(Run.id == UUID(run_id))).one()
+
+
+@pytest.mark.parametrize(
+    ("supplied", "expected", "why"),
+    [
+        (["month", "total"], ["month", "total"], "usable: kept as pushed"),
+        (None, ["a", "b"], "absent: stamped from wire order"),
+        ([], ["a", "b"], "empty: stamped"),
+        ([0, 1], ["a", "b"], "truthy but not strings: stamped over"),
+        ([{"name": "a"}], ["a", "b"], "truthy but not strings: stamped over"),
+        ("ab", ["a", "b"], "truthy but not a list: stamped over"),
+        (["a", 2], ["a", "b"], "mixed types: stamped over"),
+    ],
+)
+def test_the_stamp_asks_whether_the_GRADER_can_read_the_columns(
+    supplied: object, expected: list[str], why: str
+) -> None:
+    """A `columns` the grader cannot read must not suppress the stamp.
+
+    The stamp exists because JSONB canonicalizes object keys, so a dict row
+    read back from storage has lost its wire order -- the defect that once
+    flipped 699 outcomes on scrambled columns (B44). It used to skip on any
+    TRUTHY `columns`, but the grader accepts only a non-empty list of strings
+    (`explicit_columns`). So a push carrying `[0, 1]` suppressed the stamp,
+    stored evidence that looks declared, and sent the grader back to insertion
+    order -- the exact path the stamp prevents.
+
+    Stamping over an unusable value loses nothing: the grader ignores it
+    either way, and the wire order is still available here to record.
+    """
+    from beacon_ui.api.routes.ingest import _stamped_output
+
+    output: dict[str, object] = {"rows": [{"a": 1, "b": 2}]}
+    if supplied is not None:
+        output["columns"] = supplied
+
+    assert _stamped_output(output, deferred=False)["columns"] == expected, why

@@ -13,7 +13,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from beacon_graders.composer import VerdictComposer
 from beacon_graders.graders import DabstepAnswerMatcher, ResultSetMatchGrader
-from beacon_graders.graders.result_set_match import gold_variants, rows_from
+from beacon_graders.graders.result_set_match import explicit_columns, gold_variants, rows_from
 from beacon_graders.types import VerdictOutcome
 from beacon_iam.permissions import Permission
 from beacon_runner.persistence import persist_result
@@ -340,7 +340,17 @@ def _stamped_output(output: dict[str, Any], *, deferred: bool = False) -> dict[s
     """
     stamped = dict(output)
     rows = output.get("rows")
-    if isinstance(rows, list) and rows and isinstance(rows[0], dict) and not output.get("columns"):
+    # Usable to the GRADER, not merely present: a truthy `columns` the grader
+    # cannot read (`[0, 1]`) would suppress the stamp and store evidence that
+    # looks declared and regrades on insertion order. Stamping over it loses
+    # nothing -- the grader ignores it either way -- and recovers the wire
+    # order while it still exists.
+    if (
+        isinstance(rows, list)
+        and rows
+        and isinstance(rows[0], dict)
+        and explicit_columns(output.get("columns")) is None
+    ):
         stamped["columns"] = list(rows[0].keys())
     if deferred:
         stamped["deferred"] = True

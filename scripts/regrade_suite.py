@@ -20,7 +20,7 @@ import sys
 from typing import Any
 
 import sqlalchemy as sa
-from beacon_graders.graders.result_set_match import ResultSetMatchGrader
+from beacon_graders.graders.result_set_match import ResultSetMatchGrader, explicit_columns
 from beacon_runner.types import EvalItem as RunnerItem
 from beacon_runner.types import ExecutionResult, ExecutionStep
 from beacon_storage.db import make_engine, make_session_factory, session_scope
@@ -63,6 +63,12 @@ def rows_have_unrecoverable_column_order(output: dict[str, Any]) -> bool:
     orderless results, 7217 (72.5%) are single-column, and none could be
     regraded, so every grader improvement skipped most of that corpus.
 
+    "Carries a columns array" is asked through the grader's own
+    ``explicit_columns``, not by truthiness. A truthy-but-unusable value like
+    ``[0, 1]`` answers None there, so a truthiness test clears this gate while
+    the grader falls back to insertion order -- admitting exactly the scrambled
+    evidence the refusal exists to keep out.
+
     Arity is read across EVERY row. A result whose rows disagree on arity is
     exactly the shape whose order cannot be trusted, and reading row zero alone
     would admit it.
@@ -76,7 +82,7 @@ def rows_have_unrecoverable_column_order(output: dict[str, Any]) -> bool:
     rows = output.get("rows")
     if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
         return False
-    if output.get("columns"):
+    if explicit_columns(output.get("columns")) is not None:
         return False
     widest = max((len(row) for row in rows if isinstance(row, dict)), default=0)
     return widest > 1

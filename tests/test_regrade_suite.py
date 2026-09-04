@@ -195,6 +195,13 @@ def test_an_already_current_result_still_has_its_OUTCOME_re_derived() -> None:
         ({"rows": [{"a": 1}, {"a": 2}]}, False, "one column: no order to lose"),
         ({"rows": [{"a": 1, "b": 2}]}, True, "two columns, no columns array"),
         ({"rows": [{"a": 1, "b": 2}], "columns": ["a", "b"]}, False, "order was stored"),
+        # Truthy but UNUSABLE to the grader. `explicit_columns` answers None for
+        # each, so `rows_from` falls back to insertion order -- the scrambled
+        # path. A truthiness test on `columns` clears the gate on all three.
+        ({"rows": [{"a": 1, "b": 2}], "columns": [0, 1]}, True, "not strings"),
+        ({"rows": [{"a": 1, "b": 2}], "columns": [{"name": "a"}]}, True, "not strings"),
+        ({"rows": [{"a": 1, "b": 2}], "columns": "ab"}, True, "not a list"),
+        ({"rows": [{"a": 1, "b": 2}], "columns": ["a", 2]}, True, "mixed types"),
         ({"rows": [[1, 2]]}, False, "list rows keep their order"),
         ({"rows": []}, False, "nothing to order"),
         ({}, False, "no rows at all"),
@@ -219,6 +226,11 @@ def test_which_evidence_has_an_unrecoverable_column_order(
     699 outcomes on scrambled columns. It just does not reach one column,
     where there is exactly one possible ordering -- 7217 of bird's 9957
     orderless results.
+
+    The `columns` cases pin the OTHER half. The first version of this
+    parametrization tested only a well-formed `["a", "b"]`, so weakening the
+    check to `is not None` -- or back to plain truthiness -- left every case
+    green while re-admitting `[0, 1]` to the scrambled path.
     """
     from scripts.regrade_suite import rows_have_unrecoverable_column_order
 
