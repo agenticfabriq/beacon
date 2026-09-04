@@ -51,12 +51,32 @@ def test_the_importer_carries_the_counts_and_the_engines_own_outcome() -> None:
     )
 
     assert output["sql"] == "SELECT 1"
-    # The drill-down renders `output.sql || output.answer`, so a case that
-    # carries no SQL -- a deferral, an error -- shows the answer or an empty
-    # box. Dropping this key from the record fails nothing else.
+    # The drill-down renders `output.sql || output.answer`, so an ERROR case
+    # carrying no SQL shows the answer instead of an empty box. Not a DEFER,
+    # which short-circuits to "No SQL produced." before that fallback --
+    # `deferred_correctly` maps to PASS and does reach it. Dropping this key
+    # from the record fails nothing else.
     assert output["answer"] == "1"
     assert output["db_id"] == "local001"
     assert output["row_count"] == 1
     assert output["engine_row_count"] == 1
     assert output["gold_row_count"] == 2
     assert output["mnemiq_outcome"] == "wrong"
+
+
+def test_the_count_is_the_engines_count_and_not_the_length_of_the_preview() -> None:
+    """`rows` is a preview of the first N; `row_count` is how many there were.
+
+    The grader reads `int(result.output.get("row_count") or len(candidate.rows))`,
+    so sourcing the count from the preview instead would compare 3 against a
+    gold of 5000 and emit a row_count mismatch on every truncated case. A
+    fixture where the two are equal cannot tell the sources apart.
+    """
+    output = result_output(
+        {"engine_rows": [{"n": 1}, {"n": 2}, {"n": 3}], "engine_row_count": 5000},
+        "correct",
+    )
+
+    assert output["row_count"] == 5000
+    assert output["engine_row_count"] == 5000
+    assert len(output["rows"]) == 3
