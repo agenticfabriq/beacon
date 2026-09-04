@@ -20,6 +20,7 @@ from beacon_runner.persistence import persist_result
 from beacon_runner.trace_conformance import layer_contradictions
 from beacon_runner.types import EvalItem, ExecutionResult, ExecutionStep
 from beacon_storage.models.runs import Result, RunStatus
+from beacon_storage.models.suites import Suite
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.results import ResultRepo
@@ -50,7 +51,29 @@ def _status_value(status_like: object) -> str:
     return str(getattr(status_like, "value", status_like))
 
 
-def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
+def _headline_metric(session: Session, suite_id: UUID) -> str | None:
+    """The metric this suite declares as its headline, or None for the default.
+
+    Read at ingest so an outcome is composed under the same reading every
+    aggregate and every regrade uses. Without it the outcome followed the
+    grader's default while `scripts/regrade_suite.py` followed the
+    declaration, so the same result got different outcomes depending on how it
+    was graded (B74).
+
+    None on a missing suite or a missing key rather than raising: a suite that
+    declares no headline wants the grader's default, and a push must not fail
+    because metadata is silent.
+    """
+    suite = session.get(Suite, suite_id)
+    if suite is None:
+        return None
+    declared = (suite.suite_metadata or {}).get("headline_metric")
+    return str(declared) if declared else None
+
+
+def _composer_for(
+    item: EvalItem, body: ResultIngestIn, *, headline: str | None = None
+) -> VerdictComposer:
     """Build the composer for one push, refusing to grade blind.
 
     SQL grades by result-set comparison: the push carries the rows its engine
@@ -63,6 +86,8 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
         # Answer-and-friends grade by the matcher; deferrals and errored
         # attempts never need rows -- the composer scores them DEFER/ERROR
         # before any grader runs.
+        # One reading, so nothing to choose between: the answer matcher emits
+        # a single metric and the headline cannot select a different one.
         return VerdictComposer(graders=[DabstepAnswerMatcher()])
 
     # An item DECLARING itself unanswerable is judged on its REFUSAL, not on a
@@ -86,7 +111,7 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
     # Missing gold WITHOUT that declaration stays an ingest defect and is still
     # refused -- two different absences, and only the declared one is benign.
     if (item.query or {}).get("answerable") is False:
-        return VerdictComposer(graders=[ResultSetMatchGrader()])
+        return VerdictComposer(graders=[ResultSetMatchGrader()], primary_metric=headline or None)
 
     # Both predicates below are the grader's own, not lookalikes. This gate
     # selects ResultSetMatchGrader, whose `applicable` is
@@ -126,7 +151,15 @@ def _composer_for(item: EvalItem, body: ResultIngestIn) -> VerdictComposer:
             "list of values or an object keyed by column name -- a flat list of "
             "scalars is not a row set.",
         )
-    return VerdictComposer(graders=[ResultSetMatchGrader()])
+    # The SUITE says which reading decides its outcomes. Hardcoding the
+    # grader's default meant a suite declaring the tolerant reading as its
+    # headline still had its outcomes composed under the strict one, so the
+    # outcome disagreed with every aggregate and with any regrade -- which is
+    # what a regrade of spider2_lite_local_v1 surfaced as 3 FAIL -> PASS
+    # flips, every case where the two readings differ (B74). The declaration
+    # is deliberate: "strict for BIRD, tolerant for Spider -- each benchmark
+    # defines its own".
+    return VerdictComposer(graders=[ResultSetMatchGrader()], primary_metric=headline or None)
 
 
 def _eval_item(session: Session, *, item_id: str, suite: str) -> EvalItem:
@@ -259,7 +292,7 @@ def ingest_result(
         deferred=body.deferred,
     )
 
-    composer = _composer_for(item, body)
+    composer = _composer_for(item, body, headline=_headline_metric(session, run.suite_id))
     try:
         verdicts, outcome = composer.compose(item, exec_result)
     except Exception as exc:  # noqa: BLE001 - a grader fault is not the pusher's fault

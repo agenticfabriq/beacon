@@ -380,3 +380,50 @@ def test_a_sql_push_without_rows_is_refused(
 
     assert response.status_code == 422, response.text
     assert "output.rows" in response.json()["detail"]
+
+
+def test_a_suite_whose_headline_is_TOLERANT_composes_under_that_reading(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """B74: the outcome must follow the reading the SUITE declares.
+
+    A candidate that gets the facts but not the exact table composed FAIL,
+    because the outcome followed the grader's default `exact_match` no matter
+    what the suite declared. Meanwhile every aggregate and
+    `scripts/regrade_suite.py` read the declared headline -- so a regrade of
+    spider2_lite_local_v1, whose headline is `got_facts`, flipped exactly the
+    cases where the two readings disagree. Measured on the deployment: 3, all
+    FAIL -> PASS.
+
+    The declaration is deliberate, not a mistake: "strict for BIRD, tolerant
+    for Spider -- each benchmark defines its own". So the ingest path was the
+    defect, and the fix is to honour it here rather than to change the suite.
+    """
+    from beacon_storage.models.suites import Suite
+    from sqlalchemy import select
+
+    run_id, item_id = _seed_accepted_results(session, world)
+    suite = session.scalars(select(Suite).where(Suite.id == _suite_id_of(session, run_id))).one()
+    suite.suite_metadata = {**(suite.suite_metadata or {}), "headline_metric": "got_facts"}
+    session.commit()
+
+    # Right facts, wrong shape: an extra column the gold does not carry, so
+    # exact_match fails and got_facts holds.
+    response = _push(
+        api_client,
+        world,
+        run_id,
+        item_id,
+        [["01", 10.0, "extra"], ["02", 20.0, "extra"]],
+        output_over={"columns": ["month", "total", "note"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] == "PASS"
+
+
+def _suite_id_of(session: Session, run_id: str) -> object:
+    from beacon_storage.models.runs import Run
+    from sqlalchemy import select
+
+    return session.scalars(select(Run.suite_id).where(Run.id == UUID(run_id))).one()
