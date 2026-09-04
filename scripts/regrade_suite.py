@@ -48,10 +48,23 @@ def outcome_is_the_graders_to_restate(item_input: dict[str, Any], outcome: str) 
     return outcome in {"PASS", "FAIL"}
 
 
+class _DryRun(Exception):
+    """Signal a rollback from inside ``session_scope``, which commits on return."""
+
+    def __init__(self, flipped: int) -> None:
+        super().__init__(f"dry run: {flipped} outcome(s) would flip")
+        self.flipped = flipped
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", required=True, help="suite name, e.g. bird_minidev_v2")
     parser.add_argument("--database-url", help="beacon DB URL; defaults to $DATABASE_URL")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would change, then roll back and write nothing",
+    )
     args = parser.parse_args()
 
     dsn = args.database_url or os.environ.get("DATABASE_URL")
@@ -196,6 +209,22 @@ def main() -> int:
             for metric in sorted(true_counts):
                 print(f"  {metric:12s} {true_counts[metric]} true")
             print(f"outcomes  {flipped} flipped under the headline derivation")
+            if args.dry_run:
+                # Raised INSIDE session_scope, whose except branch rolls back.
+                # Returning early would commit: the scope commits on success,
+                # so a dry run has to leave by the failure path.
+                #
+                # This exists because a flip is the one irreversible part.
+                # Verdicts are APPENDED -- older versions stay, history not
+                # garbage -- but `result.outcome` is overwritten in place with
+                # no record of what it was, and the count is printed only
+                # after the flush. On a corpus a peer has already published
+                # numbers from, "run it and read the summary" means finding out
+                # too late.
+                raise _DryRun(flipped)
+    except _DryRun as signal:
+        print(f"\nDRY RUN -- nothing written. {signal.flipped} outcome(s) would flip.")
+        return 0
     finally:
         engine.dispose()
     return 0
