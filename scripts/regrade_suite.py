@@ -48,6 +48,40 @@ def outcome_is_the_graders_to_restate(item_input: dict[str, Any], outcome: str) 
     return outcome in {"PASS", "FAIL"}
 
 
+def rows_have_unrecoverable_column_order(output: dict[str, Any]) -> bool:
+    """Whether this result's rows lost an order that mattered.
+
+    Dict-shaped rows read back from JSONB have lost their wire column order
+    unless an ordered ``columns`` array was stored beside them. Column order is
+    part of exact match, so such evidence cannot be regraded -- refusing beats
+    mangling, learned the hard way when a regrade over orderless rows flipped
+    699 outcomes on scrambled columns.
+
+    EXCEPT AT ONE COLUMN, where there is no order to lose: a single-key row has
+    exactly one possible ordering, so the hazard cannot occur. Refusing those
+    was over-broad by nearly three quarters -- of bird_minidev_v2's 9957
+    orderless results, 7217 (72.5%) are single-column, and none could be
+    regraded, so every grader improvement skipped most of that corpus.
+
+    Arity is read across EVERY row. A result whose rows disagree on arity is
+    exactly the shape whose order cannot be trusted, and reading row zero alone
+    would admit it.
+
+    A module-level function rather than an expression inside ``main`` so it can
+    be tested against row payloads. As an inline predicate the only available
+    test was structural -- it asserted the expression mentioned ``len`` and a
+    generator, which `min` for `max`, `stored_rows[:1]` for `stored_rows`, and
+    `> 0` for `> 1` all satisfy while breaking exactly what it claimed to pin.
+    """
+    rows = output.get("rows")
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return False
+    if output.get("columns"):
+        return False
+    widest = max((len(row) for row in rows if isinstance(row, dict)), default=0)
+    return widest > 1
+
+
 class _DryRun(Exception):
     """Signal a rollback from inside ``session_scope``, which commits on return."""
 
@@ -113,39 +147,7 @@ def main() -> int:
                     if item_row is None:
                         skipped += 1
                         continue
-                    # Dict-shaped rows read back from JSONB have LOST their wire
-                    # column order unless an ordered columns array was stored
-                    # beside them. Column order is part of exact match, so such
-                    # evidence cannot be regraded -- refusing beats mangling.
-                    # (Found the hard way: a regrade over orderless rows flipped
-                    # 699 outcomes on scrambled columns before being reverted.)
-                    #
-                    # EXCEPT AT ONE COLUMN, where there is no order to lose. A
-                    # single-key row has exactly one possible ordering, so the
-                    # thing being protected against cannot happen. Refusing it
-                    # was over-broad by nearly three quarters: of
-                    # bird_minidev_v2's 9957 orderless results, 7217 (72.5%)
-                    # are single-column, and none of them could be regraded --
-                    # so every grader improvement skipped most of that corpus
-                    # while reporting the skips only as a count.
-                    #
-                    # Checked across ALL rows, not just the first. A result
-                    # whose rows disagree on arity is exactly the shape whose
-                    # order cannot be trusted, and reading row zero alone would
-                    # admit it.
-                    stored_rows = (result.output or {}).get("rows")
-                    stored_columns = (result.output or {}).get("columns")
-                    if (
-                        isinstance(stored_rows, list)
-                        and stored_rows
-                        and isinstance(stored_rows[0], dict)
-                        and not stored_columns
-                        and max(
-                            (len(row) for row in stored_rows if isinstance(row, dict)),
-                            default=0,
-                        )
-                        > 1
-                    ):
+                    if rows_have_unrecoverable_column_order(dict(result.output or {})):
                         orderless += 1
                         continue
                     # One verdict per (result, metric, grader, version) -- the
@@ -261,7 +263,9 @@ def main() -> int:
             print(
                 f"graded    {graded} results at {grader.name} {grader.version}, "
                 f"{current} already at this version, {skipped} skipped, "
-                f"{orderless} refused (no ordered columns in evidence)"
+                f"{orderless} refused (multi-column rows with no ordered columns "
+                f"in evidence; single-column rows are regraded, having no "
+                f"order to lose)"
             )
             for metric in sorted(true_counts):
                 print(f"  {metric:12s} {true_counts[metric]} true")

@@ -189,49 +189,37 @@ def test_an_already_current_result_still_has_its_OUTCOME_re_derived() -> None:
     )
 
 
-def test_the_orderless_refusal_stops_at_one_column() -> None:
-    """A single-key row has one possible ordering, so nothing can be scrambled.
+@pytest.mark.parametrize(
+    ("output", "refused", "why"),
+    [
+        ({"rows": [{"a": 1}, {"a": 2}]}, False, "one column: no order to lose"),
+        ({"rows": [{"a": 1, "b": 2}]}, True, "two columns, no columns array"),
+        ({"rows": [{"a": 1, "b": 2}], "columns": ["a", "b"]}, False, "order was stored"),
+        ({"rows": [[1, 2]]}, False, "list rows keep their order"),
+        ({"rows": []}, False, "nothing to order"),
+        ({}, False, "no rows at all"),
+        # The mixed-arity case, and the reason arity is read across EVERY row.
+        ({"rows": [{"a": 1}, {"a": 1, "b": 2}]}, True, "rows disagree on arity"),
+        ({"rows": [{"a": 1, "b": 2}, {"a": 1}]}, True, "disagree, widest first"),
+    ],
+)
+def test_which_evidence_has_an_unrecoverable_column_order(
+    output: dict[str, object], refused: bool, why: str
+) -> None:
+    """Asserted on payloads, because the structural version could not see this.
 
-    The refusal exists because dict rows read back from JSONB have lost their
-    wire column order, and column order is part of exact match -- a regrade
-    over such evidence once flipped 699 outcomes on scrambled columns. That
-    reasoning does not reach a one-column result: there is no order to lose.
+    While the predicate was an expression inside `main`, the only available
+    test parsed it and checked it mentioned `len` and a generator. Three
+    mutations satisfy that and break exactly what the test claimed to pin:
+    `max` -> `min` re-admits mixed arity, `stored_rows[:1]` reads row zero
+    alone, and `> 1` -> `> 0` reverts the whole change to refusing every
+    single-column result. A shape check is not a property check.
 
-    Measured on the deployment: of bird_minidev_v2's 9957 orderless results,
-    7217 (72.5%) are single-column, and every one was refused. So each grader
-    improvement skipped roughly three quarters of that corpus while reporting
-    the skips only as a count, which reads as a property of the data rather
-    than a limit of the tool.
-
-    Structural, because the loop needs a database. What it pins is the arity
-    condition and that it reads EVERY row: a result whose rows disagree on
-    arity is exactly the shape whose order cannot be trusted, and inspecting
-    row zero alone would admit it.
+    The refusal itself is earned: a regrade over orderless rows once flipped
+    699 outcomes on scrambled columns. It just does not reach one column,
+    where there is exactly one possible ordering -- 7217 of bird's 9957
+    orderless results.
     """
-    import ast
+    from scripts.regrade_suite import rows_have_unrecoverable_column_order
 
-    source = (Path(__file__).resolve().parents[1] / "scripts" / "regrade_suite.py").read_text(
-        encoding="utf-8"
-    )
-    main = next(
-        node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef) and node.name == "main"
-    )
-    guards = [
-        node
-        for node in ast.walk(main)
-        if isinstance(node, ast.If) and "orderless" in ast.dump(node)
-    ]
-    assert len(guards) == 1, "expected exactly one orderless guard"
-    dumped = ast.dump(guards[0].test)
-
-    # An arity bound, so one-column evidence is not refused.
-    assert "'len'" in dumped or '"len"' in dumped, (
-        "the orderless guard must bound row arity: a one-column row has no order to lose"
-    )
-    # A generator over all rows, not a subscript of the first.
-    assert "GeneratorExp" in dumped, (
-        "arity must be read across every row; row zero alone admits a result "
-        "whose rows disagree on arity, which is the untrustworthy shape"
-    )
+    assert rows_have_unrecoverable_column_order(output) is refused, why
