@@ -347,8 +347,21 @@ class ResultSetMatchGrader:
     # depends on is part of the reading, not decoration.
     version = "v8"
     kind = GraderKind.EXECUTION
-    # The strict reading decides the outcome; grade() also emits got_facts.
+    # The strict reading decides the outcome BY DEFAULT; grade() also emits
+    # got_facts.
     metric: str | None = "exact_match"
+    # Every metric this grader emits, which is not the same question as which
+    # one decides. `metric` alone was read as the set of available metrics, so
+    # `primary_metric="got_facts"` is refused with "no grader declaring it" --
+    # and that is the reading spider2_lite_local_v1 declares as its headline.
+    # Declaring one of two readings as "the" metric says which is default, not
+    # which exist.
+    #
+    # This PERMITS a caller to select the tolerant reading; it does not make
+    # anything select it. The ingest path still composes under the default
+    # until it is taught to read the suite's declaration, so B74 stays open at
+    # this revision.
+    emits: tuple[str, ...] = ("exact_match", "got_facts")
 
     def applicable(self, item: EvalItem, result: ExecutionResult) -> bool:
         """Apply when the push carries rows and the item's gold is materialized."""

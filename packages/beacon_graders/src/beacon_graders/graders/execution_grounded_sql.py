@@ -40,6 +40,12 @@ class ExecutionGroundedSqlGrader:
     # tolerant verdict under "got_facts"; the composer stamps this metric only
     # onto verdicts that carry none, so the two stay distinct.
     metric: str | None = "exact_match"
+    # Both readings this grader stamps. Without `emits` the composer refuses
+    # `primary_metric="got_facts"` against it, so a suite declaring the
+    # tolerant reading as its headline could not be honoured here either --
+    # latent only because this grader's one construction site is the
+    # bird_minidev adapter, whose headline is exact_match (B74).
+    emits: tuple[str, ...] = ("exact_match", "got_facts")
 
     def __init__(
         self,

@@ -89,11 +89,31 @@ class VerdictComposer:
         made the same result compose PASS or FAIL by argument order. So an
         explicit choice is required as soon as the answer is not obvious.
         """
-        declared = [
-            metric
-            for grader in self.graders
-            if (metric := getattr(grader, "metric", None)) is not None
-        ]
+        # Every metric the graders EMIT, not only the one each declares as its
+        # default. A grader that emits two readings can have either decide; a
+        # name nothing emits still cannot, because that would put back the
+        # argument-order dependence this check exists to remove -- nothing
+        # would decide and the composer would fall through to ERROR.
+        # The UNION of what each grader emits and what it declares as default,
+        # never one replacing the other. An `elif` here read `emits` as the
+        # whole set, so a grader declaring `emits = ("got_facts",)` as "the
+        # additional readings" while keeping `metric = "exact_match"` had its
+        # own stamped default silently dropped -- and the operator would then
+        # see every push fail with `primary_metric 'exact_match' has no grader
+        # declaring it` while every verdict in the database carried exactly
+        # that name. A message pointing away from its cause.
+        #
+        # A name no grader emits is still refused: accepting one would restore
+        # the argument-order dependence this check exists to remove, with
+        # nothing matching as the deciding verdict and the composer falling
+        # through to its terminal ERROR.
+        declared: list[str] = []
+        for grader in self.graders:
+            emits = getattr(grader, "emits", None)
+            if isinstance(emits, (tuple, list)):
+                declared.extend(str(metric) for metric in emits)
+            if (metric := getattr(grader, "metric", None)) is not None:
+                declared.append(metric)
         if requested is not None:
             if requested not in declared:
                 raise AmbiguousPrimaryMetricError(
