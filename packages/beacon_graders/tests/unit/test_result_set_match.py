@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from beacon_graders.comparison import ResultSet, got_facts, got_facts_contained
 from beacon_graders.graders.result_set_match import ResultSetMatchGrader, _project_gold
 from beacon_graders.tolerance import Tolerance
@@ -672,3 +673,88 @@ def test_an_exact_match_on_a_LATER_accepted_result_claims_no_narrowed_scope() ->
     assert exact.raw_output is not None
     assert exact.raw_output["matched_accepted_index"] == 1
     assert facts.raw_output["matched_accepted_index"] == 1
+
+
+@pytest.mark.parametrize(
+    ("gold_extra", "candidate_total", "expected_scope"),
+    [
+        # Exact must FAIL for the projection to be what carried got-facts:
+        # a candidate equal to gold on every column reports "full", correctly,
+        # because no restriction was applied to reach that verdict.
+        ({"condition_cols": [[0]]}, 999, "subset"),
+        ({"condition_cols": [[0, 1]]}, 356618, "full"),
+        ({}, 356618, "full"),
+    ],
+    ids=["restricted", "restriction-covers-everything", "no-restriction"],
+)
+def test_the_got_facts_verdict_ALWAYS_declares_its_scope(
+    gold_extra: dict[str, Any], candidate_total: int, expected_scope: str
+) -> None:
+    """A positive marker, because absence has to mean exactly one thing.
+
+    The aggregate counts subset-scored readings apart from full-table ones
+    (B72). If "full" were inferred from a MISSING key, then a verdict written
+    before the scope existed would be indistinguishable from one that compared
+    every column -- and every historical row would count as full-table-scored.
+    That is an absence rendered as a measurement, the family B65 and B67 belong
+    to, and it is the reason `scope` is written on every got-facts verdict
+    rather than only on the restricted ones.
+
+    So NULL means one thing: this verdict predates the disclosure. Deleting the
+    `scope = "full"` line left every other test in this file green.
+    """
+    gold: dict[str, Any] = {
+        "accepted_results": [{"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618]]}]
+    }
+    gold.update(gold_extra)
+    result = _result({"rows": [["2020-01", candidate_total]]})
+
+    facts = next(
+        v for v in ResultSetMatchGrader().grade(_item(gold), result) if v.metric == "got_facts"
+    )
+
+    assert facts.raw_output is not None
+    assert facts.raw_output["scope"] == expected_scope
+
+
+@pytest.mark.parametrize(
+    ("candidate_rows", "expected_bool"),
+    [
+        ([["2020-01", 999]], True),
+        ([["2020-02", 999]], False),
+    ],
+    ids=["passes-the-scored-column", "fails-the-scored-column"],
+)
+def test_the_scope_describes_the_QUESTION_not_the_answer(
+    candidate_rows: list[list[Any]], expected_bool: bool
+) -> None:
+    """A restricted item is subset-scoped whether the model got it right or not.
+
+    An earlier version read the scope off the variant that CARRIED a true
+    verdict, so a restricted item that FAILED got-facts had no carrier and was
+    stamped "full". `n_got_facts_subset_scored` could then only ever count the
+    restricted items a model PASSED -- a composition that moves with the pass
+    rate it exists to qualify, which is worse than publishing no breakdown at
+    all. Measured before the fix: `condition_cols [[0]]` with a candidate wrong
+    on the scored column gave `bool_value=False, scope="full"`.
+
+    The three cases of `test_the_got_facts_verdict_ALWAYS_declares_its_scope`
+    all reach a non-None carrier, so the entire failing-restricted region was
+    unread. That is what this covers.
+    """
+    item = _item(
+        {
+            "condition_cols": [[0]],
+            "accepted_results": [{"columns": ["MONTH", "TOTAL"], "rows": [["2020-01", 356618]]}],
+        }
+    )
+
+    facts = next(
+        v
+        for v in ResultSetMatchGrader().grade(item, _result({"rows": candidate_rows}))
+        if v.metric == "got_facts"
+    )
+
+    assert facts.bool_value is expected_bool
+    assert facts.raw_output is not None
+    assert facts.raw_output["scope"] == "subset"

@@ -85,7 +85,15 @@ def _latest_reading(metric: str) -> sa.Subquery:
     """
     verdict = sa.orm.aliased(Verdict)
     return (
-        sa.select(verdict.result_id, verdict.bool_value)
+        sa.select(
+            verdict.result_id,
+            verdict.bool_value,
+            # The reading's own declared scope. Only got_facts sets it, and
+            # only from the version that began declaring it -- NULL means "this
+            # verdict predates the disclosure", which is not the same as "the
+            # whole table was compared" and must not be counted as it.
+            verdict.raw_output["scope"].astext.label("scope"),
+        )
         .where(verdict.metric == metric)
         .distinct(verdict.result_id)
         .order_by(verdict.result_id, verdict.id.desc())
@@ -208,6 +216,35 @@ def results_matrix(
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.isnot(None))
             .label("n_got_facts_scored"),
+            # The breakdown of that total, three ways and each counted
+            # DIRECTLY. `condition_cols` restricts the tolerant reading to the
+            # benchmark's scored columns, so on 45 of spider2's 135 items this
+            # metric asks about a strict subset of gold -- 20 of them a single
+            # column -- and one number spanning both questions cannot be
+            # compared across rows (B72). None of these is derived by
+            # subtracting the others: that is how a numerator came to count
+            # what its denominator had thrown out (B68).
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(
+                Result.outcome.in_(_GRADED),
+                got_facts_now.c.bool_value.isnot(None),
+                got_facts_now.c.scope == "subset",
+            )
+            .label("n_got_facts_subset_scored"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(
+                Result.outcome.in_(_GRADED),
+                got_facts_now.c.bool_value.isnot(None),
+                got_facts_now.c.scope == "full",
+            )
+            .label("n_got_facts_full_scored"),
+            sa.func.count(sa.func.distinct(Result.id))
+            .filter(
+                Result.outcome.in_(_GRADED),
+                got_facts_now.c.bool_value.isnot(None),
+                got_facts_now.c.scope.is_(None),
+            )
+            .label("n_got_facts_scope_unknown"),
             sa.func.count(sa.func.distinct(Result.id))
             .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.isnot(None))
             .label("n_exact_scored"),
@@ -287,6 +324,10 @@ def results_matrix(
                     if int(record.n_got_facts_scored)
                     else None
                 ),
+                n_got_facts_scored=int(record.n_got_facts_scored),
+                n_got_facts_subset_scored=int(record.n_got_facts_subset_scored),
+                n_got_facts_full_scored=int(record.n_got_facts_full_scored),
+                n_got_facts_scope_unknown=int(record.n_got_facts_scope_unknown),
                 defer_rate=_rate(int(record.n_defer), graded),
                 wrong_rate=_rate(int(record.n_fail), graded),
                 median_tokens=float(record.median_tokens)

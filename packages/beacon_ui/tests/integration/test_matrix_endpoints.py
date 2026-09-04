@@ -648,3 +648,137 @@ def test_a_pooled_row_shows_the_spread_it_averages(
     assert row["ex_rate_min"] == pytest.approx(1 / 3)
     assert row["ex_rate_max"] == pytest.approx(2 / 3)
     assert row["ex_rate_min"] < row["ex_rate"] < row["ex_rate_max"]
+
+
+def _seed_got_facts_scopes(
+    session: Session, world: _World, scopes: list[dict[str, object] | None]
+) -> None:
+    """Seed one got_facts verdict per gradeable result, with the given raw_output."""
+    from beacon_storage.models.runs import Result, Run
+    from beacon_storage.repository.verdicts import VerdictRepo
+    from sqlalchemy import select
+
+    # Scoped to model-a's VALID run and ordered, because the assertions read
+    # model-a's row. An unordered select over the whole team also picks up
+    # model-b's results and the invalidated run's three FAILs, and pairing
+    # scopes against that with strict=False truncated silently -- the
+    # assertions then held only because Postgres happened to return insertion
+    # order for freshly written rows.
+    results = [
+        r
+        for r in session.scalars(
+            select(Result)
+            .join(Run, Run.id == Result.run_id)
+            .where(
+                Result.team_id == world.acme_team_id,
+                Run.invalidated_at.is_(None),
+                Run.config["model_id"].astext == "model-a",
+            )
+            .order_by(Result.id)
+        ).all()
+        if str(r.outcome) in ("PASS", "FAIL", "DEFER")
+    ]
+    assert len(results) == len(scopes), (
+        f"seeding {len(scopes)} scopes against {len(results)} results would truncate"
+    )
+    for result, raw in zip(results, scopes, strict=True):
+        VerdictRepo(session).create(
+            team_id=world.acme_team_id,
+            result_id=result.id,
+            grader="result_set_match",
+            grader_version="v7",
+            metric="got_facts",
+            criterion="correctness",
+            bool_value=True,
+            value=1.0,
+            justification="seeded",
+            raw_output=raw,
+        )
+    session.commit()
+
+
+def test_a_verdict_with_no_declared_scope_is_UNKNOWN_not_full(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """The defect this breakdown exists to avoid, in its own test.
+
+    Every stored verdict predates the scope disclosure, so a breakdown that
+    inferred "full" from a missing key would report the whole corpus as
+    full-table-scored -- an absence rendered as a measurement, which is the
+    family B65 and B67 belong to. The grader therefore writes a POSITIVE
+    `scope` marker, and NULL means one thing only: this verdict was written
+    before that existed.
+    """
+    _seed_got_facts_scopes(session, world, [None, None, None])
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    assert row["n_got_facts_scope_unknown"] > 0
+    assert row["n_got_facts_full_scored"] == 0
+    assert row["n_got_facts_subset_scored"] == 0
+
+
+def test_a_subset_scored_verdict_is_counted_apart_from_a_full_one(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """One metric name over two questions is what makes the rate incomparable."""
+    _seed_got_facts_scopes(
+        session,
+        world,
+        [
+            {"scope": "subset", "scored_columns": ["MONTH"]},
+            {"scope": "full"},
+            {"scope": "full"},
+        ],
+    )
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    assert row["n_got_facts_subset_scored"] == 1
+    assert row["n_got_facts_full_scored"] == 2
+    assert row["n_got_facts_scope_unknown"] == 0
+
+
+def test_the_three_scope_counts_add_up_to_the_scored_total(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """Counted directly, so this has to hold rather than be arranged.
+
+    Each of the three is its own `count(...) filter(...)`. Deriving any one by
+    subtracting the others is how a numerator came to count what its
+    denominator had thrown out and a row reported 150% (B68), so the invariant
+    is asserted rather than assumed.
+    """
+    _seed_got_facts_scopes(
+        session, world, [{"scope": "subset", "scored_columns": ["MONTH"]}, {"scope": "full"}, None]
+    )
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    parts = (
+        row["n_got_facts_subset_scored"]
+        + row["n_got_facts_full_scored"]
+        + row["n_got_facts_scope_unknown"]
+    )
+    assert parts > 0
+    assert parts == row["n_got_facts_scored"]
+
+
+def test_the_breakdown_does_not_move_the_rate_it_describes(
+    api_client: TestClient, world: _World, seeded: Seeded, session: Session
+) -> None:
+    """B72 keeps the published total's meaning; it only says what it is over.
+
+    A breakdown that changed `got_facts_rate` would invalidate every figure
+    already quoted from it, which is the reason this half was chosen over
+    splitting the metric in two.
+    """
+    _seed_got_facts_scopes(
+        session, world, [{"scope": "subset", "scored_columns": ["MONTH"]}, {"scope": "full"}, None]
+    )
+
+    row = next(r for r in _matrix(api_client, world, seeded)["rows"] if r["model_id"] == "model-a")
+
+    # Three gradeable results, all seeded true, so the rate is over the graded
+    # denominator exactly as before -- the scope split changes none of it.
+    assert row["got_facts_rate"] == pytest.approx(1.0)

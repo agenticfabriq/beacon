@@ -274,6 +274,31 @@ def _facts_raw(
     recording one would misdescribe the reading.
     """
     raw: dict[str, object] = {"exact_match": passed}
+    # A POSITIVE scope marker, always, and this is the load-bearing part for
+    # aggregating this metric. Recording `scored_columns` only when the reading
+    # was restricted leaves "compared every column" and "graded before this
+    # was recorded at all" both looking like an absent key -- so an aggregate
+    # counting subset-scored verdicts would report 0 for every historical row
+    # and read as "nothing is subset-scored", which is an absence rendered as a
+    # measurement (B65/B67). With `scope` always present, its ABSENCE means
+    # exactly one thing: this verdict predates the disclosure.
+    # Derived from what the reading ASKED, not from which variant answered it.
+    # An earlier version read the carrying variant, so a restricted item that
+    # FAILED got-facts was stamped "full": `facts_via_projection` is false
+    # whenever facts is false, so there was no carrier to read. The subset
+    # count could then only ever contain restricted items the model PASSED --
+    # a composition moving with the pass rate it exists to qualify, which is
+    # worse than no breakdown. Measured before the fix: gold `condition_cols
+    # [[0]]` with a candidate wrong on the scored column gave
+    # `bool_value=False, scope="full"`.
+    #
+    # An exact full-table match is the one case where nothing was restricted:
+    # got-facts is true by `passed_v` without any projection being applied.
+    if passed:
+        raw["scope"] = "full"
+    else:
+        restricted = any(_scored_columns(variant) is not None for variant in variants)
+        raw["scope"] = "subset" if restricted else "full"
     # The index that CARRIED this verdict. When the exact reading did, that is
     # `matched_index`, not the first variant to facts-match by projection --
     # reporting the latter had the got-facts row name accepted result 0 while
@@ -285,6 +310,10 @@ def _facts_raw(
         raw["matched_accepted_index"] = carrier
         scored = _scored_columns(variants[carrier]) if via_projection else None
         if scored is not None:
+            # Already "subset" from the reading above; the COLUMNS are the
+            # extra a passing verdict can name, because it knows which
+            # accepted result it matched.
+            raw["scope"] = "subset"
             raw["scored_columns"] = scored
             raw["condition_cols"] = list(variants[carrier].condition_cols)
     return raw
@@ -309,7 +338,14 @@ class ResultSetMatchGrader:
     # verdict at the current version as `current` and skips it, so a stale
     # v6 row would never be refreshed and never say so. Nothing stored is
     # affected: v6 never reached the deployed image, which still serves v5.
-    version = "v7"
+    # v8: the got-facts verdict declares its SCOPE, which the matrix aggregate
+    # reads to say what the rate is a rate over (B72). Bumped even though no
+    # bool moves, because `scripts/regrade_suite.py` counts a result already
+    # carrying a verdict at this version as `current` and SKIPS it -- so any v7
+    # verdict written since 361a855 would keep an unrecorded scope for ever and
+    # be reported as "already at this version". A raw_output key the aggregate
+    # depends on is part of the reading, not decoration.
+    version = "v8"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome; grade() also emits got_facts.
     metric: str | None = "exact_match"

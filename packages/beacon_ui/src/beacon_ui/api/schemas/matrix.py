@@ -59,6 +59,29 @@ class MatrixRowOut(BaseModel):
     # -- runs graded before the grader emitted it -- which must not read as 0%;
     # read and matched nothing is 0.0, which must not read as None.
     got_facts_rate: float | None = None
+    # What `got_facts_rate` is a rate OVER, because it is not one question.
+    # `condition_cols` restricts the tolerant reading to the benchmark's scored
+    # columns, so for a third of spider2 this metric asks about a strict subset
+    # of gold -- one item scored PASS on its month column while its value was
+    # 6x off (B72). Summing that with full-table readings produces a number
+    # that cannot be compared across rows, and the rate alone never said so.
+    #
+    # Counted directly, not derived: subset + full + unknown == the scored
+    # total, and a reader who has to subtract to learn the composition is one
+    # arithmetic slip from B68's 150% row.
+    #
+    # `unknown` is verdicts written before the grader declared its scope. It is
+    # NOT "the whole table was compared" -- that distinction is the whole point
+    # of recording a positive marker rather than inferring full from a missing
+    # key.
+    #
+    # The total is exposed too. Publishing the parts without the whole leaves a
+    # reader adding three numbers to recover the denominator the rate is over,
+    # which is the arithmetic this breakdown exists to spare them (B57).
+    n_got_facts_scored: int = 0
+    n_got_facts_subset_scored: int = 0
+    n_got_facts_full_scored: int = 0
+    n_got_facts_scope_unknown: int = 0
     defer_rate: float | None = None
     wrong_rate: float | None = None
     median_tokens: float | None = None
