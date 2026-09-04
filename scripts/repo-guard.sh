@@ -19,29 +19,93 @@ list_files() {
   fi
 }
 
-# Resolve the blocklist: environment first (CI), then the gitignored .env.
-if [ -z "${REPO_GUARD_NAME_PATTERNS:-}" ] && [ -f .env ]; then
-  REPO_GUARD_NAME_PATTERNS="$(grep '^REPO_GUARD_NAME_PATTERNS=' .env | head -1 | cut -d= -f2- \
-    | sed -e "s/^['\"]//" -e "s/['\"]\$//")"
+# Resolve the blocklist: environment first (CI), then the gitignored .env, then
+# the main checkout's .env for a linked worktree (which has none of its own --
+# .env is gitignored and does not carry across). The fallbacks widen where the
+# secret is FOUND, never what happens without one.
+#
+# ONE resolution path, and the quote handling is why. It used to be stripped
+# only in the .env branches, so a secret STORED with .env's surrounding quotes
+# reached grep as a pattern beginning with a literal quote and matched nothing.
+# The guard then printed "clean" on a file it should have blocked, and did not
+# fail closed, because a quoted value is non-empty and passes the is-it-set
+# check. Reproduced with a synthetic token: bare blocked, `'token'` reported
+# clean. Two code paths for one value is what let the env one drift.
+read_patterns_from() {
+  grep '^REPO_GUARD_NAME_PATTERNS=' "$1" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+RAW="${REPO_GUARD_NAME_PATTERNS:-}"
+if [ -z "$RAW" ] && [ -f .env ]; then
+  RAW="$(read_patterns_from .env)"
 fi
-# A linked worktree has no .env of its own -- .env is gitignored and does not
-# carry across -- so fall back to the main checkout's. Still fails closed when
-# neither has it: the fallback widens where the secret is FOUND, never what
-# happens without one.
-if [ -z "${REPO_GUARD_NAME_PATTERNS:-}" ]; then
+if [ -z "$RAW" ]; then
   MAIN_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
   if [ -n "$MAIN_ROOT" ] && [ -f "$MAIN_ROOT/.env" ]; then
-    REPO_GUARD_NAME_PATTERNS="$(grep '^REPO_GUARD_NAME_PATTERNS=' "$MAIN_ROOT/.env" | head -1 \
-      | cut -d= -f2- | sed -e "s/^['\"]//" -e "s/['\"]\$//")"
+    RAW="$(read_patterns_from "$MAIN_ROOT/.env")"
   fi
 fi
-if [ -z "${REPO_GUARD_NAME_PATTERNS:-}" ]; then
+if [ -z "$RAW" ]; then
   echo "repo-guard: BLOCKED [config]: REPO_GUARD_NAME_PATTERNS is not set."
   echo "Set it in .env (gitignored) or the environment; in CI it comes from a repo secret."
   echo "The guard fails closed: it will not bless a commit it could not check."
   exit 1
 fi
-NAME_PATTERNS="$REPO_GUARD_NAME_PATTERNS"
+
+# Strip ONE matching leading/trailing quote pair, whatever the source.
+NAME_PATTERNS="$(printf '%s' "$RAW" | sed -e "s/^\(['\"]\)\(.*\)\1\$/\2/")"
+
+# A blocklist that cannot express a pattern must refuse, not pass. Each of
+# these reported "clean" before, which is the same output as a checked clean
+# tree -- the one thing a guard must never be ambiguous about.
+guard_config_failure() {
+  echo "repo-guard: BLOCKED [config]: $1"
+  echo "REPO_GUARD_NAME_PATTERNS must be an extended regular expression, optionally"
+  echo "wrapped in one matching pair of quotes. The guard fails closed rather than"
+  echo "reporting a tree it could not actually check."
+  exit 1
+}
+if ! printf '%s' "$NAME_PATTERNS" | grep -q '[^[:space:]]'; then
+  guard_config_failure "the blocklist is empty (or only whitespace) after quote stripping."
+fi
+case "$NAME_PATTERNS" in
+  \'*|\"*|*\'|*\")
+    # An unmatched quote survived, so the stored value is mangled. Left alone it
+    # either matches nothing or matches every apostrophe in the tree; neither is
+    # a name blocklist.
+    guard_config_failure "the blocklist still begins or ends with a quote: the stored value is mangled."
+    ;;
+esac
+# ONE probe against a string no real blocklist can contain, read three ways.
+# The exit code alone is not portable and the difference is not academic:
+#
+#   pattern      BSD grep 2.6 (macOS /usr/bin/grep)   GNU grep 3.12 (CI)
+#   *            2 (invalid)                          0 (matches every line)
+#   [unclosed    2 (invalid)                          2 (invalid)
+#   .*  ^  $     0 (valid, matches everything)        0 (same)
+#
+# So on CI a mangled `*` blocklist would have surfaced as BLOCKED
+# [proprietary-name] on EVERY file -- a phantom leak to chase -- while this
+# machine reported the config error the check was added to emit. Measured in an
+# ubuntu:latest container against the staged script, not reasoned about.
+#
+#   0  the pattern matches innocuous text, so it is not a name blocklist
+#   1  valid and selective: the only outcome that proceeds
+#  >1  grep rejected the expression
+#
+# The scan below sends grep's stderr to /dev/null, so without this an invalid
+# or over-broad blocklist passed or blocked everything in silence.
+GUARD_CANARY='zzq-repo-guard-canary-no-real-blocklist-matches-this-9418'
+printf '%s\n' "$GUARD_CANARY" | grep -qEi "$NAME_PATTERNS" >/dev/null 2>&1
+case "$?" in
+  0)
+    guard_config_failure "the blocklist matches arbitrary text, so it would block every file."
+    ;;
+  1) ;;
+  *)
+    guard_config_failure "the blocklist is not a valid extended regular expression."
+    ;;
+esac
 
 # Secret shapes. Never commit these.
 SECRET_PATTERNS='(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{8,})'
