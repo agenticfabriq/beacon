@@ -67,6 +67,20 @@ class SuiteOut(BaseModel):
     created_by: UUID
     created_at: datetime
     item_count: int
+    # Every run registered against this benchmark, INVALIDATED ONES INCLUDED,
+    # and uncapped. Both halves of that are deliberate.
+    #
+    # Included, because it is what the UI already displayed: it counted runs
+    # itself with `include_invalidated: true`, so bird_minidev_v2 reads 288
+    # here while the results matrix aggregates 42 valid ones. Serving a
+    # different number from the same column would have changed a figure on
+    # screen as a side effect of making it cheaper. The gap is real and worth
+    # surfacing one day; it is not this change's to decide.
+    #
+    # Uncapped, because the client asked for `limit: 500` and took `.length`,
+    # so a benchmark past 500 runs would have under-reported in silence. A
+    # COUNT has no such ceiling.
+    run_count: int
 
 
 class SuiteListOut(BaseModel):

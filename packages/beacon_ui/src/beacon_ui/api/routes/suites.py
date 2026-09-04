@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Annotated, cast
 from uuid import UUID  # noqa: TC003
 
+import sqlalchemy as sa
 from beacon_iam.permissions import Permission
 from beacon_registry.errors import DuplicateSuiteError
 from beacon_registry.suites import SuiteService
+from beacon_storage.models.runs import Run
 from beacon_storage.models.suites import Suite  # noqa: TC002
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.eval_items import EvalItemRepo
@@ -46,6 +48,14 @@ def _suite_out(session: Session, suite: Suite) -> SuiteOut:
         for item in EvalItemRepo(session).list_active(suite=suite.name, team_id=suite.team_id)
     }
     item_count = len(by_name | set(SuiteRepo(session).list_item_ids(suite.id)))
+    # One COUNT, replacing a per-suite request that fetched up to 500 whole run
+    # objects only to take `.length` -- N+1 in the number of benchmarks, and a
+    # 288-run payload on bird just to render a number. Reported as slow from
+    # use, which is how it was found.
+    run_count = (
+        session.scalar(sa.select(sa.func.count()).select_from(Run).where(Run.suite_id == suite.id))
+        or 0
+    )
     return SuiteOut(
         suite_id=suite.id,
         id=suite.id,
@@ -59,6 +69,7 @@ def _suite_out(session: Session, suite: Suite) -> SuiteOut:
         created_by=suite.created_by,
         created_at=suite.created_at,
         item_count=item_count,
+        run_count=run_count,
     )
 
 

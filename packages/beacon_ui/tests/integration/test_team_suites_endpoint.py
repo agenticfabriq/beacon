@@ -3,6 +3,7 @@ from uuid import UUID
 
 import pytest
 from beacon_storage.models.eval_items import EvalItemTier
+from beacon_storage.models.suites import Suite
 from beacon_storage.repository.eval_items import EvalItemRepo
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -94,3 +95,98 @@ def test_list_suites(api_client: TestClient, world: _World) -> None:
     assert response.status_code == 200, response.text
     names = [suite["name"] for suite in response.json()]
     assert "smoke-list" in names
+
+
+def _seed_run(session: Session, world: _World, suite: Suite, *, invalid: bool = False) -> None:
+    """Register one run against `suite`, optionally already invalidated."""
+    from datetime import UTC, datetime
+
+    from beacon_storage.models.runs import Run, RunStatus
+    from beacon_storage.repository.solutions import SolutionRepo
+
+    solution = SolutionRepo(session).create(
+        team_id=world.acme_team_id,
+        solution_id=f"run-count-sut-{'inv' if invalid else 'ok'}",
+        version="0.1",
+        owner_team=world.acme_team_id,
+        summary="",
+        supported_modes=["EVAL"],
+        layers=[],
+        created_by=world.alice_id,
+    )
+    extra = (
+        {
+            "invalidated_at": datetime.now(UTC),
+            "invalidated_by": world.alice_id,
+            "invalidation_reason": "seeded invalid",
+        }
+        if invalid
+        else {}
+    )
+    session.add(
+        Run(
+            team_id=world.acme_team_id,
+            suite_id=suite.id,
+            suite=suite.name,
+            dataset_version="test-1",
+            solution_id=solution.id,
+            mode="EVAL",
+            status=RunStatus.CANCELLED if invalid else RunStatus.COMPLETED,
+            config={},
+            created_by=world.alice_id,
+            **extra,
+        )
+    )
+    session.commit()
+
+
+def _run_count(api_client: TestClient, world: _World, suite_id: UUID) -> int:
+    body = api_client.get(
+        f"/v1/teams/{world.acme_team_id}/suites", headers={"X-API-Key": world.alice_key}
+    ).json()
+    return int(next(s for s in body if s["id"] == str(suite_id))["run_count"])
+
+
+def test_the_suites_response_carries_a_run_count(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The count the benchmarks view needs, on the response it already fetches.
+
+    That view used to fire one request PER SUITE, asking for up to 500 whole
+    run objects only to take `.length` -- N+1 in the number of benchmarks, and
+    a 288-run payload on bird_minidev_v2 to render a single number. Reported as
+    slow from use, which is how it was found.
+    """
+    from beacon_storage.models.suites import Suite
+    from sqlalchemy import select
+
+    suite = session.scalars(select(Suite).where(Suite.team_id == world.acme_team_id)).first()
+    assert suite is not None
+    baseline = _run_count(api_client, world, suite.id)
+
+    _seed_run(session, world, suite)
+
+    assert _run_count(api_client, world, suite.id) == baseline + 1
+
+
+def test_the_run_count_includes_invalidated_runs(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """Deliberately the same population the client counted, not a better one.
+
+    The old client passed `include_invalidated: true`, so bird_minidev_v2 reads
+    288 here while the results matrix aggregates 42 valid runs. Serving a
+    different number from the same column would have changed a figure on screen
+    as a side effect of making it cheaper. That gap is real and worth surfacing
+    one day; it was not this change's to decide.
+    """
+    from beacon_storage.models.suites import Suite
+    from sqlalchemy import select
+
+    suite = session.scalars(select(Suite).where(Suite.team_id == world.acme_team_id)).first()
+    assert suite is not None
+    baseline = _run_count(api_client, world, suite.id)
+
+    _seed_run(session, world, suite, invalid=True)
+
+    assert _run_count(api_client, world, suite.id) == baseline + 1

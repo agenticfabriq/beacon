@@ -1007,27 +1007,19 @@ const Q_PAGE = 50;
 
 /* -------------------------- benchmarks -------------------------- */
 const loadBenchmarks = guard(async () => {
-  // Reported as slow from use, and the run counts are why: one request per
-  // suite fetching up to 500 FULL run objects only to take `.length`. With 288
-  // runs on bird_minidev_v2 that is a large payload for a number, and it is
-  // N+1 in the number of benchmarks. A count on the suites response, or a
-  // total alongside a limit=1 page, would replace the whole Promise.all --
-  // filed as the fix rather than done here, because it is an API change.
-  //
-  // Until then, say so instead of holding a stale table.
+  // ONE request. This used to fire a second per suite, fetching up to 500
+  // whole run objects only to take `.length` -- N+1 in the number of
+  // benchmarks, and a 288-run payload on bird to render one number. The count
+  // now comes back on the suites response itself, which is what made this
+  // view slow enough to be reported.
   const gen = S.teamGen;
   clearTeamScopedPanels();
   S.suites = asList(await api("suites", { team_id: S.teamId }), "suites");
-  const counts = await Promise.all(S.suites.map((suite) =>
-    api("runs", { suite_id: suite.id }, { query: { limit: 500, include_invalidated: "true" } })
-      .then((runs) => runs.length).catch(() => 0)));
   if (gen !== S.teamGen) return;
-  const bySuite = {};
-  S.suites.forEach((suite, index) => { bySuite[String(suite.id)] = counts[index]; });
   document.getElementById("benchmarks-rows").innerHTML = S.suites.length ? S.suites.map((suite) =>
     `<tr class="click" data-suite="${esc(suite.id)}"><td>${esc(suite.name)}</td>
       <td class="num dim">${suite.item_count}</td>
-      <td class="num dim">${bySuite[String(suite.id)] || 0}</td>
+      <td class="num dim">${suite.run_count ?? 0}</td>
       <td class="dim" style="font-size:11px">${String(suite.id) === S.suiteId ? "current" : "open →"}</td></tr>`).join("")
     : '<tr><td colspan="4"><div class="empty">No benchmarks yet.</div></td></tr>';
 });

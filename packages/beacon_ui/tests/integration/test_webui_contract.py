@@ -371,3 +371,29 @@ def test_every_team_switch_bumps_the_team_generation() -> None:
         assert "S.teamGen += 1;" in line, (
             f"team switch does not bump the generation: {line.strip()}"
         )
+
+
+def test_the_benchmarks_loader_makes_ONE_request() -> None:
+    """The N+1 must not come back, and it is easy to reintroduce.
+
+    Rendering a run count per benchmark once meant a second request per suite
+    asking for up to 500 whole run objects to take `.length` -- N+1 in the
+    number of benchmarks, and a 288-run payload on bird_minidev_v2 for one
+    number. It was reported as slow from use. The count now arrives on the
+    suites response, so this loader awaits exactly one API call.
+
+    Pinned as a count of `await api(` rather than by naming the endpoint,
+    because the shape to prevent is "a second round trip", whichever endpoint
+    it goes to.
+    """
+    page = _page()
+    body = re.search(r"const loadBenchmarks = guard\(async \(\) => \{(.*?)\n\}\);", page, re.S)
+    assert body, "no loadBenchmarks found"
+    text = body.group(1)
+
+    assert text.count("await api(") == 1, (
+        f"loadBenchmarks awaits {text.count('await api(')} API calls; the run count "
+        "comes back on the suites response and needs no second round trip"
+    )
+    assert "Promise.all" not in text
+    assert "run_count" in text
