@@ -125,8 +125,15 @@ headline.
 Dict-shaped rows carry their column order only while in flight: JSONB
 canonicalizes object keys at rest, and column order is part of exact match.
 So pushed and imported evidence is stamped with an ordered `columns` array at
-arrival, the grader reads dict rows through it, and a regrade REFUSES
-evidence that lacks one -- refusing beats mangling. BIRD verdicts graded
+arrival and the grader reads dict rows through it. Two exceptions, and neither
+is an oversight. Rows that disagree on their KEY SET are not stamped: the read
+is by name, so row zero's keys would fabricate a null for a key a later row
+lacks and drop ones it adds, inventing a rectangle. (Rows that disagree only
+on key ORDER are stamped -- that is exactly what the stamp repairs.) And a
+regrade refuses unstamped multi-column dict rows -- refusing beats mangling --
+but not unstamped SINGLE-column ones, which have one possible ordering and so
+nothing to lose. The two rules are therefore not exhaustive partners: a
+single-column ragged push is neither stamped nor refused, and correctly so. BIRD verdicts graded
 before the stamp (v1-v3) are the push-time record and are not re-derived at
 later grader versions. That is chosen policy -- history as graded -- not
 impossibility: the wire order each push carried survives in the v3 verdicts'

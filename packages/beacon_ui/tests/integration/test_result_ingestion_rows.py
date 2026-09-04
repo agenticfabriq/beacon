@@ -481,9 +481,11 @@ def test_the_stamp_turns_on_the_key_SET_not_the_key_ORDER() -> None:
 
     A differing key SET is the opposite. `entry.get(c)` fabricates None for a
     key a later row lacks and drops ones it adds, inventing a rectangle out of
-    ragged evidence -- and a stamp would also hide the result from the
-    regrade's mixed-arity refusal, which fires only on evidence carrying no
-    usable `columns`.
+    ragged evidence. Where those rows are multi-column, a stamp would also hide
+    them from the regrade's mixed-arity refusal, which fires only on evidence
+    carrying no usable `columns`. Not where they are single-column: that
+    refusal never fires there either way, since one column has no order to
+    lose. The two rules are not exhaustive partners.
     """
     from beacon_ui.api.routes.ingest import _stamped_output
 
