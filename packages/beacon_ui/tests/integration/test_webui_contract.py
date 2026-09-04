@@ -215,3 +215,91 @@ def test_half_a_measurement_is_not_reported_as_nothing_recorded(branch: str) -> 
     code = re.sub(r"//[^\n]*", "", body.group(1))
 
     assert branch in code
+
+
+def _table_column_count(page: str, tbody_id: str) -> int:
+    """Columns in the header of the table owning ``tbody_id``, counting colspans.
+
+    Generalizes ``_matrix_column_count`` to any of the suite-scoped tables. The
+    table is located by walking back from its tbody to the enclosing <table>,
+    because the markup has no per-table id.
+    """
+    end = page.index(f'id="{tbody_id}"')
+    start = page.rindex("<table", 0, end)
+    thead = re.search(r"<thead>(.*?)</thead>", page[start:end], re.S)
+    assert thead, f"the table owning {tbody_id} must have a thead"
+    last_row = re.findall(r"<tr[^>]*>(.*?)</tr>", thead.group(1), re.S)[-1]
+    columns = 0
+    for th in re.findall(r"<th[^>]*>", last_row):
+        span = re.search(r'colspan="(\d+)"', th)
+        columns += int(span.group(1)) if span else 1
+    return columns
+
+
+def _suite_panels(page: str) -> list[tuple[str, int]]:
+    block = re.search(r"const SUITE_PANELS = \[(.*?)\];", page, re.S)
+    assert block, "the UI must declare its suite-scoped panels in one SUITE_PANELS block"
+    entries = re.findall(r'\["([a-z-]+)",\s*(\d+)\]', block.group(1))
+    assert entries, "SUITE_PANELS must list at least one panel"
+    return [(name, int(width)) for name, width in entries]
+
+
+def test_every_suite_panel_placeholder_spans_its_whole_table() -> None:
+    """The loading placeholder must not render a half-width sliver.
+
+    `test_every_matrix_placeholder_spans_the_whole_table` guards three
+    functions that write the matrix body; `clearSuiteScopedPanels` is a FOURTH,
+    and it writes three different tables at three different widths. That test
+    passes while this one is absent -- not because the widths agree, but
+    because it does not look here, which is the same drift it was written
+    about, one function over.
+    """
+    page = _page()
+
+    for tbody_id, declared in _suite_panels(page):
+        actual = _table_column_count(page, tbody_id)
+        assert declared == actual, (
+            f"SUITE_PANELS declares colspan {declared} for {tbody_id}, "
+            f"whose table has {actual} columns"
+        )
+
+
+def test_every_suite_scoped_loader_drops_a_stale_response() -> None:
+    """A response for a suite the user has left must not be rendered.
+
+    Clearing the panels on switch fixes the stale-content bug but not the
+    ordering one: switching A -> B -> A faster than the requests return lets
+    B's response land last and paint B's rows under A's name, which reads as
+    authoritative. Each suite-scoped loader therefore captures `S.suiteGen`
+    before its await and returns if it has moved.
+
+    Pinned per loader rather than by counting, so ADDING a suite-scoped loader
+    without the guard fails here instead of passing quietly.
+    """
+    page = _page()
+
+    for loader in ("loadMatrix", "loadRuns", "loadQuestions"):
+        body = re.search(rf"const {loader} = guard\(async \(\) => \{{(.*?)\n\}}\);", page, re.S)
+        assert body, f"no {loader} found"
+        text = body.group(1)
+        assert "const gen = S.suiteGen;" in text, f"{loader} does not capture the suite generation"
+        assert "if (gen !== S.suiteGen) return;" in text, f"{loader} does not drop a stale response"
+        assert text.index("const gen = S.suiteGen;") < text.index("await api("), (
+            f"{loader} captures the generation after its await, which captures the NEW suite"
+        )
+        assert text.index("await api(") < text.index("if (gen !== S.suiteGen) return;"), (
+            f"{loader} checks the generation before awaiting, which cannot detect a switch"
+        )
+
+
+def test_the_suite_switch_bumps_the_generation_and_clears_the_panels() -> None:
+    """Both halves, at the one site that changes the suite from the rail."""
+    page = _page()
+    handler = re.search(r'const suiteRow = t\.closest\("\[data-suite\]"\);(.*?)\n  \}', page, re.S)
+    assert handler, "the suite-row click handler must exist"
+
+    assert "S.suiteGen += 1;" in handler.group(1)
+    assert "clearSuiteScopedPanels();" in handler.group(1)
+    assert handler.group(1).index("clearSuiteScopedPanels();") < handler.group(1).index(
+        'go("matrix")'
+    ), "the panels must be cleared before the view is shown, or the old rows paint first"

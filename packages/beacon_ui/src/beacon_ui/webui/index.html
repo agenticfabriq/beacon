@@ -456,7 +456,44 @@ const S = {  // client state; everything else lives on the server
   runsOffset: 0, runsPageFull: false, runsDateAsc: false,
   qOffset: 0, qTotal: 0,
   ritemsOffset: 0, ritemsTotal: 0, ritemsDateAsc: false,
+  // Bumped on every suite switch. Each suite-scoped loader captures it before
+  // its await and drops a response whose generation has moved on -- without
+  // that, switching A -> B -> A faster than the requests return lets B's
+  // response land last and render B's rows under A's name, which is worse than
+  // the stale-content bug because it looks authoritative.
+  suiteGen: 0,
 };
+
+// The panels whose contents belong to ONE suite, with the column count each
+// table needs so a placeholder row does not collapse its layout.
+const SUITE_PANELS = [
+  ["matrix-rows", 16],
+  ["runs-rows", 11],
+  ["questions-rows", 7],
+];
+
+// Called when the suite changes, BEFORE the fetch. The loaders write their
+// panels only after awaiting, so without this the previous suite's rows stay
+// on screen under the new suite's name -- indistinguishable from data that has
+// finished loading.
+function clearSuiteScopedPanels() {
+  for (const [id, cols] of SUITE_PANELS) {
+    const body = document.getElementById(id);
+    if (!body) continue;
+    body.innerHTML = `<tr><td colspan="${cols}" class="muted">Loading…</td></tr>`;
+    body.dataset.payload = "[]";
+  }
+  // Counts, chips and pagers describe the suite being left. A stale count
+  // beside a loading table is the same lie in smaller type.
+  for (const id of ["matrix-count", "matrix-diff-chips", "questions-chips", "q-page", "runs-page"]) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  }
+  for (const id of ["q-prev", "q-next", "runs-prev", "runs-next"]) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  }
+}
 
 function url(name, params = {}, query = {}) {
   let path = ENDPOINTS[name][1];
@@ -601,6 +638,10 @@ const loadMatrix = guard(async () => {
     document.getElementById("matrix-rows").dataset.payload = "[]";
     return;
   }
+  // Captured before the await: a response for a suite the user has already
+  // navigated away from must not be rendered. Dropping it silently is correct
+  // -- a newer load is in flight and will paint.
+  const gen = S.suiteGen;
   // Difficulty re-aggregates the rates, so it is server-side; everything else
   // below is a refinement over the returned rows and stays in the client.
   let body;
@@ -613,6 +654,7 @@ const loadMatrix = guard(async () => {
     if (error.message !== "signed out") matrixUnknown(error.message);
     throw error;
   }
+  if (gen !== S.suiteGen) return;
   S.matrixRows = body.rows;
   const counts = body.difficulty_counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -730,6 +772,10 @@ const openCell = guard(async (row) => {
 /* ---------------------------- runs ---------------------------- */
 const RUNS_PAGE = 50;
 const loadRuns = guard(async () => {
+  // Captured before the await: a response for a suite the user has already
+  // navigated away from must not be rendered. Dropping it silently is
+  // correct -- a newer load is in flight and will paint.
+  const gen = S.suiteGen;
   if (!S.suiteId) {
     document.getElementById("runs-rows").innerHTML = `<tr><td colspan="11">${NO_BENCH}</td></tr>`;
     document.getElementById("runs-page").textContent = "";
@@ -740,6 +786,7 @@ const loadRuns = guard(async () => {
   const runs = await api("runs", { suite_id: S.suiteId }, { query: {
     limit: RUNS_PAGE, offset: S.runsOffset,
     include_invalidated: S.showInvalidated ? "true" : "" } });
+  if (gen !== S.suiteGen) return;
   S.runsPageFull = runs.length === RUNS_PAGE;
   if (S.runsDateAsc) runs.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   document.getElementById("runs-page").textContent =
@@ -892,6 +939,10 @@ const openItem = guard(async (runId, itemId) => {
 
 /* -------------------------- questions -------------------------- */
 const loadQuestions = guard(async () => {
+  // Captured before the await: a response for a suite the user has already
+  // navigated away from must not be rendered. Dropping it silently is
+  // correct -- a newer load is in flight and will paint.
+  const gen = S.suiteGen;
   if (!S.suiteId) {
     document.getElementById("questions-chips").innerHTML = "";
     document.getElementById("questions-rows").innerHTML = `<tr><td colspan="7">${NO_BENCH}</td></tr>`;
@@ -904,6 +955,7 @@ const loadQuestions = guard(async () => {
     { query: { difficulty: S.questionsDifficulty, source: S.questionsSource,
                limit: Q_PAGE, offset: S.qOffset } });
   S.qTotal = body.total;
+  if (gen !== S.suiteGen) return;
   document.getElementById("q-page").textContent =
     `${S.qOffset + 1}–${Math.min(S.qOffset + Q_PAGE, body.total)} of ${body.total}`;
   document.getElementById("q-prev").disabled = S.qOffset === 0;
@@ -1174,6 +1226,9 @@ document.addEventListener("click", (event) => {
     S.baselineRunId = suite ? suite.baseline_run_id : null;
     S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
     S.runsOffset = 0; S.qOffset = 0; S.ritemsOffset = 0;
+    S.suiteGen += 1;
+    S.matrixRows = [];
+    clearSuiteScopedPanels();
     renderRail(); go("matrix");
     return;
   }
