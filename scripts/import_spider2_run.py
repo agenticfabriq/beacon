@@ -114,9 +114,12 @@ def result_output(row: dict[str, Any], outcome: str) -> dict[str, Any]:
 
     A function rather than a dict literal inside the import loop so the stamp
     can be tested on a payload. Inline, nothing exercised it: passing the wrong
-    key to ``column_order_for`` returns None for every case, drops the stamp
-    from every imported result, and leaves the whole suite unregradeable behind
-    a green import -- invisible to a test suite that never imports this module.
+    key to ``column_order_for`` returns None for every case and drops the stamp
+    from every imported result, behind a green import and invisible to a test
+    suite that never imports this module. A later regrade then refuses the
+    multi-column ones and silently regrades the single-column ones on whatever
+    order JSONB returns -- which is harmless only because one column has no
+    order to lose.
     """
     engine_rows = row.get("engine_rows")
     output: dict[str, Any] = {

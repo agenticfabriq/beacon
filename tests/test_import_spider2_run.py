@@ -25,9 +25,10 @@ def test_the_importer_stamps_through_the_shared_rule(
     """Reading the call site is not enough to know the right key reaches it.
 
     Passing the wrong key to `column_order_for` returns None for every case,
-    which drops the stamp from every imported result and leaves the whole
-    spider2 suite unregradeable -- behind a green import, and invisible to a
-    test suite that never imports this module.
+    dropping the stamp from every imported result -- behind a green import, and
+    invisible to a test suite that never imports this module. A regrade then
+    refuses the multi-column ones and proceeds on the single-column ones,
+    which is safe only because one column has no order to lose.
     """
     output = result_output({"engine_rows": engine_rows}, "correct")
 
@@ -50,7 +51,12 @@ def test_the_importer_carries_the_counts_and_the_engines_own_outcome() -> None:
     )
 
     assert output["sql"] == "SELECT 1"
+    # The drill-down renders `output.sql || output.answer`, so a case that
+    # carries no SQL -- a deferral, an error -- shows the answer or an empty
+    # box. Dropping this key from the record fails nothing else.
+    assert output["answer"] == "1"
     assert output["db_id"] == "local001"
     assert output["row_count"] == 1
+    assert output["engine_row_count"] == 1
     assert output["gold_row_count"] == 2
     assert output["mnemiq_outcome"] == "wrong"
