@@ -462,10 +462,21 @@ const S = {  // client state; everything else lives on the server
   // response land last and render B's rows under A's name, which is worse than
   // the stale-content bug because it looks authoritative.
   suiteGen: 0,
+  // The team equivalent. Benchmarks and settings are TEAM-scoped, so a team
+  // switch races them exactly as a suite switch raced the matrix: the loader
+  // awaits, the switch lands, and the previous team's suites paint under the
+  // new team's name.
+  teamGen: 0,
 };
 
 // The panels whose contents belong to ONE suite, with the column count each
 // table needs so a placeholder row does not collapse its layout.
+// Team-scoped, listed separately because a SUITE switch must not blank them:
+// the benchmark list is what you pick a suite FROM.
+const TEAM_PANELS = [
+  ["benchmarks-rows", 4],
+];
+
 const SUITE_PANELS = [
   ["matrix-rows", 16],
   ["runs-rows", 11],
@@ -476,6 +487,14 @@ const SUITE_PANELS = [
 // panels only after awaiting, so without this the previous suite's rows stay
 // on screen under the new suite's name -- indistinguishable from data that has
 // finished loading.
+function clearTeamScopedPanels() {
+  for (const [id, cols] of TEAM_PANELS) {
+    const body = document.getElementById(id);
+    if (!body) continue;
+    body.innerHTML = `<tr><td colspan="${cols}" class="muted">Loading…</td></tr>`;
+  }
+}
+
 function clearSuiteScopedPanels() {
   for (const [id, cols] of SUITE_PANELS) {
     const body = document.getElementById(id);
@@ -988,10 +1007,21 @@ const Q_PAGE = 50;
 
 /* -------------------------- benchmarks -------------------------- */
 const loadBenchmarks = guard(async () => {
+  // Reported as slow from use, and the run counts are why: one request per
+  // suite fetching up to 500 FULL run objects only to take `.length`. With 288
+  // runs on bird_minidev_v2 that is a large payload for a number, and it is
+  // N+1 in the number of benchmarks. A count on the suites response, or a
+  // total alongside a limit=1 page, would replace the whole Promise.all --
+  // filed as the fix rather than done here, because it is an API change.
+  //
+  // Until then, say so instead of holding a stale table.
+  const gen = S.teamGen;
+  clearTeamScopedPanels();
   S.suites = asList(await api("suites", { team_id: S.teamId }), "suites");
   const counts = await Promise.all(S.suites.map((suite) =>
     api("runs", { suite_id: suite.id }, { query: { limit: 500, include_invalidated: "true" } })
       .then((runs) => runs.length).catch(() => 0)));
+  if (gen !== S.teamGen) return;
   const bySuite = {};
   S.suites.forEach((suite, index) => { bySuite[String(suite.id)] = counts[index]; });
   document.getElementById("benchmarks-rows").innerHTML = S.suites.length ? S.suites.map((suite) =>
@@ -1299,13 +1329,13 @@ document.getElementById("bench-create-btn").addEventListener("click", guard(asyn
   loadBenchmarks(); renderRail();
 }));
 document.getElementById("set-team").addEventListener("change", guard(async (event) => {
-  S.teamId = event.target.value; S.suiteId = null; S.suites = [];
+  S.teamId = event.target.value; S.suiteId = null; S.suites = []; S.teamGen += 1;
   await bootstrapWorkspace(); loadSettings();
 }));
 document.getElementById("set-delete-team").addEventListener("click", guard(async () => {
   if (!window.confirm("Delete this team? Only an empty team can be deleted — anything it holds refuses.")) return;
   await api("deleteTeam", { team_id: S.teamId });
-  S.teamId = null; S.suiteId = null; S.suites = []; S.memberships = S.memberships;
+  S.teamId = null; S.suiteId = null; S.suites = []; S.memberships = S.memberships; S.teamGen += 1;
   await bootstrapWorkspace(); loadSettings();
 }));
 document.getElementById("set-create-team").addEventListener("click", guard(async () => {
@@ -1313,7 +1343,7 @@ document.getElementById("set-create-team").addEventListener("click", guard(async
   if (!name) return;
   const created = await api("createTeam", {}, { body: { name, description: "" } });
   document.getElementById("set-new-team").value = "";
-  S.teamId = String(created.id); S.suiteId = null; S.suites = [];
+  S.teamId = String(created.id); S.suiteId = null; S.suites = []; S.teamGen += 1;
   await bootstrapWorkspace(); loadSettings();
 }));
 document.getElementById("set-invite-btn").addEventListener("click", guard(async () => {

@@ -236,12 +236,35 @@ def _table_column_count(page: str, tbody_id: str) -> int:
     return columns
 
 
-def _suite_panels(page: str) -> list[tuple[str, int]]:
-    block = re.search(r"const SUITE_PANELS = \[(.*?)\];", page, re.S)
-    assert block, "the UI must declare its suite-scoped panels in one SUITE_PANELS block"
+def _declared_panels(page: str, block_name: str) -> list[tuple[str, int]]:
+    block = re.search(rf"const {block_name} = \[(.*?)\];", page, re.S)
+    assert block, f"the UI must declare its panels in one {block_name} block"
     entries = re.findall(r'\["([a-z-]+)",\s*(\d+)\]', block.group(1))
-    assert entries, "SUITE_PANELS must list at least one panel"
+    assert entries, f"{block_name} must list at least one panel"
     return [(name, int(width)) for name, width in entries]
+
+
+def _suite_panels(page: str) -> list[tuple[str, int]]:
+    return _declared_panels(page, "SUITE_PANELS")
+
+
+@pytest.mark.parametrize("block_name", ["SUITE_PANELS", "TEAM_PANELS"])
+def test_every_declared_panel_placeholder_spans_its_whole_table(block_name: str) -> None:
+    """Both panel groups, because the drift does not care which list it is in.
+
+    TEAM_PANELS was added for the benchmarks table after that view was
+    reported slow with no loading state. It is a FIFTH function writing a
+    table body at a hardcoded width, and the invariant has to reach it for the
+    same reason it had to reach the fourth.
+    """
+    page = _page()
+
+    for tbody_id, declared in _declared_panels(page, block_name):
+        actual = _table_column_count(page, tbody_id)
+        assert declared == actual, (
+            f"{block_name} declares colspan {declared} for {tbody_id}, "
+            f"whose table has {actual} columns"
+        )
 
 
 def test_every_suite_panel_placeholder_spans_its_whole_table() -> None:
@@ -303,3 +326,48 @@ def test_the_suite_switch_bumps_the_generation_and_clears_the_panels() -> None:
     assert handler.group(1).index("clearSuiteScopedPanels();") < handler.group(1).index(
         'go("matrix")'
     ), "the panels must be cleared before the view is shown, or the old rows paint first"
+
+
+def test_the_benchmarks_loader_says_it_is_loading_and_drops_a_stale_response() -> None:
+    """Reported from use: the benchmarks view sat blank-then-populated slowly.
+
+    It is slow for a findable reason -- one request per suite fetching up to
+    500 FULL run objects only to take `.length`, N+1 in the number of
+    benchmarks -- but a loader that awaits before writing must say so
+    regardless. And it is TEAM-scoped, so a team switch races it exactly as a
+    suite switch raced the matrix: without a generation token the previous
+    team's suites paint under the new team's name.
+    """
+    page = _page()
+    body = re.search(r"const loadBenchmarks = guard\(async \(\) => \{(.*?)\n\}\);", page, re.S)
+    assert body, "no loadBenchmarks found"
+    text = body.group(1)
+
+    assert "clearTeamScopedPanels();" in text
+    assert "const gen = S.teamGen;" in text
+    assert "if (gen !== S.teamGen) return;" in text
+    assert text.index("clearTeamScopedPanels();") < text.index("await api("), (
+        "the panel must be blanked BEFORE the await, or the stale table stays up"
+    )
+    assert text.index("await api(") < text.index("if (gen !== S.teamGen) return;"), (
+        "checking the generation before awaiting cannot detect a switch"
+    )
+
+
+def test_every_team_switch_bumps_the_team_generation() -> None:
+    """Pinned per site: adding a fourth switch without the bump fails here.
+
+    The initial resolution and the route restore are deliberately excluded --
+    nothing is on screen yet at those points, so there is no stale panel to
+    drop a response against.
+    """
+    page = _page()
+    switches = [
+        line for line in page.splitlines() if "S.teamId = " in line and "S.suites = []" in line
+    ]
+    assert len(switches) == 3, f"expected 3 interactive team switches, found {len(switches)}"
+
+    for line in switches:
+        assert "S.teamGen += 1;" in line, (
+            f"team switch does not bump the generation: {line.strip()}"
+        )
