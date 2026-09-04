@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 import numpy as np
@@ -101,6 +102,26 @@ class _PerKEntry(TypedDict):
     # answer "no effect" for an empty one -- (0.0, 0.0, 0.0) and p=1.0. Without
     # this, a delta of zero over nothing is indistinguishable from a real tie.
     n_compared: int
+
+
+def per_k_count(entry: object, field_name: str) -> int | None:
+    """Read a COUNT out of a per-k attribution entry, as an int or as absent.
+
+    Public and shared because "what an absent count means" must be answered
+    once. A float reader with a 0.0 fallback -- the obvious thing to reach for,
+    since the deltas beside it are floats -- gets both halves wrong: the count
+    prints as ``2.0`` next to integer columns, and a missing one renders as
+    ``0.0``, which is also the value that means nothing was compared. That is
+    the collapse these counts exist to prevent.
+
+    ``bool`` is rejected: it passes ``isinstance(value, int)`` and would read
+    ``True`` as a sample of one.
+    """
+    if isinstance(entry, Mapping):
+        value = entry.get(field_name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
 
 
 class AttributionEngine:

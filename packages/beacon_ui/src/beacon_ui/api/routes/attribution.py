@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID  # noqa: TC003
 
+from beacon_ablation import per_k_count
 from beacon_iam.permissions import Permission
 from beacon_storage.models.tenancy import User  # noqa: TC002
 from beacon_storage.repository.attributions import AttributionRepo
@@ -57,18 +58,15 @@ def _has_pass_at_3(row: Attribution) -> bool:
 def _per_k_count(row: Attribution, key: str, column: int | None) -> int | None:
     """A count from the pass@3 entry, falling back to the promoted column.
 
-    The JSONB entry is preferred for the same reason the deltas are read from
-    there: it is the value computed for THIS k. The column is the headline
-    promotion, and either may be absent on a row written before the counts
-    existed -- which stays None rather than becoming 0, since 0 would assert
-    that nothing was excluded.
+    The reading itself is ``beacon_ablation.per_k_count``, shared with the
+    sweep reports so that "what an absent count means" is answered in one
+    place. This adds the column fallback: the JSONB entry is preferred for the
+    same reason the deltas are read from there -- it is the value computed for
+    THIS k -- and either may be absent on a row written before the counts
+    existed, which stays None rather than becoming 0.
     """
-    entry = row.delta_pass_at_k.get("3")
-    if isinstance(entry, Mapping):
-        value = entry.get(key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
-    return column
+    from_entry = per_k_count(row.delta_pass_at_k.get("3"), key)
+    return column if from_entry is None else from_entry
 
 
 def _layer_out(row: Attribution) -> AttributionLayerOut:
