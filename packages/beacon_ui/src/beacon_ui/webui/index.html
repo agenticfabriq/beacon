@@ -945,13 +945,20 @@ const openItem = guard(async (runId, itemId) => {
         ${sampleTable(evidence.gold_columns, evidence.gold_sample)}
       </div>
     </div>` +
-    verdicts.map((v) =>
-      // The grader VERSION belongs beside the reading it produced. Graders are
-      // versioned and append -- a result can hold readings from several -- so
-      // "got_facts true" is not a fact about the row without it. The API has
-      // always sent it; this panel used to drop it, which made two readings of
-      // the same metric at different versions render identically.
-      `<p class="sub">${esc(v.grader)}${v.grader_version ? ` <span class="dim">${esc(v.grader_version)}</span>` : ""}${v.metric ? ` [${esc(v.metric)}]` : ""}: ${esc(v.justification || "")}</p>`).join("");
+    verdicts.map((v) => {
+      // Three things make a reading attributable: WHO graded, at WHAT VERSION,
+      // and WHAT IT CONCLUDED. Verdicts are append-only and versioned, so a
+      // result can hold several readings of one metric from several versions.
+      // This line used to render grader, metric and justification only, so two
+      // readings that DISAGREE were distinguishable solely by whatever their
+      // justifications happened to say -- `passed` and `value` are both on the
+      // verdict and neither reached the screen.
+      const verdict = v.passed === true ? "PASS" : v.passed === false ? "FAIL" : null;
+      // Absent is not zero: a grader that emitted no number has nothing here.
+      const value = v.value === null || v.value === undefined ? null : `value ${v.value}`;
+      const reading = [verdict, value].filter(Boolean).join(", ");
+      return `<p class="sub">${esc(v.grader)}${v.grader_version ? ` <span class="dim">${esc(v.grader_version)}</span>` : ""}${v.metric ? ` [${esc(v.metric)}]` : ""}${reading ? ` <b>${esc(reading)}</b>` : ""}: ${esc(v.justification || "")}</p>`;
+    }).join("");
   const anchor = document.querySelector(`#run-items tr[data-item="${itemId}"]`);
   if (!anchor) return;
   const detailRow = document.createElement("tr");

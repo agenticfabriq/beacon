@@ -337,3 +337,59 @@ def test_a_run_in_another_team_is_not_readable(
     )
 
     assert response.status_code in (403, 404)
+
+
+def test_a_metrics_readings_come_back_newest_version_first(
+    api_client: TestClient, world: _World, graded_run: GradedRun, session: Session
+) -> None:
+    """Which version the drill-down shows must match which the matrix counts.
+
+    Verdicts are append-only and versioned, so a regrade leaves a result
+    holding several readings of one metric. The drill-down picks its got-facts
+    reading with a bare `.find()`, and the matrix defines the current reading
+    as newest-by-id -- so an unordered query lets the two surfaces disagree
+    about what the same result currently reads, with nothing on screen saying
+    which version either came from.
+
+    Ordering is by (metric, id DESC), and BOTH halves are load-bearing. A
+    global `id DESC` would also reorder the metrics against each other --
+    `exact_match` and `got_facts` from one grading run differ only by
+    insertion id -- which breaks every caller reading `verdicts[0]`; that is
+    not hypothetical, it broke `test_wrong_rows_grade_fail_with_named_mismatch`
+    when tried.
+    """
+    from beacon_storage.models.runs import Result
+    from sqlalchemy import select
+
+    item_id = graded_run.failing_item_id
+    result = session.scalars(
+        select(Result).where(Result.run_id == UUID(graded_run.run_id), Result.item_id == item_id)
+    ).one()
+
+    # A later regrade of the SAME metric, at a newer version.
+    VerdictRepo(session).create(
+        team_id=world.acme_team_id,
+        result_id=result.id,
+        grader="execution_grounded_sql",
+        grader_version="v9",
+        criterion="correctness",
+        metric="exact_match",
+        bool_value=True,
+        value=1.0,
+        justification="regraded at v9",
+        raw_output={},
+    )
+    session.commit()
+
+    body = api_client.get(
+        f"/v1/runs/{graded_run.run_id}/results/{item_id}", headers=_headers(world)
+    ).json()
+
+    exact = [v for v in body["verdicts"] if v["metric"] == "exact_match"]
+    assert [v["grader_version"] for v in exact] == ["v9", "v1"], (
+        "the newest reading of a metric must come first, or the panel can show "
+        "an older version than the matrix counts"
+    )
+    # Metric grouping preserved: the first verdict overall is still exact_match,
+    # which is what callers reading verdicts[0] rely on.
+    assert body["verdicts"][0]["metric"] == "exact_match"

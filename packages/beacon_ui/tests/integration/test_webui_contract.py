@@ -399,19 +399,46 @@ def test_the_benchmarks_loader_makes_ONE_request() -> None:
     assert "run_count" in text
 
 
-def test_the_drilldown_shows_which_GRADER_VERSION_produced_each_reading() -> None:
-    """A reading without its grader version is not a fact about the row.
+def _verdict_line(page: str) -> str:
+    """The drill-down's per-verdict template, comments removed.
+
+    Comments are stripped because this file has already been fooled once by a
+    deleted line surviving as a comment, and the verdict block carries several.
+    """
+    start = page.index("verdicts.map((v) =>")
+    end = page.index('}).join("");', start)
+    body = page[start:end]
+    return "\n".join(
+        segment for segment in body.split("\n") if not segment.strip().startswith("//")
+    )
+
+
+def test_the_drilldown_attributes_each_reading_to_a_version_and_a_conclusion() -> None:
+    """WHO graded, at WHAT version, and WHAT it concluded -- all three.
 
     Verdicts are append-only and versioned, unique per
     `(result, metric, grader, version)`, so one result can hold several
-    readings of the same metric from different graders. The API has always
-    sent `grader_version` on every verdict; this panel dropped it, which
-    rendered two readings that disagree -- one per version -- as identical
-    lines. That is the reading-provenance problem the grading-provenance note
-    is about, in the one surface where the provenance was already on the wire.
-    """
-    page = _page()
+    readings of the same metric. The panel used to render grader, metric and
+    justification only: `grader_version`, `passed` and `value` are all on
+    `VerdictOut` and none reached the screen, so two readings that DISAGREE
+    were distinguishable solely by whatever their justifications said.
 
-    assert "v.grader_version" in page, (
-        "the verdict line must render the grader version it came from"
+    Scoped to the interpolated template rather than searched page-wide,
+    because an unscoped substring passes on a mutation that keeps the ternary
+    and interpolates something else inside it -- and comments are stripped
+    first, since a deleted line left behind as a comment has passed a test in
+    this file before.
+    """
+    line = _verdict_line(_page())
+    template = line[line.index("return `") :]
+
+    for field in ("esc(v.grader)", "esc(v.grader_version)"):
+        assert field in template, f"the verdict line must render {field}"
+
+    # `passed` and `value` reach the screen through `reading`, so assert the
+    # INTERPOLATION, not the mention. Reading the consts alone passes on a
+    # mutation that computes the conclusion and then drops it from the output.
+    assert "v.passed" in line and "v.value" in line, "the conclusion must be derived"
+    assert "${reading" in template, (
+        "the derived conclusion must be interpolated into the rendered line"
     )

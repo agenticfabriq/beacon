@@ -95,7 +95,24 @@ def _rows_for_run(session: Session, run_id: UUID) -> list[tuple[Result, EvalItem
 def _verdicts_by_result(session: Session, result_ids: list[UUID]) -> dict[UUID, list[Verdict]]:
     if not result_ids:
         return {}
-    rows = session.scalars(sa.select(Verdict).where(Verdict.result_id.in_(result_ids))).all()
+    # Grouped by metric, NEWEST VERSION FIRST WITHIN each metric -- both halves
+    # matter and a global `id.desc()` gets it wrong. Verdicts are append-only
+    # and versioned, so a result can hold several readings of one metric, and
+    # the drill-down picks its got-facts reading with a bare `.find()`:
+    # unordered, that is whatever the planner returned, which can be an OLDER
+    # version than the matrix shows for the same result, since the matrix
+    # defines the current reading as newest-by-id.
+    #
+    # But ordering by id alone also reorders the METRICS against each other --
+    # `exact_match` and `got_facts` from one grading run differ only by
+    # insertion id -- which scrambles the presentation for no reason and breaks
+    # any caller reading `verdicts[0]`. Sorting by metric first keeps that
+    # stable and puts the version ordering where it belongs.
+    rows = session.scalars(
+        sa.select(Verdict)
+        .where(Verdict.result_id.in_(result_ids))
+        .order_by(Verdict.result_id, Verdict.metric, Verdict.id.desc())
+    ).all()
     grouped: dict[UUID, list[Verdict]] = {}
     for verdict in rows:
         grouped.setdefault(verdict.result_id, []).append(verdict)
