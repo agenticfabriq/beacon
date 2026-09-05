@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from scripts.regrade_history import (
-    _current_pass_by_run,
     _is_uuid,
     _per_run_delta,
+    _result_counts_by_run,
     changes_from_this_event_onward,
     prior_pass_counts,
 )
@@ -190,7 +190,7 @@ def test_the_query_is_never_built_with_the_unknown_run_bucket() -> None:
 
     session = _StubSession()
     real = "06a99a7c-0000-7000-8000-000000000000"
-    _current_pass_by_run(session, [real, "?"])  # type: ignore[arg-type]
+    _result_counts_by_run(session, [real, "?"])  # type: ignore[arg-type]
 
     assert session.statement is not None, "expected a query to be built"
     params = session.statement.compile().params  # type: ignore[attr-defined]
@@ -210,5 +210,45 @@ def test_no_query_is_issued_when_nothing_is_queryable() -> None:
             raise AssertionError("should not query")
 
     session = _StubSession()
-    assert _current_pass_by_run(session, ["?", "nope"]) == {}  # type: ignore[arg-type]
+    assert _result_counts_by_run(session, ["?", "nope"]) == {}  # type: ignore[arg-type]
     assert session.calls == 0
+
+
+def test_an_all_fail_run_is_told_apart_from_a_run_with_no_results() -> None:
+    """Both are absent from a PASS-only count, and only one means zero.
+
+    A run whose results are all FAIL has a real 0 PASS today, so its recovery
+    is real. A run whose results were cascaded away or reset to un-graded has
+    no basis for a number at all -- `outcome_changes` is JSONB with no FK to
+    runs, so the event outlives them. Reading absence as 0 invents a recovery
+    for the second; reading it as unknown throws away the first.
+    """
+
+    class _Result:
+        def __init__(self, rows: list[tuple[str, int, int]]) -> None:
+            self._rows = rows
+
+        def all(self) -> list[tuple[str, int, int]]:
+            return self._rows
+
+    class _StubSession:
+        def __init__(self, rows: list[tuple[str, int, int]]) -> None:
+            self._rows = rows
+
+        def execute(self, statement: object) -> _Result:
+            return _Result(self._rows)
+
+    all_fail = "06a99a7c-0000-7000-8000-000000000000"
+    gone = "06a99a7d-0000-7000-8000-000000000000"
+
+    # The all-FAIL run has results and no passes; the vanished one has no row.
+    counts = _result_counts_by_run(
+        _StubSession([(all_fail, 12, 0)]),  # type: ignore[arg-type]
+        [all_fail, gone],
+    )
+
+    assert counts[all_fail] == {"results": 12, "passes": 0}
+    assert gone not in counts, (
+        "a run with no result rows must be absent, so the caller reports it "
+        "unknown rather than inventing zero"
+    )

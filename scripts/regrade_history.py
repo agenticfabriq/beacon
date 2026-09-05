@@ -110,24 +110,40 @@ def prior_pass_counts(
     return out
 
 
-def _current_pass_by_run(session: Session, run_ids: list[str]) -> dict[str, int]:
-    """Current PASS per run, for the run ids that are actually ids.
+def _result_counts_by_run(session: Session, run_ids: list[str]) -> dict[str, dict[str, int]]:
+    """Per run: how many results it has, and how many of them are PASS.
+
+    BOTH counts, because a PASS-only query cannot tell an all-FAIL run from a
+    run with no results at all -- and it returns no row for either. Reading
+    that absence as "zero PASS" prints a fabricated recovery for a run whose
+    results were cascaded away (``Result.run_id`` is ON DELETE CASCADE) or
+    reset to un-graded (``Result.outcome`` is nullable), and the event's own
+    run ids are JSONB with no foreign key to keep up. Reading it as "unknown"
+    instead threw away the genuine all-FAIL recovery. The total distinguishes
+    them.
 
     `_per_run_delta` buckets a change with no `run_id` under "?" so the
-    accounting cannot silently lose it. `Result.run_id` is a uuid column, so
-    passing that bucket into an IN list makes the driver reject the whole
-    query and the report dies instead of printing. Filtered here rather than
-    at the bucket, because the bucket is the thing keeping it visible.
+    accounting cannot lose it. `Result.run_id` is a uuid column, so that
+    bucket is filtered here rather than at the bucket -- Postgres rejects the
+    whole IN list over one non-uuid, and the report would die instead of
+    printing.
     """
     run_ids = [rid for rid in run_ids if _is_uuid(rid)]
     if not run_ids:
         return {}
     rows = session.execute(
-        sa.select(Result.run_id, sa.func.count())
-        .where(Result.run_id.in_(run_ids), Result.outcome == "PASS")
+        sa.select(
+            Result.run_id,
+            sa.func.count(),
+            sa.func.count().filter(Result.outcome == "PASS"),
+        )
+        .where(Result.run_id.in_(run_ids))
         .group_by(Result.run_id)
     ).all()
-    return {str(run_id): int(n) for run_id, n in rows}
+    return {
+        str(run_id): {"results": int(total), "passes": int(passes)}
+        for run_id, total, passes in rows
+    }
 
 
 def main() -> int:
@@ -183,7 +199,8 @@ def main() -> int:
                 )
                 later = len(onward) - 1
 
-                current = _current_pass_by_run(session, list(delta))
+                counts = _result_counts_by_run(session, list(delta))
+                current = {run: c["passes"] for run, c in counts.items()}
                 before_counts = prior_pass_counts(current, onward)
                 if later:
                     print(
@@ -195,8 +212,8 @@ def main() -> int:
                     f"  {'run':36s} {'PASS now':>9s} {'+PASS':>6s} {'-PASS':>6s} "
                     f"{'PASS before':>12s}"
                 )
-                for run, counts in sorted(delta.items()):
-                    gained, lost = counts["gained_pass"], counts["lost_pass"]
+                for run, moved in sorted(delta.items()):
+                    gained, lost = moved["gained_pass"], moved["lost_pass"]
                     # A real run absent from `current` has ZERO PASS today --
                     # the query groups over outcome == PASS, so an all-FAIL run
                     # has no row. Reading that as unknown discarded a recovery
@@ -204,19 +221,26 @@ def main() -> int:
                     # "?" where the truth was 0 and 1. Only the "?" bucket,
                     # which is a change carrying no run id, is genuinely
                     # unknown: there is no run to count.
-                    known = _is_uuid(run)
+                    # Known only if the run still HAS results. An all-FAIL
+                    # run is absent from the PASS counts and 0 is right;
+                    # a run whose results were cascaded away is absent for a
+                    # different reason and 0 would be invented.
+                    known = _is_uuid(run) and run in counts
                     now = current.get(run, 0) if known else None
                     before = before_counts.get(run) if known else None
                     now_s = "?" if now is None else str(now)
                     before_s = "?" if before is None else str(before)
                     print(f"  {run:36s} {now_s:>9s} {gained:>6d} {lost:>6d} {before_s:>12s}")
-                total_gained = sum(c["gained_pass"] for c in delta.values())
-                total_lost = sum(c["lost_pass"] for c in delta.values())
+                total_gained = sum(d["gained_pass"] for d in delta.values())
+                total_lost = sum(d["lost_pass"] for d in delta.values())
                 print(f"\n  {'TOTAL':36s} {'':>9s} {total_gained:>6d} {total_lost:>6d}")
-                if any(run == "?" for run in delta):
+                unknown = [run for run in sorted(delta) if not (_is_uuid(run) and run in counts)]
+                if unknown:
                     print(
-                        "\n  NOTE: some changes carry no run_id and are bucketed as '?' -- "
-                        "counted above, but no current count exists to reverse them against."
+                        f"\n  NOTE: {len(unknown)} run(s) show '?' -- either the change "
+                        "carries no run_id, or the run has no results now (deleted, or "
+                        "reset to un-graded). Nothing to reverse against, so no number "
+                        "is invented for them."
                     )
                 return 0
 
