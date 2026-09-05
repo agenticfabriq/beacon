@@ -456,6 +456,4 @@ def test_the_drilldown_attributes_each_reading_to_a_version_and_a_conclusion() -
     # And that the mapping REACHES the output. The literals above live in a
     # const, so dropping `verdict` from the array feeding `reading` renders no
     # conclusion at all while every other assertion here stays green.
-    assert "[verdict, value]" in line, (
-        "the PASS/FAIL reading must feed the interpolated conclusion"
-    )
+    assert "[verdict, value]" in line, "the PASS/FAIL reading must feed the interpolated conclusion"

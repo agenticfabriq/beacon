@@ -25,6 +25,7 @@ from beacon_runner.types import EvalItem as RunnerItem
 from beacon_runner.types import ExecutionResult, ExecutionStep
 from beacon_storage.db import make_engine, make_session_factory, session_scope
 from beacon_storage.models.eval_items import EvalItem
+from beacon_storage.models.regrade_events import RegradeEvent
 from beacon_storage.models.runs import Result, Run, Verdict, VerdictOutcome
 from beacon_storage.models.suites import Suite
 from beacon_storage.repository.verdicts import VerdictRepo
@@ -105,6 +106,12 @@ def main() -> int:
         action="store_true",
         help="report what would change, then roll back and write nothing",
     )
+    parser.add_argument(
+        "--reason",
+        help="why this regrade is being run, recorded on the event "
+        "(e.g. 'B74 headline wiring'). Free text: the useful version is "
+        "the one no enum would have anticipated.",
+    )
     args = parser.parse_args()
 
     dsn = args.database_url or os.environ.get("DATABASE_URL")
@@ -146,6 +153,10 @@ def main() -> int:
             verdict_repo = VerdictRepo(session)
             graded = skipped = flipped = orderless = current = 0
             rederived = 0
+            # One entry per outcome that MOVES, with the value it moved
+            # from. That before-value is what turns recovery from a
+            # re-derivation into arithmetic.
+            changes: list[dict[str, Any]] = []
             true_counts: dict[str, int] = {}
             for run in runs:
                 for result in session.scalars(sa.select(Result).where(Result.run_id == run.id)):
@@ -204,6 +215,16 @@ def main() -> int:
                             continue
                         derived = VerdictOutcome.PASS if stored.bool_value else VerdictOutcome.FAIL
                         if str(result.outcome) != derived.value:
+                            changes.append(
+                                {
+                                    "result_id": str(result.id),
+                                    "run_id": str(run.id),
+                                    "item_id": str(result.item_id),
+                                    "before": str(result.outcome),
+                                    "after": derived.value,
+                                    "source": "rederived_from_stored_verdict",
+                                }
+                            )
                             result.outcome = derived
                             flipped += 1
                             rederived += 1
@@ -261,6 +282,16 @@ def main() -> int:
                             VerdictOutcome.PASS if by_metric.get(headline) else VerdictOutcome.FAIL
                         )
                         if str(result.outcome) != derived.value:
+                            changes.append(
+                                {
+                                    "result_id": str(result.id),
+                                    "run_id": str(run.id),
+                                    "item_id": str(result.item_id),
+                                    "before": str(result.outcome),
+                                    "after": derived.value,
+                                    "source": "graded_at_this_version",
+                                }
+                            )
                             result.outcome = derived
                             flipped += 1
             session.flush()
@@ -280,6 +311,37 @@ def main() -> int:
                 f"({rederived} of them from a verdict already at this version, "
                 f"where only the derivation was stale)"
             )
+            # The record goes in the SAME transaction as the outcomes it
+            # describes, so an event exists exactly when the change did. On a
+            # dry run the scope rolls back and takes this with it, which is
+            # right: nothing moved, so there is nothing to explain.
+            #
+            # Written even when nothing flipped. "I ran the regrade and it
+            # changed nothing" is a fact worth having -- without it, silence
+            # is indistinguishable from never having run.
+            event = RegradeEvent(
+                suite_id=suite.id,
+                suite_name=suite.name,
+                grader=grader.name,
+                grader_version=grader.version,
+                headline_metric=headline,
+                n_runs=len(runs),
+                n_graded=graded,
+                n_already_current=current,
+                n_skipped=skipped,
+                n_refused=orderless,
+                n_flipped=flipped,
+                outcome_changes=changes,
+                reason=args.reason,
+            )
+            session.add(event)
+            session.flush()
+            if not args.dry_run:
+                print(f"recorded  event {event.id}  (reason: {args.reason or 'none given'})")
+                print(
+                    "          look it up later with: DATABASE_URL=... uv run "
+                    f"python scripts/regrade_history.py --suite {suite.name}"
+                )
             if args.dry_run:
                 # Raised INSIDE session_scope, whose except branch rolls back.
                 # Returning early would commit: the scope commits on success,

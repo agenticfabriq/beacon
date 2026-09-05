@@ -236,3 +236,77 @@ def test_which_evidence_has_an_unrecoverable_column_order(
     from scripts.regrade_suite import rows_have_unrecoverable_column_order
 
     assert rows_have_unrecoverable_column_order(output) is refused, why
+
+
+def test_the_regrade_event_is_written_INSIDE_the_rolled_back_scope() -> None:
+    """A dry run must record nothing, and that is a placement property.
+
+    `session_scope` commits on success and rolls back on exception, and a dry
+    run leaves by raising `_DryRun`. So the event write has to sit inside that
+    `with` block: moved below the `except`, a dry run would record an event
+    describing outcomes it had just rolled back -- a durable claim that a
+    number moved when it did not, in the one table whose purpose is being
+    trustworthy about exactly that.
+
+    Structural because reproducing it needs a database, three grader versions
+    and a live corpus. What it pins is containment, which is the whole risk:
+    the write is correct anywhere inside the scope and wrong anywhere outside.
+    """
+    import ast
+
+    source = (Path(__file__).resolve().parents[1] / "scripts" / "regrade_suite.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+
+    scopes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.With)
+        and any(
+            isinstance(item.context_expr, ast.Call)
+            and getattr(item.context_expr.func, "id", None) == "session_scope"
+            for item in node.items
+        )
+    ]
+    assert len(scopes) == 1, "expected exactly one session_scope block in the regrade"
+    inside = ast.dump(scopes[0])
+
+    assert "RegradeEvent" in inside, (
+        "the event must be constructed inside the scope that rolls back, or a "
+        "dry run records a change it reverted"
+    )
+    assert "_DryRun" in inside, "the dry-run signal is raised from inside the same scope"
+
+    # And CONSTRUCTED nowhere else: a second write outside the scope would
+    # survive the rollback. Real containment by node identity -- the first
+    # version of this diffed module bodies, which cannot work, because the
+    # scope is nested inside `main` and so is never in `tree.body`.
+    contained = {id(node) for node in ast.walk(scopes[0])}
+    constructions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "RegradeEvent"
+    ]
+    assert constructions, "expected the event to be constructed somewhere"
+    assert all(id(node) in contained for node in constructions), (
+        "every RegradeEvent construction must be inside the rolled-back scope"
+    )
+
+    # The WRITE, not just the construction. `session_scope` commits and then
+    # CLOSES on exit, so a `session.add` below the block is discarded in
+    # silence -- no event recorded, no error, the exact inverse of "an event
+    # exists when the change did". Checking only the constructor left that
+    # one-line move green.
+    adds = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add"
+        and any(getattr(arg, "id", None) == "event" for arg in node.args)
+    ]
+    assert adds, "expected session.add(event) somewhere"
+    assert all(id(node) in contained for node in adds), (
+        "session.add(event) must be inside the scope that commits it"
+    )

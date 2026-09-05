@@ -2,6 +2,7 @@ from beacon_storage.models.attribution import Attribution
 from beacon_storage.models.base import Base, IdMixin, TimestampsMixin
 from beacon_storage.models.dataset_loads import DatasetLoad
 from beacon_storage.models.eval_items import EvalItem, EvalItemTier
+from beacon_storage.models.regrade_events import RegradeEvent
 from beacon_storage.models.runs import (
     HarnessMode,
     Result,
@@ -28,6 +29,7 @@ __all__ = [
     "HarnessMode",
     "IdMixin",
     "Membership",
+    "RegradeEvent",
     "Result",
     "ResultStatus",
     "Role",
