@@ -96,10 +96,15 @@ class Derivation(Base, IdMixin, TimestampsMixin):
 class ResultOutcome(Base, IdMixin):
     """One outcome a result held, under one derivation.
 
-    Append-only, and written ON CHANGE -- including the first write, which is
-    a change from nothing. Recording every derivation for every result would
-    cost 127k rows per regrade for a value that is stable almost everywhere;
-    on change, the bird regrade of 2026-09-04 would have written 298.
+    Append-only, and written ON CHANGE -- where "change" means the outcome OR
+    the derivation moved, and the first write is a change from nothing.
+
+    Sizing: the bird regrade of 2026-09-04 touched 7,747 results and flipped
+    298, so it would write 7,747 rows here. An earlier version of this comment
+    said 298, which described a flip-only rule this deliberately does not have
+    -- re-attributing only the movers leaves everything else crediting the
+    previous derivation. What on-change buys is that a REPEAT regrade under the
+    same derivation writes nothing.
 
     Reading "the outcome at derivation D" is therefore the latest row at or
     before D, not a direct lookup. There is deliberately NO unique constraint

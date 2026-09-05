@@ -12,7 +12,6 @@ suite untouched.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -39,7 +38,13 @@ pytestmark = pytest.mark.e2e
 _SUITE = "regrade_history_suite"
 
 
-def _seed(session: Session, *, stored_outcome: VerdictOutcome, verdict_passes: bool) -> None:
+def _seed(
+    session: Session,
+    *,
+    stored_outcome: VerdictOutcome,
+    verdict_passes: bool,
+    with_current_verdict: bool = True,
+) -> None:
     """One result whose stored outcome may or may not match its verdict.
 
     The verdict is written at the CURRENT grader version and headline metric,
@@ -97,7 +102,9 @@ def _seed(session: Session, *, stored_outcome: VerdictOutcome, verdict_passes: b
         item_id=str(item.item_id),
         attempt_idx=0,
         output={"rows": [[1]], "columns": ["a"]},
-        output_kind="rows",
+        # "sql": ResultSetMatchGrader.applicable requires it, so "rows" made
+        # the grader inapplicable and the freshly-graded branch never ran.
+        output_kind="sql",
         tokens_input=None,
         tokens_output=None,
         runtime_ms=1,
@@ -105,18 +112,19 @@ def _seed(session: Session, *, stored_outcome: VerdictOutcome, verdict_passes: b
         outcome=stored_outcome,
         error=None,
     )
-    VerdictRepo(session).create(
-        team_id=team.id,
-        result_id=result.id,
-        grader=grader.name,
-        grader_version=grader.version,
-        metric="exact_match",
-        criterion="correctness",
-        bool_value=verdict_passes,
-        value=1.0 if verdict_passes else 0.0,
-        justification="seeded",
-        raw_output={},
-    )
+    if with_current_verdict:
+        VerdictRepo(session).create(
+            team_id=team.id,
+            result_id=result.id,
+            grader=grader.name,
+            grader_version=grader.version,
+            metric="exact_match",
+            criterion="correctness",
+            bool_value=verdict_passes,
+            value=1.0 if verdict_passes else 0.0,
+            justification="seeded",
+            raw_output={},
+        )
     session.commit()
 
 
@@ -173,4 +181,37 @@ def test_a_second_regrade_records_nothing_new(session: Session, db_url: str) -> 
     assert len(list(session.scalars(sa.select(ResultOutcome)))) == 1, (
         "an unchanged outcome under an unchanged derivation must not append"
     )
-    _ = os.environ  # the script reads DATABASE_URL only as a fallback
+
+
+def test_the_freshly_graded_branch_also_attributes_every_result(
+    session: Session, db_url: str
+) -> None:
+    """The OTHER record call, which the first three tests never reached.
+
+    They all seeded a verdict at the current grader version, so the regrade
+    took its already-current branch and `continue`d -- the freshly-graded path
+    was never entered, and moving ITS record call inside the flip check
+    reproduced the round-1 defect with every test green.
+
+    Seeded with no verdict at all, so the grader runs for real. The stored
+    outcome already agrees with what it will conclude, so nothing flips and the
+    attribution is the only thing being asserted.
+    """
+    _seed(
+        session,
+        stored_outcome=VerdictOutcome.PASS,
+        verdict_passes=True,
+        with_current_verdict=False,
+    )
+
+    assert _run_regrade(db_url) == 0
+
+    rows = list(session.scalars(sa.select(ResultOutcome)))
+    assert len(rows) == 1, (
+        "a freshly graded result whose outcome does not move must still be "
+        "attributed to the derivation that produced it"
+    )
+    derivation = session.get(Derivation, rows[0].derivation_id)
+    assert derivation is not None
+    assert derivation.metric == "exact_match"
+    assert derivation.grader_version == ResultSetMatchGrader().version

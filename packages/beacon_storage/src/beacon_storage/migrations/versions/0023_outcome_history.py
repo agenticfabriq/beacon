@@ -34,11 +34,22 @@ execution verdict and has none to name -- requiring all three would crash
 ingest on that grader, which is reachable. NULLS NOT DISTINCT (Postgres
 15+) makes that collapse to one row rather than a fresh one per insert.
 
-``result_outcomes`` is written ON CHANGE, including the first write, which is
-a change from nothing. Recording every derivation for every result would cost
-127,401 rows per regrade for a value that is stable almost everywhere; on
-change, the bird regrade would have written 298. So reading "the outcome at
-derivation D" is the latest row at or before D, not a point lookup.
+``result_outcomes`` is written ON CHANGE, where "change" means the outcome OR
+the derivation moved -- including the first write, which is a change from
+nothing.
+
+Sizing, correctly: the bird regrade of 2026-09-04 touched 7,747 results and
+298 of them FLIPPED, so it would write **7,747** rows here, not 298. The
+earlier figure in this docstring said 298 and was 26x low, because it
+described a flip-only rule the code deliberately does not have: a result whose
+outcome held while the DERIVATION changed still has to be re-attributed, or
+its history keeps crediting the previous rule and a derivation filter reads
+298 of 7,747. What on-change does buy is that a REPEAT regrade under the same
+derivation writes nothing, and that steady-state ingest writes one row per
+result rather than one per result per derivation.
+
+So reading "the outcome at derivation D" is the latest row at or before D, not
+a point lookup.
 
 There is deliberately NO unique constraint on ``(result_id, derivation_id)``.
 A re-push regrades the same result under the same derivation against

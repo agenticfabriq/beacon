@@ -106,12 +106,18 @@ def _seed_team_with_history(session: Session, *, who: str) -> tuple[UUID, UUID]:
 def test_outcome_history_is_not_readable_across_teams(engine: Engine) -> None:
     """Behavioural, not textual: the rows are queried as each user.
 
-    A structural check that a policy EXISTS passes on `USING (true)`, and a
-    text check for the right substrings passes on a predicate with
-    `WHERE m.user_id = current_user_id()` deleted -- which still mentions
-    team_id, memberships and current_user_id while letting anyone holding any
-    membership read every team's history. Only reading rows as a user catches
-    that, which is why `runs` and `suites` are tested this way.
+    What this DOES catch is a policy that stops isolating -- `USING (true)`,
+    or one scoped on the wrong column -- which a structural "a policy exists"
+    check and a substring check both pass. That is why `runs` and `suites` are
+    tested this way.
+
+    What it does NOT catch is deleting `m.user_id = current_user_id()` from
+    the predicate, and saying so here matters: measured, alice still sees 1
+    and bob 1, because `memberships` is itself under FORCE RLS so the subquery
+    only ever sees the caller's own rows. A maintainer who deletes that clause
+    and sees green should conclude the clause is redundant defence in depth --
+    which it is -- and NOT that this test is broken. See the sibling test for
+    the coupling that actually carries the isolation.
     """
     factory = make_session_factory(engine)
 
@@ -172,3 +178,30 @@ def test_memberships_rls_is_load_bearing_for_this_table(engine: Engine) -> None:
         "memberships must stay under enforced RLS: result_outcomes' policy "
         f"scopes through it (rls={enabled} forced={forced} policies={policies})"
     )
+
+    # The FLAGS are not enough, and checking only them was the first version's
+    # weakness: replacing memberships' policy with `USING (true)` leaves
+    # rls/forced/count untouched while making every membership row readable --
+    # and with the defence-in-depth clause also gone the leak is complete
+    # (measured: alice sees 2 of 2). So the predicate is read too.
+    with engine.connect() as conn:
+        predicates = [
+            r[0]
+            for r in conn.execute(
+                sa.text(
+                    "SELECT pg_get_expr(p.polqual, p.polrelid) FROM pg_policy p"
+                    " JOIN pg_class c ON c.oid = p.polrelid"
+                    " WHERE c.relname = 'memberships'"
+                )
+            ).all()
+        ]
+
+    assert predicates, "expected a predicate on memberships' policy"
+    for predicate in predicates:
+        assert predicate.strip().lower() != "true", (
+            "memberships' policy must not be a blanket allow: result_outcomes "
+            "isolation is scoped through it"
+        )
+        assert "current_user_id()" in predicate, (
+            f"memberships must stay user-scoped; got: {predicate}"
+        )
