@@ -69,6 +69,22 @@ def _per_run_delta(changes: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     return dict(delta)
 
 
+def changes_from_this_event_onward(
+    ordered_changes: Sequence[list[dict[str, Any]]], position: int
+) -> list[list[dict[str, Any]]]:
+    """The selected event's changes and every LATER event's, oldest first.
+
+    Split out because the recovery has two halves and only the arithmetic one
+    was pinned. Narrowing this to the single selected event passed every test
+    while `--event <older-id>` printed exactly the never-published number the
+    multi-event fix was written for -- and with the "N later regrades are
+    reversed too" note suppressed, so nothing marked it.
+    """
+    if position < 0 or position >= len(ordered_changes):
+        raise IndexError(f"event position {position} outside 0..{len(ordered_changes) - 1}")
+    return list(ordered_changes[position:])
+
+
 def prior_pass_counts(
     current: dict[str, int], events_from_this_one_onward: Sequence[list[dict[str, Any]]]
 ) -> dict[str, int]:
@@ -162,7 +178,9 @@ def main() -> int:
                     )
                 )
                 position = next(i for i, e in enumerate(ordered) if e.id == event.id)
-                onward = [list(e.outcome_changes or []) for e in ordered[position:]]
+                onward = changes_from_this_event_onward(
+                    [list(e.outcome_changes or []) for e in ordered], position
+                )
                 later = len(onward) - 1
 
                 current = _current_pass_by_run(session, list(delta))
@@ -178,9 +196,17 @@ def main() -> int:
                     f"{'PASS before':>12s}"
                 )
                 for run, counts in sorted(delta.items()):
-                    now = current.get(run)
                     gained, lost = counts["gained_pass"], counts["lost_pass"]
-                    before = before_counts.get(run) if now is not None else None
+                    # A real run absent from `current` has ZERO PASS today --
+                    # the query groups over outcome == PASS, so an all-FAIL run
+                    # has no row. Reading that as unknown discarded a recovery
+                    # `prior_pass_counts` had computed correctly, and printed
+                    # "?" where the truth was 0 and 1. Only the "?" bucket,
+                    # which is a change carrying no run id, is genuinely
+                    # unknown: there is no run to count.
+                    known = _is_uuid(run)
+                    now = current.get(run, 0) if known else None
+                    before = before_counts.get(run) if known else None
                     now_s = "?" if now is None else str(now)
                     before_s = "?" if before is None else str(before)
                     print(f"  {run:36s} {now_s:>9s} {gained:>6d} {lost:>6d} {before_s:>12s}")

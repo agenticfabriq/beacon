@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import pathlib
 import pkgutil
 
 import beacon_storage.models as models_pkg
@@ -27,7 +29,22 @@ def test_every_model_module_is_imported_by_the_package() -> None:
         if not name.startswith("_") and name != "base"
     }
 
-    missing = sorted(name for name in modules if not hasattr(models_pkg, name))
+    # Parsed from `__init__.py`'s OWN imports, not `hasattr`. Importing a
+    # submodule anywhere in the process sets it as an attribute of its parent
+    # package, and a sibling test imports `models.regrade_events` directly --
+    # which happens at COLLECTION, before any test runs, even when that test
+    # is deselected. So `hasattr` was green for the exact deletion this test
+    # exists to catch, while `migrations/env.py` imports only
+    # `beacon_storage.models` and autogenerate would still drop the table.
+    init = pathlib.Path(models_pkg.__file__ or "").with_name("__init__.py")
+    tree = ast.parse(init.read_text(encoding="utf-8"))
+    imported = {
+        node.module.rsplit(".", 1)[-1]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+
+    missing = sorted(modules - imported)
     assert not missing, (
         f"model module(s) {missing} are not imported in models/__init__.py, so their "
         "tables are missing from Base.metadata and autogenerate would drop them"

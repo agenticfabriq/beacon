@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.regrade_history import _per_run_delta, prior_pass_counts
+from scripts.regrade_history import (
+    _current_pass_by_run,
+    _is_uuid,
+    _per_run_delta,
+    changes_from_this_event_onward,
+    prior_pass_counts,
+)
 
 
 def test_a_flip_into_pass_is_counted_separately_from_a_flip_out() -> None:
@@ -112,3 +118,97 @@ def test_a_change_with_no_run_id_is_still_counted() -> None:
     delta = _per_run_delta([{"before": "FAIL", "after": "PASS"}])
 
     assert delta["?"] == {"gained_pass": 1, "lost_pass": 0}
+
+
+def test_the_selection_takes_the_event_and_every_later_one() -> None:
+    """The half of the recovery that chooses WHAT to reverse.
+
+    Only the arithmetic half was pinned before. Narrowing the slice to the
+    selected event alone left all twelve tests green while an older event
+    reported the never-published number the multi-event fix exists to
+    prevent -- and suppressed the note that would have flagged it.
+    """
+    a = [{"run_id": "r", "before": "FAIL", "after": "PASS"}]
+    b = [{"run_id": "r", "before": "FAIL", "after": "PASS"}]
+    c = [{"run_id": "r", "before": "PASS", "after": "FAIL"}]
+
+    assert changes_from_this_event_onward([a, b, c], 0) == [a, b, c]
+    assert changes_from_this_event_onward([a, b, c], 1) == [b, c]
+    # The newest event reverses only itself, which is the one case where
+    # reversing a single event against today's count was ever correct.
+    assert changes_from_this_event_onward([a, b, c], 2) == [c]
+
+
+@pytest.mark.parametrize("position", [-1, 3, 99])
+def test_a_position_outside_the_event_list_is_refused(position: int) -> None:
+    """Silently returning [] would recover "no change" for a real event."""
+    with pytest.raises(IndexError):
+        changes_from_this_event_onward([[], [], []], position)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("06a99a7c-0000-7000-8000-000000000000", True),
+        ("?", False),
+        ("", False),
+        ("not-a-uuid", False),
+    ],
+)
+def test_only_real_run_ids_reach_the_database(value: str, expected: bool) -> None:
+    """`Result.run_id` is a uuid column, so the "?" bucket must not be queried.
+
+    `_per_run_delta` buckets a change with no run id under "?" so it cannot
+    vanish from the accounting. Feeding that into an `IN` list makes Postgres
+    reject the whole query and the report dies instead of printing -- and the
+    filter preventing it had no test, so deleting it stayed green.
+    """
+    assert _is_uuid(value) is expected
+
+
+def test_the_query_is_never_built_with_the_unknown_run_bucket() -> None:
+    """Pins the FILTER'S USE, not just the predicate behind it.
+
+    `_is_uuid` had a test and the line calling it did not, so deleting the
+    filter stayed green while a live query would have died: `Result.run_id` is
+    a uuid column, and Postgres rejects the whole `IN` list over one "?".
+    Captures the statement a stub session receives and reads its bind params,
+    which is the only way to see what would actually have been sent.
+    """
+
+    class _Result:
+        def all(self) -> list[object]:
+            return []
+
+    class _StubSession:
+        def __init__(self) -> None:
+            self.statement: object | None = None
+
+        def execute(self, statement: object) -> _Result:
+            self.statement = statement
+            return _Result()
+
+    session = _StubSession()
+    real = "06a99a7c-0000-7000-8000-000000000000"
+    _current_pass_by_run(session, [real, "?"])  # type: ignore[arg-type]
+
+    assert session.statement is not None, "expected a query to be built"
+    params = session.statement.compile().params  # type: ignore[attr-defined]
+    queried = next(v for k, v in params.items() if isinstance(v, list))
+    assert queried == [real], f"only real run ids may be queried, got {queried}"
+
+
+def test_no_query_is_issued_when_nothing_is_queryable() -> None:
+    """All-unknown ids must short-circuit rather than send an empty IN list."""
+
+    class _StubSession:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, statement: object) -> object:
+            self.calls += 1
+            raise AssertionError("should not query")
+
+    session = _StubSession()
+    assert _current_pass_by_run(session, ["?", "nope"]) == {}  # type: ignore[arg-type]
+    assert session.calls == 0
