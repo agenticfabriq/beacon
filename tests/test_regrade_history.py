@@ -97,11 +97,16 @@ def test_recovery_is_order_independent_across_events() -> None:
     assert prior_pass_counts({"r1": 4}, [a, b]) == prior_pass_counts({"r1": 4}, [b, a])
 
 
-def test_a_run_absent_from_the_current_counts_still_recovers() -> None:
-    """A run whose results are all non-PASS today has no row in the counts.
+def test_the_recovery_defaults_a_missing_run_to_zero_rather_than_dropping_it() -> None:
+    """A property of `prior_pass_counts` alone, not of the report.
 
-    Treating a missing key as "no such run" would silently drop it from the
-    recovery; it means zero PASS now, which is a number the reversal can use.
+    The report no longer reaches this default: `_result_counts_by_run` emits a
+    row with `passes: 0` for an all-FAIL run, and a run missing from those
+    counts is filtered as unknown before the recovery is read. What stays
+    worth pinning is that the function itself accepts a partial map and
+    reverses into it rather than skipping the run -- silently dropping a run
+    would understate the recovery, and this is the arithmetic other callers
+    would inherit.
     """
     changes = [{"run_id": "r_new", "before": "PASS", "after": "FAIL"}]
 
