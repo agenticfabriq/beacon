@@ -185,13 +185,19 @@ def test_memberships_rls_is_load_bearing_for_this_table(engine: Engine) -> None:
     # and with the defence-in-depth clause also gone the leak is complete
     # (measured: alice sees 2 of 2). So the predicate is read too.
     with engine.connect() as conn:
+        # Schema-qualified like the flags query above, and NULL predicates
+        # excluded: pg_get_expr returns NULL for a policy with no USING clause
+        # (a FOR INSERT policy has only WITH CHECK), which would raise an
+        # AttributeError below instead of asserting.
         predicates = [
             r[0]
             for r in conn.execute(
                 sa.text(
                     "SELECT pg_get_expr(p.polqual, p.polrelid) FROM pg_policy p"
                     " JOIN pg_class c ON c.oid = p.polrelid"
-                    " WHERE c.relname = 'memberships'"
+                    " JOIN pg_namespace n ON n.oid = c.relnamespace"
+                    " WHERE n.nspname = 'public' AND c.relname = 'memberships'"
+                    " AND p.polqual IS NOT NULL"
                 )
             ).all()
         ]
