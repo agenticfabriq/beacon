@@ -136,6 +136,14 @@ def upgrade() -> None:
     #
     # `derivations` deliberately gets none: it is (grader, version, metric)
     # and nothing else, so it carries no tenant data to scope.
+    #
+    # `m.user_id = current_user_id()` is DEFENCE IN DEPTH, not the isolation.
+    # Measured: deleting it changes nothing, because `memberships` is itself
+    # under FORCE RLS, so the subquery only ever sees the caller's own
+    # membership rows. That makes this table's isolation depend on ANOTHER
+    # table's policy -- an invisible coupling, which is why the clause stays
+    # and why a test asserts memberships is protected. Relaxing memberships'
+    # RLS would silently open this table without touching this file.
     op.execute("ALTER TABLE result_outcomes ENABLE ROW LEVEL SECURITY;")
     op.execute("ALTER TABLE result_outcomes FORCE ROW LEVEL SECURITY;")
     op.execute(

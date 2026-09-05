@@ -45,8 +45,11 @@ def persist_result(
 ) -> None:
     """Persist one runner result, its grader verdicts, and trace tree.
 
-    ``deciding`` is the verdict the outcome followed, as reported by the
-    composer that actually decided it -- see ``VerdictComposer.deciding_verdict``.
+    ``deciding`` is the verdict the outcome followed, as reported by
+    ``VerdictComposer.compose_with_deciding`` -- the only thing that knows,
+    because only it knows which BRANCH decided. Asking the verdict list
+    instead names a grader for a deferred or errored outcome it had no say in;
+    the composer's ``_deciding_verdict`` is private for exactly that reason.
     Passed in rather than re-derived here: "the execution verdict carrying the
     primary metric with a usable bool" is the composer's rule, and every place
     that has re-implemented one of the graders' own questions has ended up
