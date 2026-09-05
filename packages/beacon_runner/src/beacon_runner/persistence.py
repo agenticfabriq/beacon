@@ -8,6 +8,7 @@ from beacon_graders.types import Verdict as GraderVerdict
 from beacon_graders.types import VerdictOutcome as GraderOutcome
 from beacon_storage.models.runs import ResultStatus
 from beacon_storage.models.runs import VerdictOutcome as StorageOutcome
+from beacon_storage.repository.outcome_history import OutcomeHistoryRepo
 from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.traces import TraceRepo
 from beacon_storage.repository.verdicts import VerdictRepo
@@ -39,8 +40,28 @@ def persist_result(
     exec_result: ExecutionResult,
     verdicts: list[GraderVerdict],
     outcome: GraderOutcome,
+    deciding: GraderVerdict | None,
+    source: str,
 ) -> None:
-    """Persist one runner result, its grader verdicts, and trace tree."""
+    """Persist one runner result, its grader verdicts, and trace tree.
+
+    ``deciding`` is the verdict the outcome followed, as reported by the
+    composer that actually decided it -- see ``VerdictComposer.deciding_verdict``.
+    Passed in rather than re-derived here: "the execution verdict carrying the
+    primary metric with a usable bool" is the composer's rule, and every place
+    that has re-implemented one of the graders' own questions has ended up
+    asking a wider one (B77). ``None`` means no grader decided, which is a real
+    and common case -- an error, a timeout, a refusal contract, a judge-only
+    rubric -- and is recorded as a derivation naming no grader rather than
+    guessing one.
+
+    Both ``deciding`` and ``source`` are REQUIRED, with no defaults, and that
+    is the point. A default ``deciding=None`` records "no grader decided"
+    about an outcome a grader decided: a valid row that lies, which is how the
+    harness path shipped wrong past a green suite. A default ``source``
+    mislabels wherever the next caller comes from. Neither can now be omitted
+    by accident.
+    """
     result_row = ResultRepo(session).create(
         team_id=team_id,
         run_id=run_id,
@@ -54,6 +75,20 @@ def persist_result(
         status=_OUTCOME_TO_STATUS[outcome],
         outcome=StorageOutcome(outcome.value),
         error=exec_result.error,
+    )
+
+    # The FIRST outcome, recorded as history so that a later regrade cannot
+    # move a published number without the previous value surviving. Written
+    # here rather than in either caller because this is the single path both
+    # ingest and the harness take to create a result.
+    OutcomeHistoryRepo(session).record(
+        team_id=team_id,
+        result_id=result_row.id,
+        outcome=outcome.value,
+        source=source,
+        grader=deciding.grader if deciding is not None else None,
+        grader_version=deciding.grader_version if deciding is not None else None,
+        metric=deciding.metric if deciding is not None else None,
     )
 
     verdict_repo = VerdictRepo(session)

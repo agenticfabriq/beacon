@@ -28,6 +28,7 @@ from beacon_storage.models.eval_items import EvalItem
 from beacon_storage.models.regrade_events import RegradeEvent
 from beacon_storage.models.runs import Result, Run, Verdict, VerdictOutcome
 from beacon_storage.models.suites import Suite
+from beacon_storage.repository.outcome_history import OutcomeHistoryRepo
 from beacon_storage.repository.verdicts import VerdictRepo
 
 
@@ -151,6 +152,7 @@ def main() -> int:
             )
 
             verdict_repo = VerdictRepo(session)
+            history = OutcomeHistoryRepo(session)
             graded = skipped = flipped = orderless = current = 0
             rederived = 0
             # One entry per outcome that MOVES, with the value it moved
@@ -214,6 +216,26 @@ def main() -> int:
                         if stored is None or stored.bool_value is None:
                             continue
                         derived = VerdictOutcome.PASS if stored.bool_value else VerdictOutcome.FAIL
+                        # Recorded for EVERY result this regrade re-derived, not
+                        # only the ones that moved. `record` already skips an
+                        # unchanged outcome under an unchanged derivation, so
+                        # the on-change rule still holds -- but a result whose
+                        # outcome stayed while the DERIVATION changed has to be
+                        # re-attributed, or its history keeps crediting the
+                        # previous rule. Recording only flips left 7,449 of the
+                        # bird regrade's 7,747 attributed to the old derivation,
+                        # so a read half filtering by derivation_id would have
+                        # computed over 298 of 7,747: the partial denominator
+                        # this whole table exists to prevent.
+                        history.record(
+                            team_id=result.team_id,
+                            result_id=result.id,
+                            outcome=derived.value,
+                            source="regrade",
+                            grader=grader.name,
+                            grader_version=grader.version,
+                            metric=headline,
+                        )
                         if str(result.outcome) != derived.value:
                             changes.append(
                                 {
@@ -280,6 +302,18 @@ def main() -> int:
                     ):
                         derived = (
                             VerdictOutcome.PASS if by_metric.get(headline) else VerdictOutcome.FAIL
+                        )
+                        # Same reason as the already-current branch above: every
+                        # re-derivation is attributed, not only the flips, or a
+                        # derivation filter reads a partial denominator.
+                        history.record(
+                            team_id=result.team_id,
+                            result_id=result.id,
+                            outcome=derived.value,
+                            source="regrade",
+                            grader=grader.name,
+                            grader_version=grader.version,
+                            metric=headline,
                         )
                         if str(result.outcome) != derived.value:
                             changes.append(

@@ -265,3 +265,81 @@ def test_error_outcome_takes_precedence_over_llm_pass(
     )
     _, outcome = composer.compose(item, result)
     assert outcome == VerdictOutcome.ERROR
+
+
+def _exec_grader() -> _Fixed:
+    """A grader whose verdict WOULD decide, if the pass/fail branch were reached."""
+    return _Fixed(
+        name="exec",
+        verdicts=[_v("execution_grounded_sql", "correctness", bool_value=True, value=1.0)],
+    )
+
+
+def test_a_deferred_push_records_no_deciding_verdict(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """The branch matters, and the verdict list cannot reveal which one it was.
+
+    A deferral returns DEFER *before* the pass/fail branch, while the verdicts
+    it returns still contain the execution verdict. So asking the verdict list
+    "which decides" answers with a verdict that did NOT decide, and a caller
+    recording that as the derivation writes a valid row claiming a grader
+    decided an outcome the runner's deferral decided -- into a table the
+    migration says cannot be backfilled or corrected.
+    """
+    composer = VerdictComposer(graders=[_exec_grader()])
+    result = make_result(output={"answer": "x"}, output_kind="answer", deferred=True)
+
+    verdicts, outcome, deciding = composer.compose_with_deciding(make_item(), result)
+
+    assert outcome == VerdictOutcome.DEFER
+    assert verdicts, "the execution verdict is still recorded as evidence"
+    assert deciding is None, "the deferral decided, not the grader"
+
+
+def test_an_errored_push_records_no_deciding_verdict(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    composer = VerdictComposer(graders=[_exec_grader()])
+    result = make_result(output={"answer": "x"}, output_kind="answer", error="boom")
+
+    _verdicts, outcome, deciding = composer.compose_with_deciding(make_item(), result)
+
+    assert outcome == VerdictOutcome.ERROR
+    assert deciding is None, "an instrument failure is not a grader's reading"
+
+
+def test_the_refusal_contract_records_no_deciding_verdict(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    """Its PASS is indistinguishable from a grader's PASS by value alone.
+
+    Which is exactly why an outcome value cannot be used to infer whether a
+    grader decided -- this branch returns the same PASS/FAIL the grader branch
+    does, so only the composer can tell them apart.
+    """
+    composer = VerdictComposer(graders=[_exec_grader()])
+    item = make_item(query={"answerable": False})
+    result = make_result(output={"rows": []}, output_kind="rows", deferred=True)
+
+    _verdicts, outcome, deciding = composer.compose_with_deciding(item, result)
+
+    assert outcome == VerdictOutcome.PASS
+    assert deciding is None, "the runner's deferral decided this PASS"
+
+
+def test_a_graded_pass_records_the_verdict_that_decided_it(
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+) -> None:
+    composer = VerdictComposer(graders=[_exec_grader()])
+    result = make_result(output={"answer": "x"}, output_kind="answer")
+
+    _verdicts, outcome, deciding = composer.compose_with_deciding(make_item(), result)
+
+    assert outcome == VerdictOutcome.PASS
+    assert deciding is not None, "a grader decided; the derivation must name it"
+    assert deciding.bool_value is True

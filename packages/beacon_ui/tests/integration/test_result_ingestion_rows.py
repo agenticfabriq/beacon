@@ -512,3 +512,40 @@ def test_the_stamp_turns_on_the_key_SET_not_the_key_ORDER() -> None:
     # it (1,), (None,): the fabricated-null mangling the rule exists to stop.
     same_arity_different_keys = {"rows": [{"a": 1}, {"b": 2}]}
     assert "columns" not in _stamped_output(same_arity_different_keys, deferred=False)
+
+
+def test_a_push_records_the_derivation_that_decided_its_outcome(
+    api_client: TestClient, world: _World, session: Session
+) -> None:
+    """The first outcome is history too, and it names the rule that produced it.
+
+    Without this, `deciding=None` at the call site -- or the wrong verdict --
+    writes a perfectly valid row and every other assertion in this file still
+    holds. The row would say "no grader decided" about an outcome a grader
+    decided, which is the fabrication the nullable pair exists to avoid.
+    """
+    from beacon_storage.models.outcome_history import Derivation, ResultOutcome
+    from sqlalchemy import select
+
+    run_id, item_id = _seed_accepted_results(session, world)
+
+    response = _push(api_client, world, run_id, item_id, [["01", 10.0], ["02", 20.0]])
+    assert response.status_code == 200, response.text
+
+    row = session.scalars(
+        select(ResultOutcome).join(Derivation, ResultOutcome.derivation_id == Derivation.id)
+    ).one()
+    derivation = session.get(Derivation, row.derivation_id)
+    assert derivation is not None
+
+    assert row.outcome == response.json()["outcome"], (
+        "the recorded outcome must be the one the push reported"
+    )
+    assert row.source == "ingest"
+    # A grader DID decide this one, so the derivation must name it rather than
+    # record the no-grader pair.
+    assert derivation.grader is not None, "a grader decided; the row must say which"
+    assert derivation.grader_version is not None
+    assert derivation.metric == "exact_match", (
+        "the metric recorded must be the one the outcome followed"
+    )

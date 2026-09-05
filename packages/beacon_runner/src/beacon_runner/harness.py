@@ -226,10 +226,14 @@ class HarnessRunner:
             )
 
         try:
-            verdicts, outcome = self.composer.compose(item, exec_result)
+            # compose_with_deciding: only the composer knows which BRANCH
+            # decided, and a deferred or errored attempt returns before the
+            # pass/fail branch while still carrying an execution verdict.
+            verdicts, outcome, deciding = self.composer.compose_with_deciding(item, exec_result)
         except Exception as exc:
             verdicts = []
             outcome = GraderOutcome.ERROR
+            deciding = None
             exec_result = exec_result.model_copy(
                 update={"error": f"composer_raised: {type(exc).__name__}: {exc!s}"[:1000]}
             )
@@ -244,6 +248,8 @@ class HarnessRunner:
                 exec_result=exec_result,
                 verdicts=verdicts,
                 outcome=outcome,
+                deciding=deciding,
+                source="harness",
             )
             session.commit()
 

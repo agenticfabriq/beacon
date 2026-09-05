@@ -118,6 +118,27 @@ def test_harness_runs_dummy_sut_end_to_end(engine: Engine) -> None:
         assert run.mode == HarnessMode.EVAL
         assert len(ResultRepo(session).list_for_run(run_id)) == 20
 
+        # Outcome history, asserted through the HARNESS rather than through a
+        # direct persist_result call. Testing the function instead of its use
+        # is what left the harness omitting `deciding` past a green suite:
+        # mutating the call site had nothing to fail.
+        from beacon_storage.models.outcome_history import Derivation, ResultOutcome
+        from sqlalchemy import select
+
+        history = list(session.scalars(select(ResultOutcome)))
+        assert len(history) == 20, "every first outcome is recorded, not just some"
+        assert {row.source for row in history} == {"harness"}, (
+            "a harness write must not be labelled ingest"
+        )
+        derivations = {session.get(Derivation, row.derivation_id) for row in history}
+        assert all(d is not None for d in derivations)
+        # DabstepAnswerMatcher decides these, so the recorded derivation must
+        # name it. All-null here would mean "no grader decided", which is the
+        # valid-but-lying row the required arguments now prevent.
+        assert {d.grader for d in derivations if d} == {"dabstep_answer_matcher"}, (
+            "the grader that decided must be named, not left null"
+        )
+
 
 def test_harness_rejects_unsupported_mode(engine: Engine) -> None:
     factory = make_session_factory(engine)

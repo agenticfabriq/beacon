@@ -104,6 +104,8 @@ def test_persist_result_writes_result_verdicts_and_trace(session: Session, _ctx:
         exec_result=exec_result,
         verdicts=verdicts,
         outcome=GraderOutcome.PASS,
+        deciding=verdicts[0],
+        source="harness",
     )
     session.commit()
 
@@ -144,6 +146,8 @@ def test_persist_result_marks_error_status_when_outcome_is_error(
         exec_result=exec_result,
         verdicts=[],
         outcome=GraderOutcome.ERROR,
+        deciding=None,
+        source="harness",
     )
     session.commit()
 
@@ -171,6 +175,8 @@ def test_persist_result_marks_timeout_status(session: Session, _ctx: _Ctx) -> No
         exec_result=exec_result,
         verdicts=[],
         outcome=GraderOutcome.TIMEOUT,
+        deciding=None,
+        source="harness",
     )
     session.commit()
 
@@ -196,6 +202,8 @@ def test_persist_result_rejects_duplicate(session: Session, _ctx: _Ctx) -> None:
         exec_result=exec_result,
         verdicts=[],
         outcome=GraderOutcome.PASS,
+        deciding=None,
+        source="harness",
     )
     session.commit()
 
@@ -209,5 +217,105 @@ def test_persist_result_rejects_duplicate(session: Session, _ctx: _Ctx) -> None:
             exec_result=exec_result,
             verdicts=[],
             outcome=GraderOutcome.PASS,
+            deciding=None,
+            source="harness",
         )
         session.commit()
+
+
+def _item_and_exec() -> tuple[EvalItem, ExecutionResult]:
+    """The minimal pair every test here builds, so the new ones do not repeat it."""
+    return (
+        EvalItem(
+            item_id="i-hist",
+            suite="s",
+            query={"q": "?"},
+            ground_truth={"answer": "yes"},
+            metadata={},
+        ),
+        ExecutionResult(
+            output={"answer": "yes"},
+            output_kind="answer",
+            trace=ExecutionStep(uuid="root", name="root", level="workflow", status="COMPLETED"),
+            tokens_input=1,
+            tokens_output=1,
+            runtime_ms=1,
+        ),
+    )
+
+
+def test_the_harness_path_records_which_grader_decided(session: Session, _ctx: _Ctx) -> None:
+    """The blocker's case: a valid history row that lies about its derivation.
+
+    `persist_result` with no `deciding` records "no grader decided" for an
+    outcome a grader decided. Nothing in this file asserted on
+    `result_outcomes`, so the harness shipped exactly that past a green suite
+    -- which is why both arguments are now REQUIRED rather than defaulted.
+    """
+    from beacon_storage.models.outcome_history import Derivation, ResultOutcome
+    from sqlalchemy import select
+
+    team, _user, _project, _solution, run = _ctx
+    item, exec_result = _item_and_exec()
+    verdicts = [
+        GraderVerdict(
+            grader="exec_sql",
+            grader_version="v8",
+            criterion="correctness",
+            metric="exact_match",
+            bool_value=True,
+        )
+    ]
+    persist_result(
+        session,
+        team_id=team.id,
+        run_id=run.id,
+        item=item,
+        attempt_idx=0,
+        exec_result=exec_result,
+        verdicts=verdicts,
+        outcome=GraderOutcome.PASS,
+        deciding=verdicts[0],
+        source="harness",
+    )
+    session.commit()
+
+    row = session.scalars(select(ResultOutcome)).one()
+    derivation = session.get(Derivation, row.derivation_id)
+    assert derivation is not None
+
+    assert row.outcome == "PASS"
+    assert row.source == "harness", "a harness write must not be labelled ingest"
+    assert derivation.grader == "exec_sql", "a grader decided; the row must name it"
+    assert derivation.grader_version == "v8"
+    assert derivation.metric == "exact_match"
+
+
+def test_an_outcome_no_grader_decided_names_no_grader(session: Session, _ctx: _Ctx) -> None:
+    """The mirror fabrication: do not invent a grader for an instrument failure.
+
+    An ERROR is the harness or the endpoint failing, not a grader's reading.
+    """
+    from beacon_storage.models.outcome_history import Derivation, ResultOutcome
+    from sqlalchemy import select
+
+    team, _user, _project, _solution, run = _ctx
+    item, exec_result = _item_and_exec()
+    persist_result(
+        session,
+        team_id=team.id,
+        run_id=run.id,
+        item=item,
+        attempt_idx=0,
+        exec_result=exec_result,
+        verdicts=[],
+        outcome=GraderOutcome.ERROR,
+        deciding=None,
+        source="harness",
+    )
+    session.commit()
+
+    row = session.scalars(select(ResultOutcome)).one()
+    derivation = session.get(Derivation, row.derivation_id)
+    assert derivation is not None
+    assert (derivation.grader, derivation.grader_version, derivation.metric) == (None, None, None)

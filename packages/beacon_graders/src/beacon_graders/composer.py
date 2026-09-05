@@ -8,7 +8,7 @@ from beacon_graders.errors import BeaconGraderError
 from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     from beacon_runner.types import EvalItem, ExecutionResult
 
@@ -138,6 +138,22 @@ class VerdictComposer:
         kind = getattr(grader, "kind", None)
         return kind if isinstance(kind, GraderKind) else None
 
+    def _deciding_verdict(self, verdicts: Sequence[Verdict]) -> Verdict | None:
+        """The execution verdict a PASS/FAIL would follow, if this branch is reached.
+
+        PRIVATE, and that is the fix rather than an accident. A caller holding
+        only the verdict list cannot know which BRANCH of ``compose`` decided:
+        an errored, timed-out or DEFERRED push returns before the pass/fail
+        branch while its verdicts still contain the execution verdict, so this
+        answers "which verdict would have decided" and a caller that recorded
+        it as "which verdict did decide" wrote a valid row that lies. Use
+        ``compose_with_deciding``, which knows.
+        """
+        for verdict in verdicts:
+            if self._decides_outcome(verdict) and verdict.bool_value is not None:
+                return verdict
+        return None
+
     def _decides_outcome(self, verdict: Verdict) -> bool:
         """Return whether this verdict is the one the outcome follows."""
         if self._kind_of(verdict.grader) is not GraderKind.EXECUTION:
@@ -174,6 +190,28 @@ class VerdictComposer:
         result: ExecutionResult,
     ) -> tuple[list[Verdict], VerdictOutcome]:
         """Run applicable graders and reduce their verdicts via Swiss Cheese precedence."""
+        verdicts, outcome, _ = self.compose_with_deciding(item, result)
+        return verdicts, outcome
+
+    def compose_with_deciding(
+        self,
+        item: EvalItem,
+        result: ExecutionResult,
+    ) -> tuple[list[Verdict], VerdictOutcome, Verdict | None]:
+        """``compose``, plus WHICH verdict decided -- or None if none did.
+
+        The third element is the whole point and only this method can supply
+        it: exactly one branch below is decided by a single execution verdict.
+        Every other outcome -- an error, a timeout, the unanswerable-item
+        refusal contract, a deferral, a judge composite over several verdicts,
+        or falling through with nothing to average -- is not one grader's
+        reading, and recording a grader against it would be a fabrication in a
+        table that cannot be corrected afterwards.
+
+        Note the refusal-contract branch returns PASS or FAIL, the SAME values
+        the grader branch returns, which is why an outcome value cannot be used
+        to infer whether a grader decided.
+        """
         verdicts: list[Verdict] = []
         any_error = False
         any_timeout = False
@@ -207,9 +245,9 @@ class VerdictComposer:
                 any_error = True
 
         if any_error:
-            return verdicts, VerdictOutcome.ERROR
+            return verdicts, VerdictOutcome.ERROR, None
         if any_timeout:
-            return verdicts, VerdictOutcome.TIMEOUT
+            return verdicts, VerdictOutcome.TIMEOUT, None
 
         # An item that DECLARES itself unanswerable judges the refusal, not a
         # result set: refusing IS the right answer, answering is the wrong one
@@ -220,20 +258,25 @@ class VerdictComposer:
         # Missing gold WITHOUT the declaration still falls through to ERROR
         # below: that absence is an ingest defect, and the label is correct.
         if item.query.get("answerable") is False:
-            return verdicts, (VerdictOutcome.PASS if _is_deferred(result) else VerdictOutcome.FAIL)
+            # PASS/FAIL, but the RUNNER's deferral decided it, not a grader.
+            return (
+                verdicts,
+                VerdictOutcome.PASS if _is_deferred(result) else VerdictOutcome.FAIL,
+                None,
+            )
 
         # Checked after error/timeout — an attempt that never ran cannot be
         # said to have declined — but before pass/fail, because there is no
         # answer to grade. Grader verdicts are still recorded as evidence.
         if _is_deferred(result):
-            return verdicts, VerdictOutcome.DEFER
+            return verdicts, VerdictOutcome.DEFER, None
 
-        for verdict in verdicts:
-            if self._decides_outcome(verdict) and verdict.bool_value is not None:
-                return (
-                    verdicts,
-                    VerdictOutcome.PASS if verdict.bool_value else VerdictOutcome.FAIL,
-                )
+        if (deciding := self._deciding_verdict(verdicts)) is not None:
+            return (
+                verdicts,
+                VerdictOutcome.PASS if deciding.bool_value else VerdictOutcome.FAIL,
+                deciding,
+            )
 
         judged = [
             verdict for verdict in verdicts if self._kind_of(verdict.grader) is GraderKind.LLM_JUDGE
@@ -246,16 +289,18 @@ class VerdictComposer:
         # that -- the same one the all-unscored case already reaches by falling
         # through with nothing to average.
         if judged and any(verdict.value is None for verdict in judged):
-            return verdicts, VerdictOutcome.ERROR
+            return verdicts, VerdictOutcome.ERROR, None
         llm_values = [verdict.value for verdict in judged if verdict.value is not None]
         if llm_values:
             composite = sum(llm_values) / len(llm_values)
+            # A composite over SEVERAL verdicts: no single one decided.
             return (
                 verdicts,
                 VerdictOutcome.PASS if composite >= self.threshold else VerdictOutcome.FAIL,
+                None,
             )
 
-        return verdicts, VerdictOutcome.ERROR
+        return verdicts, VerdictOutcome.ERROR, None
 
     def _is_timeout_verdict(self, verdict: Verdict) -> bool:
         return verdict.criterion.lower() == "timeout"

@@ -299,9 +299,14 @@ def ingest_result(
 
     composer = _composer_for(item, body, headline=_headline_metric(session, run.suite_id))
     try:
-        verdicts, outcome = composer.compose(item, exec_result)
+        # compose_with_deciding, not compose plus a lookup: only the composer
+        # knows WHICH BRANCH decided. A deferred or errored push returns before
+        # the pass/fail branch while its verdicts still hold the execution
+        # verdict, so asking the verdict list would name a grader that had no
+        # say -- in a table that cannot be corrected afterwards.
+        verdicts, outcome, deciding = composer.compose_with_deciding(item, exec_result)
     except Exception as exc:  # noqa: BLE001 - a grader fault is not the pusher's fault
-        verdicts, outcome = [], VerdictOutcome.ERROR
+        verdicts, outcome, deciding = [], VerdictOutcome.ERROR, None
         exec_result = exec_result.model_copy(
             update={"error": f"grading_raised: {type(exc).__name__}: {exc!s}"[:1000]}
         )
@@ -317,6 +322,8 @@ def ingest_result(
         exec_result=exec_result,
         verdicts=verdicts,
         outcome=outcome,
+        deciding=deciding,
+        source="ingest",
     )
     session.commit()
     return ResultIngestOut(
