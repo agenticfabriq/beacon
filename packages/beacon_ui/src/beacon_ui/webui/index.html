@@ -1244,12 +1244,22 @@ const loadSettings = guard(async () => {
  * team's list, so refreshing on another team's benchmark fell back to the
  * default suite (found the hard way on fs_payments). A team or suite that
  * no longer exists, or is not visible, falls back to defaults. */
-/* "history" belongs here because go() writes a route for every view except
- * `run`: without it the address bar said .../history while a reload fell
- * through applyRoute to go("matrix") and landed on Results, so a shared link
- * silently went somewhere else. `history-event` is deliberately NOT routed --
- * the route carries no event id, so restoring it would open the list's view
- * with nothing in it. Its route is suppressed in go() instead. */
+/* Every view go() writes a route for must be listed here, or the address bar
+ * carries a URL that applyRoute cannot restore and a reload falls through to
+ * go("matrix") -- a shared link silently opens Results. That is what happened
+ * to "history", and to `cell` for much longer.
+ *
+ * THREE views are deliberately absent, and the exclusion lives in go(): `run`
+ * writes its own route with the run id, while `cell` and `history-event` are
+ * identified by a matrix row and an event id that the route does not carry.
+ *
+ * The trade for those two: writeRoute is the only thing in this page that
+ * pushes a history entry, so a view that writes no route gets no Back entry
+ * either. Browser Back from a cell or an event leaves the app rather than
+ * returning to the list. In-page navigation is the crumb at the top of each
+ * of those views. The alternative was keeping a URL that looks shareable,
+ * reloads to the wrong page, and makes Back work only by accident of that
+ * fallthrough -- which is what `cell` did. */
 const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "history", "benchmarks", "settings"]);
 let lastRoute = "";
 function writeRoute(view, runId) {

@@ -374,6 +374,18 @@ def test_every_routed_view_can_be_restored_from_its_url() -> None:
         "Either add them to ROUTED_VIEWS or exclude them from writeRoute in go()."
     )
 
+    # The other half of the enumeration: a `writeRoute("x")` ANYWHERE, not just
+    # the guarded call in go(). Reading only go()'s body left a one-line
+    # mutation green -- add `writeRoute("cell")` beside `go("cell")`, the shape
+    # already used for `run`, and the unrestorable URL is back while every
+    # assertion above still passes.
+    written = set(re.findall(r'writeRoute\("([^"]+)"', page))
+    unrestorable = sorted(written - views - {"run"})
+    assert not unrestorable, (
+        f"writeRoute called for view(s) that cannot be restored: {unrestorable}. "
+        "`run` is the one exception -- it passes its own id."
+    )
+
     assert "history-event" not in views, (
         "history-event is excluded from writeRoute, so listing it as routable "
         "claims a restore that cannot work"

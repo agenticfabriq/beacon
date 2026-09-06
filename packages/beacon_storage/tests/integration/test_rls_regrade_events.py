@@ -184,11 +184,13 @@ def test_the_policy_is_not_the_isolation_where_this_is_deployed(engine: Engine) 
         "whether it bypasses RLS cannot be read here"
     )
     assert bool(attrs[0] or attrs[1]), (
-        f"the app's configured role {role!r} no longer bypasses RLS "
-        f"(rolsuper={attrs[0]}, rolbypassrls={attrs[1]}). The gap is shut and the "
-        "policy is now load-bearing: delete this test and remove the warning from "
-        "0024. Do not widen the assertion -- the warning in the migration is the "
-        "thing that has to change."
+        f"the app's configured role {role!r} does not bypass RLS in the cluster "
+        f"this suite connects to (rolsuper={attrs[0]}, rolbypassrls={attrs[1]}). "
+        "If that is also true of the DEPLOYMENT, the gap is shut and the policy is "
+        "load-bearing: delete this test and remove the warning from 0024. If only "
+        "this cluster was constrained, the warning in 0024 is still true and "
+        "deleting it would be wrong -- see this test's docstring, which says it "
+        "cannot tell these apart. Do not widen the assertion to make it pass."
     )
 
 
