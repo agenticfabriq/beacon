@@ -146,13 +146,63 @@ def _numerators_over_graded(tree: ast.Module) -> set[str]:
             continue
         if node.func.id != RATE_FUNC or len(node.args) != 2:
             continue
-        second = node.args[1]
-        if not isinstance(second, ast.Name) or second.id != DENOMINATOR:
+        if not _is_graded_denominator(node.args[1]):
             continue
         for inner in ast.walk(node.args[0]):
             if isinstance(inner, ast.Attribute) and isinstance(inner.value, ast.Name):
                 found.add(inner.attr)
     return found
+
+
+def _is_graded_denominator(node: ast.expr) -> bool:
+    """Whether ``node`` is the graded denominator, in either spelling.
+
+    Two forms, and the second arrived with the as-of rewind:
+
+    * the bare local ``graded``, which the as-of side of every row divides by;
+    * ``int(record.n_graded_now)``, which the CURRENT side divides by -- those
+      rates are built inline rather than from a hoisted local.
+
+    Reading only the first left ``n_exact_now`` and ``n_got_facts_now``
+    unchecked, which is B68 verbatim on the current column: delete the
+    ``_GRADED`` restriction from either and a true reading on an ERROR result
+    lands in a numerator whose denominator excludes it, renderable above 100%.
+    None of the behavioural tests seeds an ERROR carrying a verdict, so nothing
+    else covered it.
+
+    Matched by NAME rather than by resolving the attribute, for the same reason
+    ``_names_the_outcome`` is: this guard reads syntax. Any denominator whose
+    name ends ``n_graded`` or is ``graded`` counts, so a differently-named
+    graded denominator added later is caught by the ``assert numerators`` floor
+    rather than silently skipped.
+    """
+    if isinstance(node, ast.Name):
+        return node.id == DENOMINATOR
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Attribute) and (
+            inner.attr == DENOMINATOR or inner.attr.startswith("n_graded")
+        ):
+            return True
+    return False
+
+
+def _names_the_outcome(node: ast.expr) -> bool:
+    """Whether ``node`` is the outcome column, however it is spelled here.
+
+    Two spellings, and the second arrived with the as-of rewind. `Result.outcome`
+    is an attribute. The rewound gate is a local named `outcome`, bound to
+    either `Result.outcome` or a COALESCE over the reversal -- so the gate is
+    still right there in the aggregate, but as a bare Name.
+
+    Matching the NAME rather than following the binding is deliberate: this
+    guard reads syntax, and a checker that tried to resolve what `outcome`
+    holds would be a small interpreter. What it costs is that a local named
+    `outcome` bound to something unrelated would satisfy it; what it buys is
+    that the gate cannot vanish unnoticed, which is the failure it exists for.
+    """
+    if isinstance(node, ast.Attribute):
+        return node.attr == "outcome"
+    return isinstance(node, ast.Name) and node.id == "outcome"
 
 
 def _negated_nodes(expr: ast.AST) -> set[int]:
@@ -220,7 +270,7 @@ def _restrictions_of(expr: ast.AST) -> list[str]:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             func = node.func
             inner = func.value
-            if isinstance(inner, ast.Attribute) and inner.attr == "outcome":
+            if _names_the_outcome(inner):
                 if func.attr in ("in_", "notin_") and id(node) in negated:
                     found.append("negated:" + func.attr)
                 elif func.attr == "notin_":
@@ -231,8 +281,7 @@ def _restrictions_of(expr: ast.AST) -> list[str]:
             left, right = node.left, node.comparators[0]
             if (
                 isinstance(node.ops[0], ast.Eq)
-                and isinstance(left, ast.Attribute)
-                and left.attr == "outcome"
+                and _names_the_outcome(left)
                 and isinstance(right, ast.Constant)
                 and isinstance(right.value, str)
             ):
@@ -324,7 +373,7 @@ def test_every_membership_gate_names_the_constant() -> None:
         if func.attr not in ("in_", "notin_"):
             continue
         inner = func.value
-        if not isinstance(inner, ast.Attribute) or inner.attr != "outcome":
+        if not _names_the_outcome(inner):
             continue
         seen += 1
         arg = ast.unparse(node.args[0]) if node.args else "<none>"
@@ -414,7 +463,14 @@ def test_the_per_run_denominator_still_has_its_gate() -> None:
             ):
                 conditions.extend(ast.unparse(a) for a in node.args)
 
-    expected = f"Result.outcome.in_({GATE_CONSTANT})"
+    # `outcome`, not `Result.outcome`, since the as-of rewind. `_per_run_rate`
+    # now binds a local that is `Result.outcome` when nothing is rewound and a
+    # COALESCE over the event reversal when something is -- because this
+    # denominator feeds ex_rate_min/max, and a CURRENT spread bracketing a
+    # rewound mean is a row that contradicts itself: 47.2% with a range of
+    # 50.9-50.9. The gate itself is unchanged in shape and still exactly one
+    # condition, which is what this assertion is for.
+    expected = f"outcome.in_({GATE_CONSTANT})"
     assert conditions == [expected], (
         f"`_per_run_rate`'s denominator must be exactly `{expected}` and nothing "
         f"else. Found: {conditions}. That denominator feeds ex_rate_min and "

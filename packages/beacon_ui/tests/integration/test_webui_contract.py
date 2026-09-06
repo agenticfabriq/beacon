@@ -71,18 +71,6 @@ def _runner_recipe(page: str) -> str:
     return recipe.group(1)
 
 
-def _matrix_column_count(page: str) -> int:
-    """Columns in the results-matrix header, counting colspans."""
-    thead = re.search(r"<thead>(.*?)</thead>", page, re.S)
-    assert thead, "the matrix table must have a thead"
-    last_row = re.findall(r"<tr[^>]*>(.*?)</tr>", thead.group(1), re.S)[-1]
-    columns = 0
-    for th in re.findall(r"<th[^>]*>", last_row):
-        span = re.search(r'colspan="(\d+)"', th)
-        columns += int(span.group(1)) if span else 1
-    return columns
-
-
 # Every function that writes the matrix table's body. NO_BENCH is shared with
 # the runs table, which is 11 columns wide and correctly says so, so the
 # invariant has to be scoped to one table rather than to the text.
@@ -103,14 +91,23 @@ def test_every_matrix_placeholder_spans_the_whole_table(pattern: str) -> None:
     them.
     """
     page = _page()
-    expected = _matrix_column_count(page)
     body = re.search(pattern, page, re.S)
     assert body, f"no function matched {pattern!r}"
-    spans = [int(n) for n in re.findall(r'colspan="(\d+)"', body.group(1))]
-    assert spans, "this function is expected to render a full-width placeholder"
 
-    assert all(span == expected for span in spans), (
-        f"placeholder spans {spans} against {expected} matrix columns"
+    # The width is no longer a literal to compare: the Delta column exists in
+    # the markup and is hidden until an as-of is in force, so the correct span
+    # differs between the two states. Every placeholder therefore reads
+    # `matrixCols()`, which counts the VISIBLE header cells -- and this asserts
+    # they all use it. A literal is what went stale last time; asserting the
+    # single reader is stronger than asserting a number, because it also
+    # survives the next column.
+    literals = re.findall(r'colspan="(\d+)"', body.group(1))
+    assert not literals, (
+        f"placeholder uses a literal colspan {literals}, which goes stale the next "
+        "time a column is added or hidden -- use matrixCols()"
+    )
+    assert 'colspan="${matrixCols()}"' in body.group(1), (
+        "this function is expected to render a full-width placeholder via matrixCols()"
     )
 
 
@@ -220,7 +217,7 @@ def test_half_a_measurement_is_not_reported_as_nothing_recorded(branch: str) -> 
 def _table_column_count(page: str, tbody_id: str) -> int:
     """Columns in the header of the table owning ``tbody_id``, counting colspans.
 
-    Generalizes ``_matrix_column_count`` to any of the suite-scoped tables. The
+    Reads any of the suite-scoped tables. The
     table is located by walking back from its tbody to the enclosing <table>,
     because the markup has no per-table id.
     """
@@ -237,11 +234,28 @@ def _table_column_count(page: str, tbody_id: str) -> int:
 
 
 def _declared_panels(page: str, block_name: str) -> list[tuple[str, int]]:
+    """The panels declaring a FIXED width, as (tbody id, columns).
+
+    A panel may instead declare the shared reader -- ``matrixCols`` -- and
+    those are excluded here rather than ignored silently: the matrix's width
+    changes at runtime because the Delta column is hidden until an as-of is in
+    force, so there is no single number to compare it against.
+    ``_reader_panels`` asserts that such an entry names the real reader, so
+    "declares a function" cannot become a way to opt out of this invariant.
+    """
     block = re.search(rf"const {block_name} = \[(.*?)\];", page, re.S)
     assert block, f"the UI must declare its panels in one {block_name} block"
     entries = re.findall(r'\["([a-z-]+)",\s*(\d+)\]', block.group(1))
-    assert entries, f"{block_name} must list at least one panel"
+    readers = _reader_panels(page, block_name)
+    assert entries or readers, f"{block_name} must list at least one panel"
     return [(name, int(width)) for name, width in entries]
+
+
+def _reader_panels(page: str, block_name: str) -> list[tuple[str, str]]:
+    """The panels declaring a width READER instead of a literal."""
+    block = re.search(rf"const {block_name} = \[(.*?)\];", page, re.S)
+    assert block, f"the UI must declare its panels in one {block_name} block"
+    return re.findall(r'\["([a-z-]+)",\s*([A-Za-z_][\w]*)\]', block.group(1))
 
 
 def _suite_panels(page: str) -> list[tuple[str, int]]:
@@ -264,6 +278,15 @@ def test_every_declared_panel_placeholder_spans_its_whole_table(block_name: str)
         assert declared == actual, (
             f"{block_name} declares colspan {declared} for {tbody_id}, "
             f"whose table has {actual} columns"
+        )
+
+    # A reader is the only permitted alternative to a literal, and it has to be
+    # THE reader -- otherwise declaring any function would silently exempt a
+    # panel from the width check this test exists to enforce.
+    for tbody_id, reader in _reader_panels(page, block_name):
+        assert reader == "matrixCols", (
+            f"{block_name} declares {reader!r} as the width of {tbody_id}; the only "
+            "reader allowed here is matrixCols, which counts the visible header cells"
         )
 
 
@@ -432,6 +455,40 @@ def test_the_suite_switch_bumps_the_generation_and_clears_the_panels() -> None:
     assert handler.group(1).index("clearSuiteScopedPanels();") < handler.group(1).index(
         'go("matrix")'
     ), "the panels must be cleared before the view is shown, or the old rows paint first"
+
+
+def test_every_suite_switch_drops_the_as_of_selection() -> None:
+    """An event id belongs to one benchmark, so it cannot survive a switch.
+
+    The route scopes `as_of_event` by suite and 404s otherwise. Carrying it
+    across a switch therefore replaced the NEW benchmark's table with
+    "Could not load results -- no such recorded regrade for this benchmark.
+    Retry when the API is reachable" -- advice that is false and never comes
+    good -- while `loadAsOfEvents` repainted the dropdown as "now (live)" over
+    state that was still rewound. Only `clear` recovered.
+
+    Both switch sites are checked, because they are separate code paths that
+    already drifted apart once: the rail click handler and the route-driven
+    switch in `applyRoute`. Anchored on the line that resets the other
+    suite-scoped state, so a third switch added later has to reset this too or
+    it will not match.
+    """
+    page = _page()
+
+    resets = re.findall(r'S\.matrixDifficulty = "";.*?(?=\n\s*(?:S\.suiteGen|\}))', page, re.S)
+    assert len(resets) >= 2, f"expected at least two suite-switch reset blocks, found {len(resets)}"
+    for block in resets:
+        assert 'S.asOfEvent = ""' in block, (
+            "a suite switch that resets the other suite-scoped state but not "
+            f"S.asOfEvent sends the previous benchmark's event id to the new one: {block!r}"
+        )
+
+    # `clear` returns to live for the same reason: leaving the rewind in force
+    # while every visible filter resets shows historical numbers with nothing
+    # on screen still claiming to be a filter.
+    clear = re.search(r'getElementById\("matrix-clear"\)\.addEventListener\((.*?)\}\);', page, re.S)
+    assert clear, "the matrix clear handler must exist"
+    assert 'S.asOfEvent = ""' in clear.group(1), "clear must return the matrix to live"
 
 
 def test_the_benchmarks_loader_says_it_is_loading_and_drops_a_stale_response() -> None:

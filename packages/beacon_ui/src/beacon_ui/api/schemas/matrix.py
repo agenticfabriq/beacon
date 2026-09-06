@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003
 from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict
@@ -84,14 +85,72 @@ class MatrixRowOut(BaseModel):
     n_got_facts_scope_unknown: int = 0
     defer_rate: float | None = None
     wrong_rate: float | None = None
+    # Present only under an as-of. `current` is this row's live values, and
+    # `affected` says whether the selected event touched any of its results --
+    # read from the event's own records, not inferred from the rates matching,
+    # because two changes can cancel and "the number is the same" is a
+    # different claim from "this event did not touch it".
+    current: MatrixCurrentOut | None = None
+    affected: bool | None = None
+
     median_tokens: float | None = None
     median_runtime_ms: float | None = None
+
+
+class MatrixCurrentOut(BaseModel):
+    """The same row's CURRENT values, carried beside a rewound one.
+
+    Present only when ``as_of_event`` is set. Five rates rather than one,
+    because a single delta on the headline leaves the rest to change in
+    silence -- measured on the first real event: EX, wrong, exact and
+    got-facts each moved in 28 of 28 rows, and only EX had a delta.
+    ``defer_rate`` is here to complete the outcome triple; a regrade cannot
+    move it, since it re-derives only results already PASS or FAIL.
+
+    ``n_graded`` too: an ``ERROR`` crossing into the graded set moves the
+    denominator, not just the numerator. It did not happen in that event, and
+    a reader cannot be asked to assume it never will.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ex_rate: float | None = None
+    defer_rate: float | None = None
+    wrong_rate: float | None = None
+    exact_rate: float | None = None
+    got_facts_rate: float | None = None
+    n_graded: int
+
+
+class MatrixAsOfOut(BaseModel):
+    """Which point the rows were read at, and what that did NOT rewind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: UUID
+    recorded_at: datetime
+    grader: str
+    grader_version: str
+    headline_metric: str
+
+    # Stated in the payload, not left to the UI's copy. A selector that
+    # rewound grading while the run set moved underneath would be a new way to
+    # publish a number nobody can reproduce, so the response names its own
+    # limits: only recorded grading changes, and only back to the first
+    # recorded event.
+    rewinds: str = (
+        "Recorded grading changes only. A rate that moved because a run landed or "
+        "was invalidated is NOT rewound: the matrix pools every valid run with no "
+        "time bound. Outcomes for results no recorded event touched are shown at "
+        "their current value."
+    )
 
 
 class MatrixOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rows: list[MatrixRowOut]
+    as_of: MatrixAsOfOut | None = None
     # Facet counts over the whole selection, so a difficulty-filtered view
     # still shows what it is a slice of.
     difficulty_counts: dict[str, int]

@@ -9,22 +9,28 @@ stays in it, and a rate over nothing gradeable is None.
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003
 from typing import Annotated
 from uuid import UUID  # noqa: TC003
 
 import sqlalchemy as sa
 from beacon_iam.permissions import Permission
 from beacon_storage.models.eval_items import EvalItem
+from beacon_storage.models.regrade_events import RegradeEvent
 from beacon_storage.models.runs import Result, Run, Verdict
 from beacon_storage.models.solutions import Solution
 from beacon_storage.models.tenancy import User  # noqa: TC002
+from beacon_storage.repository.regrade_events import RegradeEventRepo
 from beacon_storage.repository.suites import SuiteRepo
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session  # noqa: TC002
 
 from beacon_ui.api.deps import get_session, require_permission
 from beacon_ui.api.openapi import requires
 from beacon_ui.api.schemas.matrix import (
+    MatrixAsOfOut,
+    MatrixCurrentOut,
     MatrixOut,
     MatrixRowOut,
     SuiteItemListOut,
@@ -49,8 +55,15 @@ def _rate(part: int, whole: int) -> float | None:
     return part / whole if whole else None
 
 
-def _per_run_rate(filters: list[sa.ColumnElement[bool]]) -> sa.Subquery:
+def _per_run_rate(
+    filters: list[sa.ColumnElement[bool]], *, reversal: sa.Subquery | None = None
+) -> sa.Subquery:
     """Each valid run's own headline rate, one row per run.
+
+    Rewound with the row when an as-of is in force. It has to be: this feeds
+    the min/max spread beside the rate, and a current spread bracketing a
+    rewound mean is a row that contradicts itself -- 47.2% with a range of
+    50.9-50.9.
 
     A row aggregating several runs reports one number, and a reader takes it
     for a quantity. It is a mean over repetitions that disagree -- measured on
@@ -58,24 +71,41 @@ def _per_run_rate(filters: list[sa.ColumnElement[bool]]) -> sa.Subquery:
     the row said 54.3. Repeating a config is how you learn the error bar, so
     the row must be able to SHOW the spread rather than average it away.
     """
-    return (
+    outcome = (
+        Result.outcome
+        if reversal is None
+        else sa.func.coalesce(reversal.c.before_outcome, Result.outcome)
+    )
+    stmt = (
         sa.select(
             Run.id.label("run_id"),
             (
-                sa.cast(sa.func.count().filter(Result.outcome == "PASS"), sa.Float)
-                / sa.func.nullif(sa.func.count().filter(Result.outcome.in_(_GRADED)), 0)
+                sa.cast(sa.func.count().filter(outcome == "PASS"), sa.Float)
+                / sa.func.nullif(sa.func.count().filter(outcome.in_(_GRADED)), 0)
             ).label("rate"),
         )
         .select_from(Run)
         .join(Result, Result.run_id == Run.id)
-        .where(*filters)
-        .group_by(Run.id)
-        .subquery("per_run_rate")
     )
+    if reversal is not None:
+        stmt = stmt.join(reversal, reversal.c.result_id == Result.id, isouter=True)
+    return stmt.where(*filters).group_by(Run.id).subquery("per_run_rate")
 
 
-def _latest_reading(metric: str) -> sa.Subquery:
-    """The CURRENT verdict per result for one metric, one row each.
+def _latest_reading(metric: str, *, before: datetime | None = None) -> sa.Subquery:
+    """The verdict per result for one metric, one row each -- current, or as-of.
+
+    ``before`` makes it as-of: the newest verdict that EXISTED at that moment.
+    This is the cheap half of the rewind, and the reason it is cheap is that
+    verdicts are append-only and versioned -- nothing was ever overwritten, so
+    reading them at a past instant is a plain filter. ``Result.outcome`` is the
+    expensive half, because it is one column written in place.
+
+    The cutoff is strict (``<``). A regrade writes its verdicts and its event
+    in ONE transaction, so both carry the same ``now()``: ``<`` excludes
+    exactly the verdicts that regrade produced, which is what "before this
+    event" has to mean. ``<=`` would include them and the readings would
+    disagree with the outcomes beside them.
 
     Grader versions accumulate on a result (history, not garbage), so a bare
     join sees every era -- and an aggregate over it silently means "any
@@ -94,10 +124,60 @@ def _latest_reading(metric: str) -> sa.Subquery:
             # whole table was compared" and must not be counted as it.
             verdict.raw_output["scope"].astext.label("scope"),
         )
-        .where(verdict.metric == metric)
+        .where(
+            verdict.metric == metric,
+            *([verdict.created_at < before] if before is not None else []),
+        )
         .distinct(verdict.result_id)
         .order_by(verdict.result_id, verdict.id.desc())
-        .subquery(f"latest_{metric}")
+        .subquery(f"latest_{metric}" + ("_then" if before is not None else ""))
+    )
+
+
+def _outcome_reversal(suite_id: UUID, event: RegradeEvent) -> sa.Subquery:
+    """Per result, the outcome it held BEFORE the selected event.
+
+    Built in SQL from the events' own ``outcome_changes`` rather than from a
+    Python-side dict, so a suite with a long history does not have to be paged
+    into memory to answer one request.
+
+    Every event at or after the selected one contributes, and the OLDEST
+    ``before`` wins -- ``DISTINCT ON`` with the events ordered ascending. That
+    is the whole subtlety: if a result moved in event E and again in E+1,
+    "before E" is E's before-value, not E+1's. Taking the newest would report
+    the intermediate state as though it were the original.
+
+    Ordered by ``(created_at, id)`` because ``created_at`` is transaction-
+    scoped: two events written in one transaction share it exactly, and the
+    uuid7 id is what breaks the tie in write order.
+
+    Results no recorded event touched are absent here, and the caller falls
+    back to the current outcome for them. That is a real assumption and it is
+    the one the UI has to disclose: it holds for grading changes, which are
+    what events record, and NOT for an outcome that moved by some other path
+    before recording began.
+    """
+    # The column has to be declared JSONB or the `["result_id"]` subscript is
+    # not available on it -- a bare table_valued("value") comes back untyped.
+    changes = sa.func.jsonb_array_elements(RegradeEvent.outcome_changes).table_valued(
+        sa.column("value", JSONB)
+    )
+    result_id = sa.cast(changes.c.value["result_id"].astext, sa.Uuid)
+    return (
+        sa.select(
+            result_id.label("result_id"),
+            changes.c.value["before"].astext.label("before_outcome"),
+        )
+        .select_from(RegradeEvent)
+        .join(changes, sa.true())
+        .where(
+            RegradeEvent.suite_id == suite_id,
+            sa.tuple_(RegradeEvent.created_at, RegradeEvent.id)
+            >= sa.tuple_(sa.literal(event.created_at), sa.literal(event.id)),
+        )
+        .distinct(result_id)
+        .order_by(result_id, RegradeEvent.created_at.asc(), RegradeEvent.id.asc())
+        .subquery("outcome_reversal")
     )
 
 
@@ -115,12 +195,31 @@ def results_matrix(
     ],
     session: Annotated[Session, Depends(get_session)],
     difficulty: Annotated[str | None, Query()] = None,
+    as_of_event: Annotated[
+        UUID | None,
+        Query(description="Read every rate as it stood BEFORE this recorded regrade."),
+    ] = None,
 ) -> MatrixOut:
-    """Group valid runs by configuration identity and aggregate their results."""
+    """Group valid runs by configuration identity and aggregate their results.
+
+    ``as_of_event`` rewinds the grading. What it does NOT rewind is the run
+    set: a rate that moved because a run landed or was invalidated is
+    untouched, and that is not hypothetical -- the matrix pools every valid run
+    with no time bound. The response says so in ``as_of.rewinds``, because a
+    selector that silently rewound one of the two reasons a number moves would
+    be worse than none.
+    """
     filters: list[sa.ColumnElement[bool]] = [
         Run.suite_id == suite_id,
         Run.invalidated_at.is_(None),
     ]
+    event: RegradeEvent | None = None
+    if as_of_event is not None:
+        event = RegradeEventRepo(session).get_for_suite(suite_id=suite_id, event_id=as_of_event)
+        if event is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "no such recorded regrade for this benchmark"
+            )
     engine_expr = sa.func.coalesce(Run.config["engine"].astext, "")
     retrieval_k_expr = Run.config["retrieval_k"].astext
     # Two verdict readings: the strict exact_match beside the tolerant
@@ -129,7 +228,29 @@ def results_matrix(
     # grader across benchmarks -- and each read at its CURRENT version only.
     got_facts_now = _latest_reading("got_facts")
     exact_now = _latest_reading("exact_match")
-    per_run = _per_run_rate(filters)
+
+    # As-of, the two column families are rewound by DIFFERENT mechanisms,
+    # because they were stored differently. The readings are append-only, so
+    # "as it stood" is a filter on when the verdict was written. The outcome is
+    # one column overwritten in place, so it has to be reconstructed backwards
+    # from what the events recorded. Same instant, two routes to it.
+    reversal = None if event is None else _outcome_reversal(suite_id, event)
+    if event is not None:
+        got_facts_read = _latest_reading("got_facts", before=event.created_at)
+        exact_read = _latest_reading("exact_match", before=event.created_at)
+    else:
+        got_facts_read, exact_read = got_facts_now, exact_now
+
+    # Every rate below is computed over THIS expression, not `Result.outcome`
+    # directly. With no as-of it IS `Result.outcome`; with one it is the
+    # outcome the result held before the selected event, falling back to the
+    # current value for results no recorded event touched.
+    outcome = (
+        Result.outcome
+        if reversal is None
+        else sa.func.coalesce(reversal.c.before_outcome, Result.outcome)
+    )
+    per_run = _per_run_rate(filters, reversal=reversal)
 
     stmt = (
         sa.select(
@@ -161,26 +282,18 @@ def results_matrix(
             sa.func.min(per_run.c.rate).label("ex_rate_min"),
             sa.func.max(per_run.c.rate).label("ex_rate_max"),
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome.in_(_GRADED))
+            .filter(outcome.in_(_GRADED))
             .label("n_graded"),
-            sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome == "PASS")
-            .label("n_pass"),
-            sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome == "FAIL")
-            .label("n_fail"),
-            sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome == "DEFER")
-            .label("n_defer"),
-            sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome == "ERROR")
-            .label("n_errors"),
+            sa.func.count(sa.func.distinct(Result.id)).filter(outcome == "PASS").label("n_pass"),
+            sa.func.count(sa.func.distinct(Result.id)).filter(outcome == "FAIL").label("n_fail"),
+            sa.func.count(sa.func.distinct(Result.id)).filter(outcome == "DEFER").label("n_defer"),
+            sa.func.count(sa.func.distinct(Result.id)).filter(outcome == "ERROR").label("n_errors"),
             # BIRD-comparable numerator: a pass whose SQL the runner verified
             # against the gold's engine. Only meaningful when the runner
             # supplied the flag at all -- see n_portability_flagged.
             sa.func.count(sa.func.distinct(Result.id))
             .filter(
-                Result.outcome == "PASS",
+                outcome == "PASS",
                 sa.func.coalesce(Result.output["portable_to_gold_engine"].astext, "true")
                 != "false",
             )
@@ -199,10 +312,10 @@ def results_matrix(
             # rate that excluded the result -- 3 over 2 on a PASS/PASS/ERROR
             # row, which the UI renders as "150%".
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.is_(True))
+            .filter(outcome.in_(_GRADED), got_facts_read.c.bool_value.is_(True))
             .label("n_got_facts"),
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.is_(True))
+            .filter(outcome.in_(_GRADED), exact_read.c.bool_value.is_(True))
             .label("n_exact"),
             # How many results the metric was READ on, true or false. The
             # numerator cannot answer that: a system that matched nothing and
@@ -214,7 +327,7 @@ def results_matrix(
             # were never scored reports 0.0 on the strength of a verdict
             # attached to a result the rate excludes.
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.isnot(None))
+            .filter(outcome.in_(_GRADED), got_facts_read.c.bool_value.isnot(None))
             .label("n_got_facts_scored"),
             # The breakdown of that total, three ways and each counted
             # DIRECTLY. `condition_cols` restricts the tolerant reading to the
@@ -226,37 +339,85 @@ def results_matrix(
             # what its denominator had thrown out (B68).
             sa.func.count(sa.func.distinct(Result.id))
             .filter(
-                Result.outcome.in_(_GRADED),
-                got_facts_now.c.bool_value.isnot(None),
-                got_facts_now.c.scope == "subset",
+                outcome.in_(_GRADED),
+                got_facts_read.c.bool_value.isnot(None),
+                got_facts_read.c.scope == "subset",
             )
             .label("n_got_facts_subset_scored"),
             sa.func.count(sa.func.distinct(Result.id))
             .filter(
-                Result.outcome.in_(_GRADED),
-                got_facts_now.c.bool_value.isnot(None),
-                got_facts_now.c.scope == "full",
+                outcome.in_(_GRADED),
+                got_facts_read.c.bool_value.isnot(None),
+                got_facts_read.c.scope == "full",
             )
             .label("n_got_facts_full_scored"),
             sa.func.count(sa.func.distinct(Result.id))
             .filter(
-                Result.outcome.in_(_GRADED),
-                got_facts_now.c.bool_value.isnot(None),
-                got_facts_now.c.scope.is_(None),
+                outcome.in_(_GRADED),
+                got_facts_read.c.bool_value.isnot(None),
+                got_facts_read.c.scope.is_(None),
             )
             .label("n_got_facts_scope_unknown"),
             sa.func.count(sa.func.distinct(Result.id))
-            .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.isnot(None))
+            .filter(outcome.in_(_GRADED), exact_read.c.bool_value.isnot(None))
             .label("n_exact_scored"),
             sa.func.percentile_cont(0.5)
             .within_group(Result.tokens_input + Result.tokens_output)
             .label("median_tokens"),
             sa.func.percentile_cont(0.5).within_group(Result.runtime_ms).label("median_runtime"),
+            # The CURRENT values, carried alongside so the caller can render a
+            # delta and mark the cells that moved. Only the columns that can
+            # move: a single delta on the headline would leave the other three
+            # to change in silence, which is the failure this whole feature
+            # exists to end. `deferred` is here for completeness of the
+            # outcome triple even though a regrade cannot move it -- it
+            # re-derives only results already PASS or FAIL.
+            *(
+                []
+                if reversal is None
+                else [
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome.in_(_GRADED))
+                    .label("n_graded_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome == "PASS")
+                    .label("n_pass_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome == "FAIL")
+                    .label("n_fail_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome == "DEFER")
+                    .label("n_defer_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.is_(True))
+                    .label("n_exact_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome.in_(_GRADED), exact_now.c.bool_value.isnot(None))
+                    .label("n_exact_scored_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(Result.outcome.in_(_GRADED), got_facts_now.c.bool_value.is_(True))
+                    .label("n_got_facts_now"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(
+                        Result.outcome.in_(_GRADED),
+                        got_facts_now.c.bool_value.isnot(None),
+                    )
+                    .label("n_got_facts_scored_now"),
+                    # Whether the selected event touched ANY result of this
+                    # row. Read from the reversal join rather than inferred
+                    # from the rates being equal: a row can have two changes
+                    # that cancel, and "the number happens to match" is not
+                    # the same statement as "this event did not touch it".
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(reversal.c.result_id.isnot(None))
+                    .label("n_reverted"),
+                ]
+            ),
         )
         .join(Result, Result.run_id == Run.id)
         .join(Solution, Solution.id == Run.solution_id)
-        .join(got_facts_now, got_facts_now.c.result_id == Result.id, isouter=True)
-        .join(exact_now, exact_now.c.result_id == Result.id, isouter=True)
+        .join(got_facts_read, got_facts_read.c.result_id == Result.id, isouter=True)
+        .join(exact_read, exact_read.c.result_id == Result.id, isouter=True)
         .join(per_run, per_run.c.run_id == Run.id, isouter=True)
         .where(*filters)
         .group_by(
@@ -270,6 +431,21 @@ def results_matrix(
             engine_expr,
         )
     )
+    if reversal is not None:
+        # OUTER: a result the selected event never touched has no reversal row
+        # and keeps its current outcome through the COALESCE. An inner join
+        # would silently drop every unchanged result and report each rate over
+        # the movers alone -- 100% on a row where 19 of 487 moved.
+        #
+        # The current readings are joined only here, because only an as-of
+        # request needs both eras: without one, `*_read` IS `*_now` and joining
+        # them twice would multiply the rows.
+        stmt = (
+            stmt.join(reversal, reversal.c.result_id == Result.id, isouter=True)
+            .join(exact_now, exact_now.c.result_id == Result.id, isouter=True)
+            .join(got_facts_now, got_facts_now.c.result_id == Result.id, isouter=True)
+        )
+
     if difficulty is not None:
         stmt = stmt.join(EvalItem, _item_join_clause()).where(
             EvalItem.item_metadata["difficulty"].astext == difficulty
@@ -330,6 +506,30 @@ def results_matrix(
                 n_got_facts_scope_unknown=int(record.n_got_facts_scope_unknown),
                 defer_rate=_rate(int(record.n_defer), graded),
                 wrong_rate=_rate(int(record.n_fail), graded),
+                current=(
+                    None
+                    if reversal is None
+                    else MatrixCurrentOut(
+                        ex_rate=_rate(int(record.n_pass_now), int(record.n_graded_now)),
+                        defer_rate=_rate(int(record.n_defer_now), int(record.n_graded_now)),
+                        wrong_rate=_rate(int(record.n_fail_now), int(record.n_graded_now)),
+                        # Same None-vs-0.0 gate as the as-of side: a metric
+                        # that was never read and one that matched nothing
+                        # both count zero, and only one is a measurement.
+                        exact_rate=(
+                            _rate(int(record.n_exact_now), int(record.n_graded_now))
+                            if int(record.n_exact_scored_now)
+                            else None
+                        ),
+                        got_facts_rate=(
+                            _rate(int(record.n_got_facts_now), int(record.n_graded_now))
+                            if int(record.n_got_facts_scored_now)
+                            else None
+                        ),
+                        n_graded=int(record.n_graded_now),
+                    )
+                ),
+                affected=None if reversal is None else bool(int(record.n_reverted)),
                 median_tokens=float(record.median_tokens)
                 if record.median_tokens is not None
                 else None,
@@ -338,6 +538,9 @@ def results_matrix(
                 else None,
             )
         )
+    # Sorted by the rate that is ON SCREEN, which under an as-of is the
+    # rewound one. Sorting by today's number while showing last week's puts
+    # the rows in an order the reader cannot derive from the column.
     rows.sort(key=lambda row: (row.ex_rate is None, -(row.ex_rate or 0.0)))
 
     # Facet counts over the unfiltered selection, so a filtered view still
@@ -358,7 +561,21 @@ def results_matrix(
         .group_by(level)
     )
     difficulty_counts = {str(key): int(count) for key, count in session.execute(facet_stmt).all()}
-    return MatrixOut(rows=rows, difficulty_counts=difficulty_counts)
+    return MatrixOut(
+        rows=rows,
+        difficulty_counts=difficulty_counts,
+        as_of=(
+            None
+            if event is None
+            else MatrixAsOfOut(
+                event_id=event.id,
+                recorded_at=event.created_at,
+                grader=event.grader,
+                grader_version=event.grader_version,
+                headline_metric=event.headline_metric,
+            )
+        ),
+    )
 
 
 @router.get(

@@ -140,6 +140,7 @@
   .view{display:none}.view.on{display:block}
   .note{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);border-radius:var(--r);padding:11px 13px;font-family:var(--prose);font-size:12.5px;color:var(--ink-2);line-height:1.55}
   .note b{color:var(--ink)}
+  .warn{border-left-color:var(--defer)}
   .errbar{border:1px solid var(--wrong);background:var(--wrong-soft);color:var(--wrong);border-radius:var(--r);padding:8px 12px;font-family:var(--prose);font-size:12.5px;margin:10px 0;display:none}
   .errbar.on{display:block}
   code{font-family:var(--mono);font-size:11px;background:var(--surface-2);padding:1px 4px;border-radius:2px;border:1px solid var(--line-soft)}
@@ -162,7 +163,8 @@
   .reveal .k{display:flex;gap:8px;align-items:center}
   .reveal code{flex:1;background:var(--surface);border:1px solid var(--line);padding:6px 9px;font-size:11.5px;overflow-x:auto;white-space:nowrap;border-radius:var(--r)}
   footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-family:var(--prose);font-size:12px;color:var(--ink-3);line-height:1.6}
-</style>
+    .mv{color:var(--defer);font-weight:700;margin-left:3px;cursor:help}
+  </style>
 </head>
 <body>
 
@@ -225,6 +227,13 @@
         <span class="dim" style="margin-left:auto;font-size:11.5px" id="matrix-count"></span>
         <button class="btn" id="matrix-clear">clear</button>
       </div>
+      <div class="chips" id="matrix-asof" style="display:none">
+        <span class="chiplabel">as of</span>
+        <select id="matrix-asof-pick" style="min-width:300px"></select>
+        <span class="chip" id="matrix-asof-chip"
+              style="border-color:var(--defer);color:var(--defer);cursor:default;display:none">viewing history</span>
+        <span class="dim" id="matrix-asof-note" style="font-size:11.5px"></span>
+      </div>
       <div class="tw"><table>
         <thead>
         <!-- Two kinds of number sit side by side here and used to be
@@ -238,6 +247,7 @@
         <tr class="grouphead">
           <th colspan="6"></th>
           <th class="num grp" colspan="3" title="A partition of the run's gradeable items: every item is exactly one of these, so they sum to 100%. Infra errors are not here -- an outage leaves the denominator entirely.">outcome · sums to 100%</th>
+          <th class="num grp" colspan="1" id="mx-vsnow-head" style="display:none">vs now</th>
           <th class="num grp" colspan="3" title="Alternative readings of the SAME items, not further slices. They overlap the outcome columns above: an answer carrying gold's data plus extra columns is wrong under exact match and right under got-facts, so it is counted in both. Adding these to the left-hand group double-counts.">readings · overlap the above</th>
           <th colspan="4"></th></tr>
         <tr>
@@ -247,6 +257,7 @@
           <th class="num sort grp" data-sort="ex_rate" title="PASS rate under the benchmark's OWN headline rule -- exact_match for BIRD, got_facts for Spider. So EX equals the exact column on BIRD and the got-facts column on Spider: that is how the benchmark grades, not a duplicated column.">EX</th>
           <th class="num sort" data-sort="defer_rate" title="Declined to answer. Stays in the denominator: declining is an outcome, not an outage.">deferred</th>
           <th class="num sort" data-sort="wrong_rate">wrong</th>
+          <th class="num grp" id="mx-delta-head" style="display:none" title="EX as of the selected point MINUS EX now. Negative means the rewound number is lower -- the event raised this row. Only EX has a delta; the other rewound columns are marked with a dot instead.">&Delta; EX</th>
           <th class="num sort grp" data-sort="ex_target_engine_rate" title="BIRD-comparable: passes whose SQL the runner verified on the gold engine">EX*</th>
           <th class="num sort" data-sort="exact_rate" title="beacon's strict reading: exact result-set match, column order and arity included. Same meaning on every benchmark, unlike EX.">exact</th>
           <th class="num sort" data-sort="got_facts_rate" title="beacon's tolerant reading: gold's data is present, whatever shape it arrived in. Deliberately more permissive than exact, so it credits some items the wrong column already counted.">got-facts</th>
@@ -259,6 +270,7 @@
     <div class="view" id="v-cell">
       <div class="crumb"><button data-go="matrix">Results</button> › <span id="cell-crumb"></span></div>
       <h1 id="cell-title"></h1>
+      <div class="note warn" id="cell-asof-note" style="display:none"></div>
       <p class="sub">Everything scoped to this one configuration. A layer that helps here may do
       nothing on a different model, which is why this is never one global number.</p>
       <section><div class="sechead"><h2>Layer effect</h2></div><div id="cell-attribution"></div></section>
@@ -474,6 +486,7 @@ const S = {  // client state; everything else lives on the server
   showInvalidated: false,
   runOutcome: "", runDifficulty: "", selectedItem: null,
   questionsDifficulty: "", questionsSource: "",
+  asOfEvent: "", asOfEvents: [],
   runsOffset: 0, runsPageFull: false, runsDateAsc: false,
   qOffset: 0, qTotal: 0,
   ritemsOffset: 0, ritemsTotal: 0, ritemsDateAsc: false,
@@ -494,12 +507,40 @@ const S = {  // client state; everything else lives on the server
 // table needs so a placeholder row does not collapse its layout.
 // Team-scoped, listed separately because a SUITE switch must not blank them:
 // the benchmark list is what you pick a suite FROM.
+/* The matrix's VISIBLE column count, read off the header rather than written
+ * down. Three functions render a full-width placeholder and a fourth renders
+ * the rows; every previous version of this was a literal, and a literal went
+ * stale the first time a column was added -- the no-benchmark cell spanned 15
+ * of 16 and rendered as a sliver. The Delta column is present in the markup
+ * and hidden until an as-of is in force, so "visible" is the number a
+ * placeholder has to match.
+ *
+ * Declared HERE, above SUITE_PANELS, and that placement is load-bearing: a
+ * `const` is not hoisted, so referencing it from an initializer further up
+ * throws a ReferenceError at parse-evaluation time and aborts the whole
+ * script. It shipped that way once -- every listener and the boot call are
+ * below the reference, so the page rendered its markup and did nothing at
+ * all. `node --check` passes it, because the syntax is fine. */
+const matrixCols = () =>
+  [...document.querySelectorAll("#v-matrix thead tr:last-child th")]
+    .filter((th) => th.style.display !== "none")
+    // SUM the colspans, do not count elements. The helpers this replaced
+    // summed them, and this file uses colspan in its own header (the grouping
+    // row above), so counting elements would report one column short the first
+    // time a span appeared in this row -- rendering the sliver the guard
+    // exists to prevent, with the guard green.
+    .reduce((total, th) => total + (Number(th.getAttribute("colspan")) || 1), 0);
+
 const TEAM_PANELS = [
   ["benchmarks-rows", 4],
 ];
 
 const SUITE_PANELS = [
-  ["matrix-rows", 16],
+  // matrix-rows declares the shared READER, not a number. It is the one table
+  // here whose width changes at runtime: the Delta column sits in the markup
+  // and is hidden until an as-of is in force. Every other panel is a fixed
+  // width and says so.
+  ["matrix-rows", matrixCols],
   ["runs-rows", 11],
   ["questions-rows", 7],
 ];
@@ -520,7 +561,8 @@ function clearSuiteScopedPanels() {
   for (const [id, cols] of SUITE_PANELS) {
     const body = document.getElementById(id);
     if (!body) continue;
-    body.innerHTML = `<tr><td colspan="${cols}" class="muted">Loading…</td></tr>`;
+    const span = typeof cols === "function" ? cols() : cols;
+    body.innerHTML = `<tr><td colspan="${span}" class="muted">Loading…</td></tr>`;
     body.dataset.payload = "[]";
   }
   // Counts, chips and pagers describe the suite being left. A stale count
@@ -578,6 +620,46 @@ const short = (value) => String(value ?? "").slice(0, 8);
  * 8 everywhere else and is a display defect there too; this is the one view
  * whose whole purpose is attributing a number to a run, so it cannot show an
  * id that names five of them. */
+/* ---- as-of rendering ---- */
+/* A rewound cell that differs from its current value is marked. EX is NOT --
+ * it has the delta column to itself, and marking it would assert, four cells
+ * away from its own delta, that it has none. Measured on the first real event:
+ * wrong, exact and got-facts each moved in 28 of 28 rows with no delta of
+ * their own, while deferred moved in 0 -- a regrade re-derives only results
+ * already PASS or FAIL, so it has no standing over DEFER. Deferred is still
+ * marked here rather than special-cased: the rule is "differs from now", and
+ * carving out a column because today's grader cannot move it would be wrong
+ * the first time one can. */
+const moved = (row, field) => {
+  if (!row.current) return "";
+  const then = row[field], now = row.current[field];
+  if (then === null || now === null || then === undefined || now === undefined) return "";
+  if (Math.round(then * 1000) === Math.round(now * 1000)) return "";
+  return `<span class="mv" title="differs from the current value (${pct(now)}) — this column has no Δ of its own">•</span>`;
+};
+/* "not affected" is TEXT, not an empty cell or a zero. A blank reads as
+ * missing data and a 0.0 reads as measured-and-unchanged; this row was not
+ * touched by the selected event, which is a third thing. Read from the
+ * event's records, never inferred from the rates matching -- two changes can
+ * cancel. */
+const deltaText = (row) => {
+  if (!row.affected) return "not affected";
+  const then = row.ex_rate, now = row.current.ex_rate;
+  if (then === null || now === null) return "n/a";
+  const d = (then - now) * 100;
+  return (d > 0 ? "+" : "") + d.toFixed(1);
+};
+const deltaClass = (row) => {
+  if (!row.affected) return "dim";
+  const then = row.ex_rate, now = row.current.ex_rate;
+  if (then === null || now === null) return "dim";
+  const d = then - now;
+  return d < 0 ? "wr" : d > 0 ? "ex" : "dim";
+};
+const deltaTitle = (row) => row.affected
+  ? "EX as of the selected point minus EX now. Negative means the event raised this row."
+  : "the selected event did not touch any result in this configuration";
+
 const shortRun = (value) => String(value ?? "").slice(0, 11);
 /* Timestamps arrive as ISO strings. Trimmed, not localised: the same string
  * has to be quotable back to an operator reading a regrade log. */
@@ -676,7 +758,7 @@ function matrixUnknown(message) {
   document.getElementById("matrix-count").textContent = "";
   rows.dataset.payload = "[]";
   rows.innerHTML =
-    `<tr><td colspan="16"><div class="empty">Could not load results — ${esc(message)}.` +
+    `<tr><td colspan="${matrixCols()}"><div class="empty">Could not load results — ${esc(message)}.` +
     " These numbers are unknown, not zero. Retry when the API is reachable.</div></td></tr>";
 }
 
@@ -685,7 +767,8 @@ const loadMatrix = guard(async () => {
     S.matrixRows = [];
     document.getElementById("matrix-diff-chips").innerHTML = "";
     document.getElementById("matrix-count").textContent = "";
-    document.getElementById("matrix-rows").innerHTML = `<tr><td colspan="16">${NO_BENCH}</td></tr>`;
+    document.getElementById("matrix-rows").innerHTML =
+      `<tr><td colspan="${matrixCols()}">${NO_BENCH}</td></tr>`;
     document.getElementById("matrix-rows").dataset.payload = "[]";
     return;
   }
@@ -698,7 +781,7 @@ const loadMatrix = guard(async () => {
   let body;
   try {
     body = await api("matrix", { suite_id: S.suiteId },
-      { query: { difficulty: S.matrixDifficulty } });
+      { query: { difficulty: S.matrixDifficulty, as_of_event: S.asOfEvent } });
   } catch (error) {
     // Not on sign-out: that hides the whole app, and a failure notice behind
     // the login screen would be a lie about why the table went away.
@@ -707,6 +790,7 @@ const loadMatrix = guard(async () => {
   }
   if (gen !== S.suiteGen) return;
   S.matrixRows = body.rows;
+  renderAsOf(body.as_of);
   const counts = body.difficulty_counts || {};
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   document.getElementById("matrix-diff-chips").innerHTML =
@@ -749,6 +833,42 @@ function matrixSelection() {
   });
 }
 
+/* The as-of control. Populated from the same events the History page lists,
+ * because "as of before event E" is the only point in time the data can
+ * actually answer -- there is no continuous timeline behind this, only the
+ * regrades that were recorded. */
+async function loadAsOfEvents() {
+  if (!S.suiteId) { S.asOfEvents = []; return; }
+  const gen = S.suiteGen;
+  try {
+    const events = asList(await api("history", { suite_id: S.suiteId }), "events");
+    if (gen !== S.suiteGen) return;
+    S.asOfEvents = events;
+  } catch { S.asOfEvents = []; }
+  const box = document.getElementById("matrix-asof");
+  const pick = document.getElementById("matrix-asof-pick");
+  // Hidden entirely when there is nothing to rewind to. An empty dropdown
+  // would read as "history is available and this benchmark has none", which
+  // is a different claim from "no regrade was ever recorded here".
+  box.style.display = S.asOfEvents.length ? "flex" : "none";
+  pick.innerHTML = `<option value="">now (live)</option>` + S.asOfEvents.map((event) =>
+    `<option value="${esc(event.id)}"${String(event.id) === S.asOfEvent ? " selected" : ""}>` +
+    `before ${esc(when(event.recorded_at))} — ${esc(event.grader_version)} · ` +
+    `${esc(event.headline_metric)} (${event.n_flipped} moved)</option>`).join("");
+}
+
+/* Show the delta column and the chip only while rewound, and say in the note
+ * what the rewind does NOT cover -- the run set moves without a regrade, and a
+ * selector that quietly rewound one of the two reasons a number changes would
+ * be a new way to publish an unreproducible figure. */
+function renderAsOf(asOf) {
+  const on = Boolean(asOf);
+  document.getElementById("mx-vsnow-head").style.display = on ? "" : "none";
+  document.getElementById("mx-delta-head").style.display = on ? "" : "none";
+  document.getElementById("matrix-asof-chip").style.display = on ? "" : "none";
+  document.getElementById("matrix-asof-note").textContent = on ? asOf.rewinds : "";
+}
+
 function renderMatrixRows() {
   const rows = matrixSelection();
   document.querySelectorAll("#v-matrix th.sort").forEach((th) => {
@@ -768,16 +888,17 @@ function renderMatrixRows() {
       <td class="num dim">${row.n_runs}</td><td class="num dim">${row.n_graded}</td>
       <td class="num ex grp">${pct(row.ex_rate)}${row.ex_rate_min !== null && row.ex_rate_max !== null && row.ex_rate_max > row.ex_rate_min
         ? `<span class="spread" title="lowest and highest of the ${row.n_runs} runs pooled here — the row's own error bar">${pct(row.ex_rate_min)}–${pct(row.ex_rate_max)}</span>` : ""}</td>
-      <td class="num def">${pct(row.defer_rate)}</td>
-      <td class="num wr">${pct(row.wrong_rate)}</td>
+      <td class="num def">${pct(row.defer_rate)}${moved(row, "defer_rate")}</td>
+      <td class="num wr">${pct(row.wrong_rate)}${moved(row, "wrong_rate")}</td>
+      ${row.current ? `<td class="num grp ${deltaClass(row)}" title="${esc(deltaTitle(row))}">${deltaText(row)}</td>` : ""}
       <td class="num dim grp">${pct(row.ex_target_engine_rate)}</td>
-      <td class="num dim">${pct(row.exact_rate)}</td>
-      <td class="num dim">${pct(row.got_facts_rate)}</td>
+      <td class="num dim">${pct(row.exact_rate)}${moved(row, "exact_rate")}</td>
+      <td class="num dim">${pct(row.got_facts_rate)}${moved(row, "got_facts_rate")}</td>
       <td class="num ${row.n_errors ? "er" : "dim"}">${row.n_errors}</td>
       <td class="num dim">${row.median_tokens === null ? "–" : Math.round(row.median_tokens)}</td>
       <td class="num dim">${row.median_runtime_ms === null ? "–" : Math.round(row.median_runtime_ms) + "ms"}</td>
       <td class="dim" style="font-size:11px">open →</td></tr>`).join("")
-    : '<tr><td colspan="16"><div class="empty">No configuration matches these filters.</div></td></tr>';
+    : `<tr><td colspan="${matrixCols()}"><div class="empty">No configuration matches these filters.</div></td></tr>`;
   document.getElementById("matrix-rows").dataset.payload = JSON.stringify(rows);
 }
 
@@ -787,6 +908,18 @@ const openCell = guard(async (row) => {
   document.getElementById("cell-crumb").textContent =
     `${row.solution_name} ${row.solution_version} · ${row.model_id || "?"} · ${row.config_label || ""}`;
   document.getElementById("cell-title").textContent = title;
+  // Decision (a): the seam is LABELLED, not rewound. A run's pass@1 comes from
+  // _summary in routes/runs.py, which reads result.outcome -- always today's
+  // value. Measured: a parent rewound to 47.2% opens a child reading 51.1% on
+  // the same configuration. Rewinding the runs page was out of scope; leaving
+  // the two numbers side by side unlabelled was not acceptable.
+  const asOfNote = document.getElementById("cell-asof-note");
+  const picked = S.asOfEvents.find((event) => String(event.id) === S.asOfEvent);
+  asOfNote.style.display = picked ? "" : "none";
+  asOfNote.textContent = picked
+    ? `Results is rewound to before ${when(picked.recorded_at)}, but the run figures below are` +
+      " current — they are computed from each result's outcome as it stands today."
+    : "";
 
   const attributionBox = document.getElementById("cell-attribution");
   try {
@@ -1308,6 +1441,13 @@ async function applyRoute() {
     S.baselineRunId = suite.baseline_run_id;
     S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
     S.runsOffset = 0; S.qOffset = 0; S.ritemsOffset = 0;
+    // An event id belongs to ONE benchmark: the route scopes it by suite and
+    // 404s otherwise, so carrying it across a switch replaced the new
+    // benchmark's table with "Could not load results -- no such recorded
+    // regrade for this benchmark. Retry when the API is reachable", which is
+    // false advice that never comes good, while the dropdown re-rendered as
+    // "now (live)" over state that was still rewound. Only `clear` recovered.
+    S.asOfEvent = "";
   }
   if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
   if (viewPart === "run" && runPart) { openRun(runPart); return true; }
@@ -1336,7 +1476,7 @@ function go(view) {
   // silently opened Results. Found by widening the routing test to read
   // go() call sites instead of data-go attributes.
   if (view !== "run" && view !== "cell" && view !== "history-event") writeRoute(view);
-  if (view === "matrix") loadMatrix();
+  if (view === "matrix") { loadAsOfEvents(); loadMatrix(); }
   if (view === "runs") loadRuns();
   if (view === "questions") loadQuestions();
   if (view === "history") loadHistory();
@@ -1449,6 +1589,13 @@ document.addEventListener("click", (event) => {
     S.baselineRunId = suite ? suite.baseline_run_id : null;
     S.matrixDifficulty = ""; S.runOutcome = ""; S.runDifficulty = "";
     S.runsOffset = 0; S.qOffset = 0; S.ritemsOffset = 0;
+    // An event id belongs to ONE benchmark: the route scopes it by suite and
+    // 404s otherwise, so carrying it across a switch replaced the new
+    // benchmark's table with "Could not load results -- no such recorded
+    // regrade for this benchmark. Retry when the API is reachable", which is
+    // false advice that never comes good, while the dropdown re-rendered as
+    // "now (live)" over state that was still rewound. Only `clear` recovered.
+    S.asOfEvent = "";
     S.suiteGen += 1;
     S.matrixRows = [];
     clearSuiteScopedPanels();
@@ -1468,9 +1615,21 @@ document.getElementById("matrix-system").addEventListener("change", (event) => {
 document.getElementById("matrix-model").addEventListener("change", (event) => {
   S.matrixModel = event.target.value; renderMatrixRows();
 });
+document.getElementById("matrix-asof-pick").addEventListener("change", (event) => {
+  // A server round trip, not a client refinement: rewinding re-aggregates
+  // every rate from the outcomes and the verdicts, which is not something the
+  // returned rows can be filtered into.
+  S.asOfEvent = event.target.value;
+  loadMatrix();
+});
 document.getElementById("matrix-clear").addEventListener("click", () => {
   S.matrixQuery = ""; S.matrixSystem = ""; S.matrixModel = ""; S.matrixDifficulty = "";
+  // `clear` returns to live. Leaving the rewind in force while every visible
+  // filter reset would leave the table showing historical numbers with
+  // nothing on screen still claiming to be a filter.
+  S.asOfEvent = "";
   document.getElementById("matrix-q").value = "";
+  loadAsOfEvents();
   loadMatrix();
 });
 document.addEventListener("click", (event) => {
