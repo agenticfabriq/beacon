@@ -1306,7 +1306,15 @@ function go(view) {
   });
   renderRail();
   window.scrollTo({ top: 0 });
-  if (view !== "run" && view !== "history-event") writeRoute(view);
+  // The three views a bare route cannot restore. `run` writes its own route
+  // WITH the run id (see writeRoute("run", runId)); `cell` and `history-event`
+  // are identified by things the route does not carry -- a matrix row and an
+  // event id -- so writing one puts a URL in the address bar that reloads to
+  // Results. `cell` did exactly that before this: it was absent from
+  // ROUTED_VIEWS and not excluded here, so every shared link to a cell page
+  // silently opened Results. Found by widening the routing test to read
+  // go() call sites instead of data-go attributes.
+  if (view !== "run" && view !== "cell" && view !== "history-event") writeRoute(view);
   if (view === "matrix") loadMatrix();
   if (view === "runs") loadRuns();
   if (view === "questions") loadQuestions();

@@ -6,7 +6,9 @@ one. Measured at the time: rewriting the policy to ``USING (true)`` left every
 test in that change green. A guard whose passing value is indistinguishable
 from its failure is the defect this suite keeps finding, so it gets both here: a
 behavioural check under a role RLS applies to, and a predicate check that reads
-this table's policy AND ``memberships``', which its isolation is scoped through.
+this table's policy and ``memberships``'. Note ``memberships`` is NOT what
+isolates this table today -- the policy scopes on ``current_user_id()``
+directly -- and the predicate test explains why it is still read.
 
 Read ``test_the_policy_is_not_the_isolation_where_this_is_deployed`` before
 concluding that a green run here means the deployed API is isolated. It does
@@ -125,7 +127,7 @@ def test_the_policy_actually_isolates_teams(engine: Engine) -> None:
         )
 
 
-def test_the_policy_is_not_the_isolation_where_this_is_deployed() -> None:
+def test_the_policy_is_not_the_isolation_where_this_is_deployed(engine: Engine) -> None:
     """The role the API is configured to connect as bypasses this policy.
 
     0024's comment presents the tenant column and policy as the precondition
@@ -145,24 +147,48 @@ def test_the_policy_is_not_the_isolation_where_this_is_deployed() -> None:
     ``beacon_app`` -- the constrained role the behavioural test drops to -- is
     granted nothing by any migration and exists only in fixtures.
 
-    This test passes while the gap exists and FAILS once the app's DSN names a
-    constrained role. At that point delete it and drop the warning from 0024,
-    because the thing it documents will have been fixed.
+    This test passes while the gap exists and fails once the app's DSN names a
+    constrained role, or once that role is constrained in the cluster this
+    suite runs against. It CANNOT see a role constrained only in a deployment
+    the suite never connects to -- no test here can. At that point delete it
+    and drop the warning from 0024, because the thing it documents will have
+    been fixed.
     """
     makefile = (pathlib.Path(__file__).parents[4] / "Makefile").read_text()
     declared = [line for line in makefile.splitlines() if line.startswith("DATABASE_URL ?=")]
     assert len(declared) == 1, (
         f"expected exactly one app DATABASE_URL default in the Makefile, found {declared}"
     )
-    role = re.search(r"://([^:@/]+)", declared[0])
-    assert role, f"could not read a role out of {declared[0]!r}"
+    match = re.search(r"://([^:@/]+)", declared[0])
+    assert match, f"could not read a role out of {declared[0]!r}"
+    role = match.group(1)
 
-    assert role.group(1) == "beacon", (
-        f"the app is now configured to connect as {role.group(1)!r}. If that role is "
-        "constrained, this test has served its purpose: delete it and remove the "
-        "warning from 0024, which says the policy is not load-bearing. Do not simply "
-        "widen this assertion -- the warning in the migration is the thing that has to "
-        "change."
+    # The name comes from the repo; the privileges come from whatever cluster
+    # this suite is pointed at, and the difference is a real limit worth
+    # stating rather than papering over. `DATABASE_URL` here is the TEST
+    # database, so this observes the app's role only because the Makefile
+    # points both at the same cluster. Constraining the role in a DEPLOYMENT
+    # this suite never connects to is therefore NOT covered -- no test in this
+    # repo can see that, and the previous version of this comment claimed
+    # otherwise. What is covered: pointing the app DSN at a different,
+    # constrained role, and constraining the role in the cluster the suite
+    # runs against.
+    with engine.connect() as conn:
+        attrs = conn.execute(
+            sa.text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = :r"),
+            {"r": role},
+        ).one_or_none()
+
+    assert attrs is not None, (
+        f"the app's configured role {role!r} does not exist in this database, so "
+        "whether it bypasses RLS cannot be read here"
+    )
+    assert bool(attrs[0] or attrs[1]), (
+        f"the app's configured role {role!r} no longer bypasses RLS "
+        f"(rolsuper={attrs[0]}, rolbypassrls={attrs[1]}). The gap is shut and the "
+        "policy is now load-bearing: delete this test and remove the warning from "
+        "0024. Do not widen the assertion -- the warning in the migration is the "
+        "thing that has to change."
     )
 
 
@@ -170,13 +196,29 @@ def test_the_policy_predicate_is_not_a_blanket_allow(engine: Engine) -> None:
     """The other check ``result_outcomes`` has, which 0024 also shipped without.
 
     The behavioural test above catches this table's own policy going to
-    ``USING (true)``. It does NOT catch ``memberships``' policy being widened,
-    because this table's isolation is scoped THROUGH that subquery: relax
-    memberships and every membership row becomes visible to every caller, so
-    the ``EXISTS`` here starts matching for teams the caller does not belong
-    to -- without anyone editing 0024.
+    ``USING (true)``. This one reads the predicates, and it reads
+    ``memberships``' as well as this table's.
 
-    So both predicates are read: this table's, and the one it depends on.
+    **Why memberships, stated correctly.** Widening ``memberships`` alone does
+    NOT leak this table: the policy's subquery carries
+    ``m.user_id = current_user_id()`` explicitly, so the ``EXISTS`` keeps
+    matching only the caller's own rows. An earlier version of this docstring
+    said otherwise and contradicted the sibling test above, which has it right.
+
+    The real break is TWO steps -- delete that clause as redundant, and widen
+    ``memberships`` -- and each step is individually harmless, which is what
+    makes the pair dangerous. Neither is visible from the other's diff. So
+    memberships' predicate is asserted here to catch step two even though step
+    one has not happened, and the sibling test names the coupling. A maintainer
+    should conclude that the clause is redundant TODAY and that removing it
+    makes this table depend on another table's policy -- not that memberships
+    is currently load-bearing.
+
+    **The strength of that assertion is limited, deliberately stated.** It
+    rejects a literal ``true`` and a predicate that never mentions
+    ``current_user_id()``. A realistic widening -- an admin-visibility clause
+    OR'd into the existing one -- satisfies both and would pass. Catching that
+    needs a behavioural test of the two-step break, which is not here.
     """
     with engine.connect() as conn:
         rows = conn.execute(
@@ -187,19 +229,36 @@ def test_the_policy_predicate_is_not_a_blanket_allow(engine: Engine) -> None:
                 " WHERE n.nspname = 'public'"
                 " AND c.relname IN ('regrade_events', 'memberships')"
                 " AND p.polqual IS NOT NULL"
+                # PERMISSIVE only. Restrictive policies are AND'd, so a
+                # restrictive `true` grants nothing and a restrictive policy
+                # that never mentions current_user_id() can be perfectly
+                # sound -- both would fail the assertions below with a message
+                # claiming they open the table.
+                " AND p.polpermissive"
             )
         ).all()
 
-    predicates: dict[str, str] = {str(row[0]): str(row[1]) for row in rows}
+    # A LIST per table, not one entry. Permissive policies are OR'd, so adding
+    # `USING (true)` alongside the real one opens the table while the real one
+    # is still there to be found -- and a dict keyed on the table name keeps
+    # whichever row the planner happened to return, `pg_policy` order being
+    # unspecified. Every predicate is asserted.
+    predicates: dict[str, list[str]] = {}
+    for row in rows:
+        predicates.setdefault(str(row[0]), []).append(str(row[1]))
+
     for table in ("regrade_events", "memberships"):
-        assert table in predicates, f"expected a USING predicate on {table}'s policy"
-        expr = predicates[table]
-        assert expr.strip().lower() != "true", (
-            f"{table}'s policy must not be a blanket allow: regrade_events "
-            "isolation is scoped through it"
-        )
-        assert "current_user_id()" in expr, f"{table} must stay user-scoped; got: {expr}"
-    assert "team_id" in predicates["regrade_events"], (
-        "regrade_events' policy must scope on its own tenant column; got: "
+        exprs = predicates.get(table, [])
+        assert exprs, f"expected a USING predicate on {table}'s policy"
+        for expr in exprs:
+            assert expr.strip().lower() != "true", (
+                f"{table} has a blanket-allow policy: permissive policies are OR'd, "
+                f"so this opens the table regardless of the others. Got: {exprs}"
+            )
+            assert "current_user_id()" in expr, (
+                f"every {table} policy must stay user-scoped; got: {expr}"
+            )
+    assert all("team_id" in expr for expr in predicates["regrade_events"]), (
+        "every regrade_events policy must scope on its own tenant column; got: "
         f"{predicates['regrade_events']}"
     )

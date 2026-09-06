@@ -315,18 +315,29 @@ def test_every_suite_scoped_loader_drops_a_stale_response() -> None:
         )
 
 
+def _go_body(page: str) -> str:
+    """The body of `go()`, so route-writing rules are read where they live."""
+    match = re.search(r"function go\(view\) \{(.*?)\n\}", page, re.S)
+    assert match, "no go() found"
+    return match.group(1)
+
+
 def test_every_routed_view_can_be_restored_from_its_url() -> None:
     """A view `go()` writes a route for must be one `applyRoute` can restore.
 
-    `go()` writes a route for every view except the two named exclusions, so a
-    view missing from ROUTED_VIEWS puts its own URL in the address bar and then
-    falls through to `go("matrix")` on reload -- a shared link silently opens
-    Results. That is what happened to `history`, and nothing failed.
+    `go()` writes a route for every view but its named exclusions, so a view
+    that is neither excluded nor in ROUTED_VIEWS puts its own URL in the
+    address bar and then falls through to `go("matrix")` on reload -- a shared
+    link silently opens Results.
 
-    `history-event` is the deliberate other side: its route carries no event
-    id, so restoring it could only open an empty detail page. It is excluded
-    from `writeRoute` instead of added here, and this pins BOTH halves so
-    neither can be re-broken quietly.
+    **Enumerated from `go("...")` CALL SITES, not `data-go` attributes.** Two
+    earlier versions of this test read attributes and were blind to the views
+    reached by click: first `benchmarks` (`class="bench"`, not `class="nav"`),
+    then `cell`, which was a LIVE instance of the defect -- `go("cell")` wrote
+    a route, `cell` was in neither ROUTED_VIEWS nor the exclusions, and every
+    shared link to a cell page opened Results. A green run was
+    indistinguishable from that failure. Call sites are what `go()` actually
+    receives, so they cannot miss a navigable view.
     """
     page = _page()
 
@@ -334,20 +345,42 @@ def test_every_routed_view_can_be_restored_from_its_url() -> None:
     assert routed, "no ROUTED_VIEWS found"
     views = set(re.findall(r'"([^"]+)"', routed.group(1)))
 
-    nav = set(re.findall(r'class="nav" data-go="([^"]+)"', page))
-    assert nav, "no nav buttons found"
-    missing = sorted(nav - views)
-    assert not missing, f"nav view(s) that write a route but cannot be restored from it: {missing}"
-
-    # The exclusions in `go()` are the only views allowed to write no route.
-    excluded = set(re.findall(r'view !== "([^"]+)"', page))
-    assert "history-event" in excluded, (
-        "history-event must not write a route: it carries no event id, so the "
-        "route could only restore an empty detail page"
+    go_body = _go_body(page)
+    # The exclusion condition, read as a whole rather than as a bag of names:
+    # `view !== "a" && view !== "b"` and `view !== "a" || view !== "b"` contain
+    # the same names and mean opposite things -- the second is always true, so
+    # NOTHING writes a route. A name-only read passed that mutation.
+    guard_line = re.search(r"if \((view !== [^)]+)\) writeRoute\(view\);", go_body)
+    assert guard_line, "no writeRoute guard found in go()"
+    condition = guard_line.group(1)
+    assert "||" not in condition, (
+        f"the writeRoute guard must be a conjunction; `||` over !== clauses is "
+        f"always true and suppresses every route. Got: {condition}"
     )
+    skipped = set(re.findall(r'view !== "([^"]+)"', condition))
+    assert skipped == {"run", "cell", "history-event"}, (
+        "the views that write no route are load-bearing and each has a reason "
+        f"in go()'s comment; got {sorted(skipped)}"
+    )
+
+    # Every view anything navigates to: go() call sites plus data-go targets.
+    navigable = set(re.findall(r'go\("([^"]+)"\)', page))
+    navigable |= set(re.findall(r'data-go="([^"]+)"', page))
+    assert navigable, "no navigable views found"
+
+    missing = sorted(navigable - views - skipped)
+    assert not missing, (
+        f"view(s) that write a route but cannot be restored from it: {missing}. "
+        "Either add them to ROUTED_VIEWS or exclude them from writeRoute in go()."
+    )
+
     assert "history-event" not in views, (
         "history-event is excluded from writeRoute, so listing it as routable "
         "claims a restore that cannot work"
+    )
+    assert "cell" not in views, (
+        "cell is excluded from writeRoute for the same reason: the route "
+        "carries no matrix row, so it could only restore an empty page"
     )
 
 
