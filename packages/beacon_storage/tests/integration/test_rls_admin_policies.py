@@ -813,12 +813,17 @@ def test_the_acting_user_survives_a_mid_request_commit(engine: Engine, world: Wo
         assert after == before, f"visibility widened across a commit: {before} -> {after}"
 
 
-def test_a_session_with_no_acting_user_is_left_alone(engine: Engine) -> None:
+def test_a_session_with_no_acting_user_is_left_alone(engine: Engine, world: World) -> None:
     """The auth endpoints run before a user is known, and must keep working.
 
     ``bind_rls`` re-applies only a RECORDED user. A version that always wrote
     the GUC would have to invent a value, and the auth path needs the NULL
     branch to look a user up at all.
+
+    Takes ``world`` so there are users to resolve. Without it the table was
+    empty and the count was 0 -- which the original ``is not None`` assertion
+    accepted, so the test passed while proving nothing at all. Strengthening
+    it to a positive count is what surfaced that.
     """
     from beacon_storage.rls import bind_rls
 
@@ -826,6 +831,12 @@ def test_a_session_with_no_acting_user_is_left_alone(engine: Engine) -> None:
         bind_rls(s)
         s.execute(text("SET LOCAL ROLE beacon_app"))
         assert s.execute(text("SELECT current_user_id()")).scalar() is None
-        assert s.execute(text("SELECT count(*) FROM users")).scalar() is not None, (
-            "the auth path must still be able to resolve a user"
+        # A POSITIVE count. `count(*)` always returns an integer, so
+        # `is not None` passed even when the read was denied and returned 0 --
+        # measured: dropping the `current_user_id() IS NULL` branch from
+        # `users_read` left this green while the auth path could resolve
+        # nobody, which is the opposite of what its message claimed.
+        visible = s.execute(text("SELECT count(*) FROM users")).scalar()
+        assert visible and visible > 0, (
+            f"the auth path must be able to resolve a user; it can see {visible}"
         )

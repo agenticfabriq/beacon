@@ -180,12 +180,27 @@ def test_the_serving_role_does_not_bypass_rls(engine: Engine) -> None:
     for number, line in enumerate((root / "README.md").read_text().splitlines(), 1):
         if "postgresql+psycopg://" not in line:
             continue
-        marked = "migrat" in line.lower()
+        # Marked by how the line NAMES itself, not by any mention of
+        # migrating: a substring test flipped the other way, so a serving DSN
+        # whose prose said "after migrating, run with DATABASE_URL=..." landed
+        # in `owning` and failed with a message asserting the opposite of what
+        # the line said. Either the line is labelled `migrating:` or it assigns
+        # MIGRATE_DATABASE_URL.
+        stripped = line.strip()
+        marked = stripped.startswith("migrating:") or "MIGRATE_DATABASE_URL=" in line
         where = f"README.md:{number}"
         (owning if marked else declared)[where] = line
 
     assert "Makefile" in declared and ".env.example" in declared, (
         f"expected a serving DSN in both the Makefile and .env.example: {sorted(declared)}"
+    )
+    # And the owning half must resolve to something, or its assertion below
+    # covers nothing: rewording the README's migrating line so it no longer
+    # matches would silently retire that check.
+    assert owning, (
+        "no owning DSN found in the README. One is documented, so either the "
+        "labelling changed or this classifier stopped recognising it -- and the "
+        "assertion that it names the owner is now vacuous."
     )
 
     roles = {}

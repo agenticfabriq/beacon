@@ -141,10 +141,13 @@ def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) ->
     committing would pass here for the wrong reason.
 
     ``delete_team``, ``remove_team_member`` and ``issue_member_key`` all commit
-    partway; none reads afterwards today. The acting user is a separate
-    question and is handled -- ``bind_rls`` re-applies it on each new
-    transaction, covered by
-    ``test_the_acting_user_survives_a_mid_request_commit``.
+    partway; none reads afterwards today.
+
+    The acting user IS restored, because this override registers ``bind_rls``
+    just as ``get_session`` does. An earlier version of this docstring claimed
+    that while the override did not register it, so the user was lost here too
+    -- someone writing the first test of a route that reads after committing
+    would have blamed the role alone.
     """
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("BEACON_DATABASE_URL", db_url)
@@ -158,6 +161,7 @@ def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) ->
 
     deps_mod._factory = None
 
+    from beacon_storage.rls import bind_rls
     from beacon_ui.api.app import create_app
     from beacon_ui.api.deps import get_session
 
@@ -167,11 +171,27 @@ def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) ->
         factory = deps_mod._get_factory()
         session = factory()
         try:
-            # BEFORE anything the route does, and before get_current_user sets
-            # the user GUC -- a role change after the first query would leave
-            # the earliest reads unconstrained, which is the shape of bug this
-            # fixture exists to catch.
+            # `bind_rls` FIRST, exactly as `get_session` does. This override
+            # replaces that dependency wholesale, so anything production wires
+            # up has to be wired up here too -- an earlier version omitted it,
+            # which meant deleting the call from deps.py left the whole suite
+            # green while production lost the acting user after every
+            # mid-request commit.
+            bind_rls(session)
+            # Then the role, before anything the route does and before
+            # get_current_user sets the user: a role change after the first
+            # query would leave the earliest reads unconstrained.
             session.execute(text("SET LOCAL ROLE beacon_app"))
+            # And PROVE it took. Every route-level assertion in
+            # test_routes_under_rls.py is worthless if this silently did not
+            # happen, and the route-level checks could not detect it: they read
+            # endpoints that filter in Python, so they pass either way.
+            # Measured -- deleting the line above left all six of them green.
+            role = session.execute(text("SELECT current_user")).scalar()
+            assert role == "beacon_app", (
+                f"the constrained client is running as {role!r}; every RLS "
+                "assertion made through it would be vacuous"
+            )
             yield session
             session.commit()
         except Exception:

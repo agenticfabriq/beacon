@@ -24,6 +24,7 @@ because the fixtures drop and recreate the schema.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
@@ -296,3 +297,45 @@ def test_the_roster_is_readable_through_the_route(
     # for, passed the earlier assertion.
     roster = response.json()["members"]
     assert len(roster) >= 1, f"a member must see their own team's roster; got {roster}"
+
+
+def test_the_production_session_dependency_binds_rls(api_client: TestClient, world: _World) -> None:
+    """``get_session`` itself must register ``bind_rls``, not just the fixture.
+
+    ``constrained_client`` overrides ``get_session`` wholesale, so nothing it
+    does exercises the production dependency -- deleting ``bind_rls(session)``
+    from ``deps.py`` left the entire suite green while production lost the
+    acting user after every mid-request commit, which is the regression the
+    other tests here were written to pin.
+
+    So this drives the real dependency: set a user, commit, and check the
+    acting user is still there. ``api_client`` is a parameter only to get the
+    environment configured -- the assertions go through ``deps.get_session``.
+    """
+    import beacon_ui.api.deps as deps_mod
+    from beacon_storage.rls import set_current_user
+
+    sessions = deps_mod.get_session()
+    session = next(sessions)
+    try:
+        session.execute(sa.text("SET LOCAL ROLE beacon_app"))
+        set_current_user(session, world.alice_id)
+        assert session.execute(sa.text("SELECT current_user_id()")).scalar() is not None
+
+        session.commit()
+
+        # The GUC is transaction-local, so this is where it would be gone.
+        after = session.execute(sa.text("SELECT current_user_id()")).scalar()
+        assert after is not None, (
+            "get_session does not re-apply the acting user after a commit, so every "
+            "policy takes its NULL branch for the rest of the request"
+        )
+        assert str(after) == str(world.alice_id)
+    finally:
+        session.rollback()
+        session.close()
+        # Drive the generator to completion so its own cleanup runs, rather
+        # than calling .close() on it -- the declared return type is a plain
+        # Iterator, which has no such method.
+        with contextlib.suppress(StopIteration):
+            next(sessions)
