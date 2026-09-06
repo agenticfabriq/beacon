@@ -115,6 +115,75 @@ def api_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) -> TestCli
     return TestClient(create_app())
 
 
+@pytest.fixture
+def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) -> TestClient:
+    """An API client whose sessions run as ``beacon_app``, the SERVING role.
+
+    ``api_client`` above connects as the owning role, which carries
+    ``rolbypassrls`` -- so no test using it consults a policy, and none can
+    observe the DSN switch the Makefile makes. That gap is where two real bugs
+    lived: ``delete_team`` orphaned every membership because a SELECT policy
+    filtered its purge, and ``add_team_member`` returned 500 because an
+    invitee it could not read looked like a new account. Both read correctly at
+    the policy level and broke at the route.
+
+    ``TEST_DATABASE_URL`` cannot simply name ``beacon_app``: the fixtures drop
+    and recreate the public schema, which the serving role must not be able to
+    do. So the connection is made as the owner and each request DROPS to the
+    serving role.
+
+    ``SET LOCAL ROLE`` is scoped to the TRANSACTION, not the session -- an
+    earlier version of this docstring said session, which is wrong and matters.
+    A route that commits partway through therefore reverts to the OWNER for
+    everything after, where production would stay constrained because its role
+    comes from the DSN. So this fixture is WEAKER than production after a
+    mid-request commit, not stronger: a test of a route that reads after
+    committing would pass here for the wrong reason.
+
+    ``delete_team``, ``remove_team_member`` and ``issue_member_key`` all commit
+    partway; none reads afterwards today. The acting user is a separate
+    question and is handled -- ``bind_rls`` re-applies it on each new
+    transaction, covered by
+    ``test_the_acting_user_survives_a_mid_request_commit``.
+    """
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("BEACON_DATABASE_URL", db_url)
+    monkeypatch.setenv("BEACON_JWT_SIGNING_KEY", "test")
+    monkeypatch.setenv("BEACON_OIDC_ISSUER", "https://test-issuer/")
+    monkeypatch.setenv("BEACON_OIDC_CLIENT_ID", "beacon-test")
+    monkeypatch.setenv("BEACON_OIDC_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("BEACON_OIDC_JWKS_URI", "https://test-issuer/jwks")
+
+    import beacon_ui.api.deps as deps_mod
+
+    deps_mod._factory = None
+
+    from beacon_ui.api.app import create_app
+    from beacon_ui.api.deps import get_session
+
+    app = create_app()
+
+    def constrained_session() -> Iterator[Session]:
+        factory = deps_mod._get_factory()
+        session = factory()
+        try:
+            # BEFORE anything the route does, and before get_current_user sets
+            # the user GUC -- a role change after the first query would leave
+            # the earliest reads unconstrained, which is the shape of bug this
+            # fixture exists to catch.
+            session.execute(text("SET LOCAL ROLE beacon_app"))
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_session] = constrained_session
+    return TestClient(app)
+
+
 def _issue_key(session: Session, user_id: UUID, label: str) -> str:
     key = generate_api_key(prefix="bcn_test")
     ApiKeyRepo(session).create(user_id=user_id, key_hash=hash_api_key(key), label=label)

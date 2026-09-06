@@ -714,3 +714,118 @@ def test_an_invite_finds_an_existing_account_that_rls_hides(engine: Engine, worl
         assert Repo(s).find_for_invite("outsider@example.com") is None, (
             "a caller who administers nothing must not be able to test addresses"
         )
+
+
+def test_a_global_scope_viewer_cannot_mint_a_key(
+    engine: Engine, world: World, global_viewer: UUID
+) -> None:
+    """The fourth surface, which the viewer test did not probe and so left open.
+
+    ``test_a_global_scope_viewer_administers_nothing`` covers teams INSERT and
+    memberships INSERT/UPDATE. ``api_keys_insert`` was not among them, and that
+    is exactly why its unqualified ``scope_kind = 'global'`` survived the first
+    tightening pass: nothing read it. A key authenticates AS its user, so this
+    is the surface where the consequence is largest.
+
+    ``global_viewer`` shares the global scope with ``world.global_admin``, so
+    the shared-scope branch of the policy is satisfied and only the ROLE test
+    can refuse this.
+    """
+    with make_session_factory(engine)() as s:
+        _as(s, global_viewer)
+        assert (
+            _refused(
+                s,
+                "INSERT INTO api_keys (id,user_id,key_hash,label,created_at,updated_at) "
+                "VALUES (:i,:u,'h','l',now(),now())",
+                i=uuid.uuid4(),
+                u=world.global_admin,
+            )
+            in REFUSALS
+        )
+
+
+def test_a_global_admin_outside_the_team_can_mint_a_members_key(
+    engine: Engine, world: World, pure_global_admin: UUID
+) -> None:
+    """And the converse, which was a live 500.
+
+    ``issue_member_key`` gates on ``TEAM_MANAGE``, which a global membership
+    grants -- so a global admin who is not a member of the target's team
+    reached ``ApiKeyRepo.create`` and the insert was refused, with no handler.
+    The policy's shared-scope join could never match for them; the fix is a
+    global-admin branch outside it.
+    """
+    with make_session_factory(engine)() as s:
+        _as(s, pure_global_admin)
+        result = _refused(
+            s,
+            "INSERT INTO api_keys (id,user_id,key_hash,label,created_at,updated_at) "
+            "VALUES (:i,:u,'h','l',now(),now())",
+            i=uuid.uuid4(),
+            u=world.member,
+        )
+        assert result == "wrote 1", result
+
+
+def test_the_acting_user_survives_a_mid_request_commit(engine: Engine, world: World) -> None:
+    """A commit partway through a request must not turn RLS off.
+
+    The GUC is transaction-LOCAL by design: a session-scoped one would leak
+    the caller across requests on a pooled connection. But the ROLE comes from
+    the DSN and persists, so before ``bind_rls`` existed a commit left the
+    connection constrained and anonymous -- and every policy's
+    ``current_user_id() IS NULL`` branch grants everything. Measured: a member
+    who could see one team saw two after committing.
+
+    ``delete_team``, ``remove_team_member`` and ``issue_member_key`` all commit
+    partway through. None reads afterwards today, so nothing was broken yet --
+    this pins the property before something does.
+    """
+    from beacon_storage.rls import bind_rls
+
+    with make_session_factory(engine)() as s:
+        bind_rls(s)
+        _as(s, world.member)
+        before = s.execute(text("SELECT count(*) FROM teams")).scalar()
+        s.commit()
+
+        # `bind_rls` restores the USER. It does not restore the ROLE, and here
+        # that has to be re-applied by hand: `SET LOCAL ROLE` is also
+        # transaction-scoped, so this connection reverts to the owning role on
+        # commit -- whereas production keeps the serving role, which comes from
+        # the DSN. So the fixture is weaker than production at exactly this
+        # point, and comparing visibility without this line measures the
+        # fixture's own artefact instead of the property under test. It read
+        # 1 -> 2 before this was understood.
+        assert s.execute(text("SELECT current_user")).scalar() == "beacon", (
+            "the test connection is expected to revert to the owner on commit; "
+            "if it does not, this comment is stale and the re-apply below is "
+            "no longer needed"
+        )
+        s.execute(text("SET LOCAL ROLE beacon_app"))
+
+        assert s.execute(text("SELECT current_user_id()")).scalar() is not None, (
+            "the acting user was lost across the commit, so every policy now takes "
+            "its NULL branch and grants everything"
+        )
+        after = s.execute(text("SELECT count(*) FROM teams")).scalar()
+        assert after == before, f"visibility widened across a commit: {before} -> {after}"
+
+
+def test_a_session_with_no_acting_user_is_left_alone(engine: Engine) -> None:
+    """The auth endpoints run before a user is known, and must keep working.
+
+    ``bind_rls`` re-applies only a RECORDED user. A version that always wrote
+    the GUC would have to invent a value, and the auth path needs the NULL
+    branch to look a user up at all.
+    """
+    from beacon_storage.rls import bind_rls
+
+    with make_session_factory(engine)() as s:
+        bind_rls(s)
+        s.execute(text("SET LOCAL ROLE beacon_app"))
+        assert s.execute(text("SELECT current_user_id()")).scalar() is None
+        assert s.execute(text("SELECT count(*) FROM users")).scalar() is not None, (
+            "the auth path must still be able to resolve a user"
+        )

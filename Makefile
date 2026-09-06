@@ -29,6 +29,12 @@ DATABASE_URL ?= postgresql+psycopg://beacon_app:beacon_dev@localhost:$(POSTGRES_
 # role: silently running DDL as the serving role would fail on the first
 # CREATE TABLE, and doing it against the wrong database would not fail at all.
 # A deployment sets MIGRATE_DATABASE_URL explicitly.
+#
+# The check accepts `//beacon:` and `//beacon@` -- with an inline password and
+# without. The first version required the colon, which rejected
+# `postgresql+psycopg://beacon@host/db`: the ordinary shape for .pgpass,
+# PGPASSWORD or peer auth, and therefore the exact deployment this guard was
+# written for, refused with a message claiming the DSN did not name `beacon`.
 MIGRATE_DATABASE_URL ?= $(subst //beacon_app:,//beacon:,$(DATABASE_URL))
 UV ?= uv
 
@@ -44,7 +50,7 @@ db-down:
 
 migrate:
 	@case "$(MIGRATE_DATABASE_URL)" in \
-	  *//beacon:*) ;; \
+	  *//beacon:*|*//beacon@*) ;; \
 	  *) echo "MIGRATE_DATABASE_URL does not name the owning role 'beacon'." >&2; \
 	     echo "  got: $(MIGRATE_DATABASE_URL)" >&2; \
 	     echo "Set it explicitly -- the default derives it from DATABASE_URL by" >&2; \

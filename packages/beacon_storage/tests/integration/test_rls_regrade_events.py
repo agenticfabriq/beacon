@@ -157,15 +157,33 @@ def test_the_serving_role_does_not_bypass_rls(engine: Engine) -> None:
     # point at the owning role with every policy inert, which is the condition
     # this whole thread was about.
     declared: dict[str, str] = {}
+    owning: dict[str, str] = {}
     for line in (root / "Makefile").read_text().splitlines():
         if line.startswith("DATABASE_URL ?="):
             declared["Makefile"] = line
     for line in (root / ".env.example").read_text().splitlines():
         if line.startswith("DATABASE_URL="):
             declared[".env.example"] = line
+    # Any line naming a postgres DSN, not just `DATABASE_URL=...`. The labelled
+    # serving/migrating block reads `serving:  postgresql+psycopg://...` with no
+    # assignment, so an assignment-only filter skipped the FIRST and most
+    # prominent DSN an operator sees -- changing that one line to the owning
+    # role left every test green.
+    #
+    # Classified by whether the line MARKS itself as the migrating one, and
+    # keyed by line number so a second such line cannot overwrite the first.
+    # An earlier version keyed on a constant and matched only the literal
+    # prefix `migrating:`, so documenting the owning DSN in the shape the
+    # Makefile tells deployments to use -- `MIGRATE_DATABASE_URL=...` -- was
+    # read as a SERVING declaration and failed with a message asserting the
+    # opposite of what the line said.
     for number, line in enumerate((root / "README.md").read_text().splitlines(), 1):
-        if "DATABASE_URL=postgresql" in line:
-            declared[f"README.md:{number}"] = line
+        if "postgresql+psycopg://" not in line:
+            continue
+        marked = "migrat" in line.lower()
+        where = f"README.md:{number}"
+        (owning if marked else declared)[where] = line
+
     assert "Makefile" in declared and ".env.example" in declared, (
         f"expected a serving DSN in both the Makefile and .env.example: {sorted(declared)}"
     )
@@ -184,6 +202,14 @@ def test_the_serving_role_does_not_bypass_rls(engine: Engine) -> None:
             {"names": sorted(set(roles.values()))},
         ).all()
     attrs = {r[0]: (r[1], r[2]) for r in rows}
+
+    for where, line in sorted(owning.items()):
+        match = re.search(r"://([^:@/]+)", line)
+        assert match, f"could not read a role out of {where}: {line!r}"
+        assert match.group(1) == "beacon", (
+            f"{where} is the MIGRATING DSN and must name the owning role, since "
+            f"alembic runs DDL; it names {match.group(1)!r}"
+        )
 
     for where, role in sorted(roles.items()):
         assert role in attrs, (

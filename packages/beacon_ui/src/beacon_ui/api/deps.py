@@ -19,7 +19,7 @@ from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.suites import SuiteRepo
 from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
-from beacon_storage.rls import set_current_user
+from beacon_storage.rls import bind_rls, set_current_user
 from fastapi import Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session  # noqa: TC002
 
@@ -50,6 +50,11 @@ def get_session() -> Iterator[Session]:
     """Yield a request-scoped SQLAlchemy session that commits on success."""
     factory = _get_factory()
     session = factory()
+    # Before anything queries. The acting user is set later by
+    # `get_current_user`, but the listener has to be attached first: it fires
+    # on every transaction START, and the one that matters is the transaction
+    # AFTER a route commits partway through a request.
+    bind_rls(session)
     try:
         yield session
         session.commit()

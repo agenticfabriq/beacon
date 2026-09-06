@@ -67,11 +67,48 @@ def add_team_member(
         else repo.create(email=email, name=email.split("@")[0]).id
     )
 
-    membership = MembershipRepo(session).grant(
+    memberships = MembershipRepo(session)
+    requested = Role(body.role)
+
+    # Adding YOURSELF is handled before the grant, because `grant` upserts
+    # through `session.merge` and an existing row makes that an UPDATE -- which
+    # the membership policy refuses for your own row, deliberately: role
+    # escalation is the one write where being the subject is the point. The
+    # refusal surfaced as a StaleDataError ("expected to update 1 row(s); 0
+    # were matched") and nothing handles it, so re-posting your own email
+    # returned a 500 where it used to return 201.
+    #
+    # So the two cases are separated and answered honestly rather than left to
+    # an ORM error: re-adding yourself at the role you already hold is a no-op,
+    # and asking for a DIFFERENT role for yourself is the escalation the policy
+    # exists to stop, which deserves a reason rather than a crash.
+    if target_user_id == actor.id:
+        mine = next(
+            (
+                m
+                for m in memberships.list_for_user(actor.id)
+                if m.scope_kind == ScopeKind.TEAM and m.scope_id == team_id
+            ),
+            None,
+        )
+        if mine is not None:
+            if Role(mine.role) is not requested:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "you cannot change your own role; another admin of this team must",
+                )
+            return TeamMemberOut(
+                user_id=mine.user_id,
+                scope_kind=mine.scope_kind,
+                scope_id=mine.scope_id,
+                role=mine.role,
+            )
+
+    membership = memberships.grant(
         user_id=target_user_id,
         scope_kind=ScopeKind.TEAM,
         scope_id=team_id,
-        role=Role(body.role),
+        role=requested,
         granted_by=actor.id,
     )
     return TeamMemberOut(

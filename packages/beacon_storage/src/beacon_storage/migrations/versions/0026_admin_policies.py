@@ -370,17 +370,33 @@ def upgrade() -> None:
     # policy matches the API rather than differing from it in either
     # direction.
     op.execute(
-        """
+        f"""
         CREATE POLICY api_keys_insert ON api_keys FOR INSERT
         WITH CHECK (
             current_user_id() IS NULL
             OR user_id = current_user_id()
+            -- A global admin, OUTSIDE the shared-scope join. Every sibling
+            -- policy ORs this in and this one did not: a global `beacon_admin`
+            -- who is not a member of the target's team passes
+            -- `require_permission(TEAM_MANAGE)` -- a global membership grants
+            -- every permission -- reaches `ApiKeyRepo.create`, and the insert
+            -- was refused with no handler, so `issue_member_key` answered 500.
+            -- Probed. The `OR mine.scope_kind = 'global'` removed earlier sat
+            -- INSIDE the join and never reached this case.
+            OR {IS_GLOBAL_ADMIN}
             OR EXISTS (
                 SELECT 1 FROM current_user_scopes() mine
                 JOIN memberships target
                   ON target.scope_kind = mine.scope_kind AND target.scope_id = mine.scope_id
                 WHERE target.user_id = api_keys.user_id
-                  AND (mine.role IN ('team_admin', 'beacon_admin') OR mine.scope_kind = 'global')
+                  -- The ROLE, not the scope. A global `beacon_admin` already
+                  -- matches the role test beside this, so an unqualified
+                  -- `scope_kind = 'global'` added nothing for a real admin and
+                  -- let a global-scope VIEWER mint a key for any co-scoped
+                  -- user -- and a key authenticates AS its user. Every other
+                  -- predicate here was tightened to require the role; this one
+                  -- was missed.
+                  AND mine.role IN ('team_admin', 'beacon_admin')
             )
         );
         """
