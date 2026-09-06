@@ -9,6 +9,7 @@ stays in it, and a rate over nothing gradeable is None.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime  # noqa: TC003
 from typing import Annotated
 from uuid import UUID  # noqa: TC003
@@ -48,6 +49,66 @@ def _item_join_clause() -> sa.ColumnElement[bool]:
         sa.cast(Result.item_id, sa.Uuid) == EvalItem.item_id,
         EvalItem.valid_to.is_(None),
     )
+
+
+def _row_key(
+    solution_id: object,
+    model_id: object,
+    config_label: object,
+    config_digest: object,
+    engine: object,
+    retrieval_k: object,
+) -> str:
+    """A stable handle for one matrix row, derived from its own group key.
+
+    Exists so a row can be named in a URL. ``config_digest`` cannot do that
+    job: it is a hash of the run CONFIG, and the model is not in the config --
+    measured, one spider2 digest is shared by four rows differing only by
+    ``model_id``, so a cell page restored from a digest would open a different
+    configuration than the one clicked. That is the failure this key exists to
+    prevent, not a hypothetical.
+
+    Derived from six of the eight expressions the statement GROUPs BY. The two
+    omitted -- ``solution_name`` and ``solution_version`` -- are functionally
+    determined by ``solution_id``, which IS here, so no two groups can share a
+    key through them. That dependency is the whole of the "by construction"
+    argument and is stated because the argument is worthless without it.
+
+    NULL and the empty string are kept DISTINCT, using a sentinel rather than
+    ``str(x or "")``. Both ``model_id`` and ``config_label`` are nullable, so
+    the GROUP BY treats NULL and ``''`` as different groups; folding them
+    together here would give those two rows one key and open the wrong one.
+    NUL cannot appear in a Postgres text value, so it is unambiguous as the
+    marker.
+
+    Fields are LENGTH-PREFIXED, not merely separated. An earlier version joined
+    on US (0x1f) and claimed no value could contain it -- which is not a
+    property of the schema: ``model_id`` and ``config_label`` are plain
+    ``String(200)`` fed from the run-create payload, and 0x1f is a legal text
+    byte. Measured: a label carrying one collided two rows the GROUP BY keeps
+    apart, so the cell URL opened the other configuration -- the exact failure
+    this key exists to prevent. A length prefix makes the encoding injective
+    whatever the bytes are, because the length says where each field ends
+    rather than a byte that might not be reserved. Opaque and
+    short, because it is a handle rather than data -- nothing should parse it,
+    and 16 hex characters of sha256 is far past collision range for a table of
+    tens of rows.
+    """
+    # `\x00` for absent, the value itself otherwise -- NOT `x or ""`, which
+    # maps NULL and '' to one key while the GROUP BY keeps them apart.
+    parts = [
+        "\x00" if value is None else str(value)
+        for value in (
+            solution_id,
+            model_id,
+            config_label,
+            config_digest,
+            engine,
+            retrieval_k,
+        )
+    ]
+    encoded = "".join(f"{len(part)}:{part}" for part in parts)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 
 
 def _rate(part: int, whole: int) -> float | None:
@@ -456,6 +517,14 @@ def results_matrix(
         graded = int(record.n_graded)
         rows.append(
             MatrixRowOut(
+                row_key=_row_key(
+                    record.solution_id,
+                    record.model_id,
+                    record.config_label,
+                    record.config_digest,
+                    record.engine,
+                    record.retrieval_k,
+                ),
                 solution_id=record.solution_id,
                 solution_name=record.solution_name,
                 solution_version=record.solution_version,

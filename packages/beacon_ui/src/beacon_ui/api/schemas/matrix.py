@@ -18,6 +18,11 @@ class MatrixRowOut(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # An opaque handle for THIS row, so it can be named in a URL. Not the
+    # config digest: the model is not part of the config, so one digest can
+    # cover several rows -- measured, four on spider2. See `_row_key`.
+    row_key: str
+
     solution_id: UUID
     solution_name: str
     solution_version: str

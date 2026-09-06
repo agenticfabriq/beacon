@@ -10,9 +10,10 @@ this table's policy and ``memberships``'. Note ``memberships`` is NOT what
 isolates this table today -- the policy scopes on ``current_user_id()``
 directly -- and the predicate test explains why it is still read.
 
-Read ``test_the_policy_is_not_the_isolation_where_this_is_deployed`` before
-concluding that a green run here means the deployed API is isolated. It does
-not, and that test says why.
+These policies are still INERT where this is deployed: the app connects as the
+cluster owner, which never consults one. 0025 grants a constrained
+``beacon_app`` so that can change, but the serving DSN is not switched yet --
+``test_a_constrained_role_cannot_insert_a_team`` records why.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from beacon_storage.repository.teams import TeamRepo
 from beacon_storage.repository.users import UserRepo
 from beacon_storage.rls import set_current_user
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -127,32 +129,21 @@ def test_the_policy_actually_isolates_teams(engine: Engine) -> None:
         )
 
 
-def test_the_policy_is_not_the_isolation_where_this_is_deployed(engine: Engine) -> None:
-    """The role the API is configured to connect as bypasses this policy.
+def test_the_policies_are_still_inert_where_this_is_deployed(engine: Engine) -> None:
+    """The app's configured role bypasses RLS, so no policy here decides anything.
 
-    0024's comment presents the tenant column and policy as the precondition
-    for serving this table. They are the precondition, and they are not by
-    themselves sufficient, because the app connects as the cluster owner.
+    Kept because the gap is still open, and it is open for a reason that was
+    discovered by trying to close it. 0025 grants a constrained ``beacon_app``,
+    which is the schema half. Pointing the serving DSN at it does NOT work
+    yet: see ``test_a_constrained_role_cannot_insert_a_team`` below.
 
-    **This reads the DECLARED app DSN, not this test's connection.** The first
-    version asserted on ``current_user`` of the test engine, which cannot fail
-    the way the docstring promised: ``make test`` points ``DATABASE_URL`` at a
-    separate ``TEST_DATABASE_URL`` literal, so closing the gap -- changing the
-    app's DSN to ``beacon_app`` -- would have left it green and 0024 would have
-    gone on warning about a gap that was shut. That is the same
-    check-that-cannot-fail this file was added to remove, so it is worth
-    naming: the subject of the claim is the shipped configuration, and the
-    assertion has to read the shipped configuration.
+    Reads the DECLARED app DSN from the Makefile, then that role's privileges.
+    Both halves are needed and each was wrong once -- reading privileges off
+    the TEST connection cannot see the app's role, and reading the name alone
+    stays green when the role is constrained in place.
 
-    ``beacon_app`` -- the constrained role the behavioural test drops to -- is
-    granted nothing by any migration and exists only in fixtures.
-
-    This test passes while the gap exists and fails once the app's DSN names a
-    constrained role, or once that role is constrained in the cluster this
-    suite runs against. It CANNOT see a role constrained only in a deployment
-    the suite never connects to -- no test here can. At that point delete it
-    and drop the warning from 0024, because the thing it documents will have
-    been fixed.
+    This FAILS once the serving DSN names a constrained role, which is the
+    signal to delete it and to correct the notes in 0024 and the Makefile.
     """
     makefile = (pathlib.Path(__file__).parents[4] / "Makefile").read_text()
     declared = [line for line in makefile.splitlines() if line.startswith("DATABASE_URL ?=")]
@@ -163,16 +154,6 @@ def test_the_policy_is_not_the_isolation_where_this_is_deployed(engine: Engine) 
     assert match, f"could not read a role out of {declared[0]!r}"
     role = match.group(1)
 
-    # The name comes from the repo; the privileges come from whatever cluster
-    # this suite is pointed at, and the difference is a real limit worth
-    # stating rather than papering over. `DATABASE_URL` here is the TEST
-    # database, so this observes the app's role only because the Makefile
-    # points both at the same cluster. Constraining the role in a DEPLOYMENT
-    # this suite never connects to is therefore NOT covered -- no test in this
-    # repo can see that, and the previous version of this comment claimed
-    # otherwise. What is covered: pointing the app DSN at a different,
-    # constrained role, and constraining the role in the cluster the suite
-    # runs against.
     with engine.connect() as conn:
         attrs = conn.execute(
             sa.text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = :r"),
@@ -184,14 +165,84 @@ def test_the_policy_is_not_the_isolation_where_this_is_deployed(engine: Engine) 
         "whether it bypasses RLS cannot be read here"
     )
     assert bool(attrs[0] or attrs[1]), (
-        f"the app's configured role {role!r} does not bypass RLS in the cluster "
-        f"this suite connects to (rolsuper={attrs[0]}, rolbypassrls={attrs[1]}). "
-        "If that is also true of the DEPLOYMENT, the gap is shut and the policy is "
-        "load-bearing: delete this test and remove the warning from 0024. If only "
-        "this cluster was constrained, the warning in 0024 is still true and "
-        "deleting it would be wrong -- see this test's docstring, which says it "
-        "cannot tell these apart. Do not widen the assertion to make it pass."
+        f"the app is now configured as {role!r}, which does not bypass RLS "
+        f"(rolsuper={attrs[0]}, rolbypassrls={attrs[1]}). If the write paths were "
+        "fixed too, delete this test and update 0024 and the Makefile. Do not widen "
+        "the assertion to make it pass."
     )
+
+
+def test_a_constrained_role_cannot_insert_a_team(engine: Engine) -> None:
+    """Why the serving DSN is not switched: RLS refuses the writes.
+
+    Every tenant policy is ``FOR ALL USING (...)`` with no ``WITH CHECK``, and
+    Postgres reuses USING as the INSERT check. So under a constrained role a
+    write must satisfy the same membership predicate a read does -- and a
+    brand-new team has no membership, so its creator cannot insert it.
+
+    ``TeamService.create`` inserts the team BEFORE granting the creator's
+    membership, so ``POST /v1/teams`` would 500. ``add_team_member`` inserts a
+    ``users`` row and a ``memberships`` row for someone OTHER than the actor,
+    so both fail. This is the precondition for the switch, recorded as a test
+    so it cannot be rediscovered the hard way.
+
+    It passes while the gap exists. Once ``WITH CHECK`` clauses are added it
+    will fail, which is the point: that is when the switch becomes safe.
+    """
+    factory = make_session_factory(engine)
+    with factory() as session:
+        user = UserRepo(session).create(email="wc-probe@example.com", name="W")
+        team = TeamRepo(session).create(name="wc-probe-team")
+        session.flush()
+        MembershipRepo(session).grant(
+            user_id=user.id,
+            scope_kind=ScopeKind.TEAM,
+            scope_id=team.id,
+            role=Role.TEAM_ADMIN,
+        )
+        session.commit()
+        uid = user.id
+
+    with factory() as session:
+        session.execute(text("SET LOCAL ROLE beacon_app"))
+        set_current_user(session, uid)
+        with pytest.raises(ProgrammingError) as caught:
+            session.execute(
+                text(
+                    "INSERT INTO teams (id, name, created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), 'wc-probe-2', now(), now())"
+                )
+            )
+        assert "row-level security" in str(caught.value), (
+            "expected the insert to be refused BY THE POLICY; a different failure "
+            f"means this test is measuring something else: {caught.value}"
+        )
+        session.rollback()
+
+
+def test_the_serving_role_cannot_run_ddl(engine: Engine) -> None:
+    """Serving and owning are different roles, and 0025 keeps them apart.
+
+    0025 grants ``beacon_app`` DML and nothing else. If it could create or drop
+    tables there would be little left of the separation -- and a compromised app
+    could DISABLE the policies constraining it, which is a more direct route to
+    the data than reading around them.
+
+    Still meaningful with the serving DSN unswitched: it asserts what the
+    grants do and do not confer, which is what the switch will rely on.
+    """
+    factory = make_session_factory(engine)
+    with factory() as session:
+        session.execute(text("SET LOCAL ROLE beacon_app"))
+        with pytest.raises(ProgrammingError):
+            session.execute(text("CREATE TABLE rls_probe_should_fail (id int)"))
+        session.rollback()
+
+    with factory() as session:
+        session.execute(text("SET LOCAL ROLE beacon_app"))
+        with pytest.raises(ProgrammingError):
+            session.execute(text("ALTER TABLE regrade_events DISABLE ROW LEVEL SECURITY"))
+        session.rollback()
 
 
 def test_the_policy_predicate_is_not_a_blanket_allow(engine: Engine) -> None:

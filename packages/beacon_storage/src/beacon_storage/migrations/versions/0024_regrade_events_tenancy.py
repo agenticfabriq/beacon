@@ -95,29 +95,29 @@ def upgrade() -> None:
     # suite UUID and not `suite_name`.
     op.create_index("idx_regrade_events_suite_id", "regrade_events", ["suite_id", "created_at"])
 
-    # Same shape as `result_outcomes` in 0023, and TWO caveats apply.
+    # Same shape as `result_outcomes` in 0023, and one caveat applies.
     #
-    # First, and larger than the one 0023 records: **this policy constrains
-    # nothing in the configuration this repo ships.** The app's `DATABASE_URL`
-    # default in `Makefile` names the `beacon` role, which is the same role
-    # `docker-compose.yml` creates as `POSTGRES_USER` and therefore owns the
-    # cluster: it carries `rolsuper` and `rolbypassrls`, so RLS is never
-    # consulted for it -- measured, a caller with no membership at all still
-    # reads every row. `beacon_app`, the constrained role the tests drop to, is
-    # granted nothing by any migration and exists only in fixtures. So for this
-    # route the isolation that actually holds today is `require_permission` in
-    # the API layer, and this policy is defence in depth that becomes
-    # load-bearing the moment the app connects as a non-superuser -- which it
-    # should. The docstring above says the column and policy are the
-    # precondition for serving the table; they are the precondition, and they
-    # are not by themselves sufficient. `test_rls_regrade_events.py` asserts
-    # this gap so it cannot be forgotten, and fails once it is closed.
+    # This policy is INERT where it is deployed: the app connects as `beacon`,
+    # the cluster owner, whose queries never consult a policy, so
+    # `require_permission` is the isolation that actually holds. 0025 grants a
+    # constrained `beacon_app` -- the schema half of the fix -- but the serving
+    # DSN is not switched, because under a constrained role RLS also refuses
+    # the WRITES: these policies carry no `WITH CHECK`, so Postgres reuses
+    # USING as the insert check and a team cannot be created by someone who is
+    # not yet a member of it. See the Makefile's note and
+    # `test_a_constrained_role_cannot_insert_a_team`.
     #
-    # Second, the one 0023 records: `m.user_id = current_user_id()` is defence
-    # in depth rather than the isolation, because `memberships` is itself FORCE
-    # RLS and the subquery therefore only ever sees the caller's own rows. It
-    # stays because this table's isolation otherwise depends invisibly on
-    # another table's policy.
+    # The remaining caveat, which 0023 also records: `m.user_id =
+    # current_user_id()` is defence in depth rather than the isolation, because
+    # `memberships` is itself FORCE RLS and the subquery therefore only ever
+    # sees the caller's own rows. It stays because this table's isolation would
+    # otherwise depend invisibly on another table's policy.
+    #
+    # Note the policy's null branch: a connection that never sets
+    # `app.current_user_id` sees everything. That is load-bearing, not a hole --
+    # the auth endpoints must look a user up before one is known, and the
+    # retention worker acts for no user. Measured: of the routes taking a
+    # session, all but those three resolve a user first.
     op.execute("ALTER TABLE regrade_events ENABLE ROW LEVEL SECURITY;")
     op.execute("ALTER TABLE regrade_events FORCE ROW LEVEL SECURITY;")
     op.execute(

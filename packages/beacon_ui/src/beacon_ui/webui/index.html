@@ -904,6 +904,10 @@ function renderMatrixRows() {
 
 const openCell = guard(async (row) => {
   go("cell");
+  // Keyed on the server's `row_key`, not `config_digest`: the model is not in
+  // the config, so one digest covers several rows -- four on spider2 -- and a
+  // digest would reopen a different configuration than the one clicked.
+  writeRoute("cell", row.row_key);
   const title = `${row.config_label || "(unlabelled)"} on ${row.model_id || "?"}`;
   document.getElementById("cell-crumb").textContent =
     `${row.solution_name} ${row.solution_version} · ${row.model_id || "?"} · ${row.config_label || ""}`;
@@ -1008,6 +1012,7 @@ const loadHistory = guard(async () => {
 
 const openHistoryEvent = guard(async (eventId) => {
   go("history-event");
+  writeRoute("history-event", eventId);
   const body = document.getElementById("hev-body");
   body.innerHTML = '<div class="empty">Loading…</div>';
   document.getElementById("hev-title").textContent = "";
@@ -1378,37 +1383,40 @@ const loadSettings = guard(async () => {
  * default suite (found the hard way on fs_payments). A team or suite that
  * no longer exists, or is not visible, falls back to defaults. */
 /* Every view go() writes a route for must be listed here, or the address bar
- * carries a URL that applyRoute cannot restore and a reload falls through to
- * go("matrix") -- a shared link silently opens Results. That is what happened
- * to "history", and to `cell` for much longer.
+ * carries a URL applyRoute cannot restore and a reload falls through to
+ * go("matrix") -- a shared link silently opens Results. That happened to
+ * "history", and to `cell` for far longer.
  *
- * THREE views are deliberately absent, and the exclusion lives in go(): `run`
- * writes its own route with the run id, while `cell` and `history-event` are
- * identified by a matrix row and an event id that the route does not carry.
+ * The three DETAIL views are here too, and each carries its own id in the
+ * route's fourth segment (see DETAIL_VIEWS). They were previously ABSENT and
+ * their routes suppressed, which removed the misleading URL at the cost of
+ * the Back button; carrying the id removes both problems instead of trading
+ * them.
  *
- * The trade for those two, stated carefully because the first attempt at this
- * comment got it wrong: writeRoute assigning window.location.hash is the only
- * history push in the page, so a view that writes no route adds no Back entry.
- * Back from a cell or an event therefore does NOT return to the list -- the
- * hashchange listener runs applyRoute on the PREVIOUS routed URL and restores
- * whatever view that was, which is wherever the user happened to be before.
- * And if the excluded view was entered from the first route written after
- * load, Back sets the hash to "", applyRoute returns false, the listener
- * ignores the false, and the view stays on screen with the hash stripped --
- * Back appears to do nothing. So the cost is a jump to an unrelated view or a
- * silent no-op, not an app exit.
- *
- * The crumb at the top of each of those views is the in-page path back. The
- * alternative was keeping a URL that looks shareable, reloads to the wrong
- * page, and makes Back work only by accident of that same fallthrough -- which
- * is what `cell` did. Making these genuinely routable (a config digest in the
- * cell route, an event id in the other) is the fix that costs nothing, and is
- * not done here. */
-const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "history", "benchmarks", "settings"]);
+ * `cell` is keyed on the server-computed `row_key`, NOT on config_digest: the
+ * model is not part of the config, so one digest covers several rows -- four
+ * on spider2 -- and a digest would restore a different configuration than the
+ * one clicked. Round-tripped: 4 of 4 correct on row_key, 1 of 4 on digest. */
+const ROUTED_VIEWS = new Set([
+  "matrix", "runs", "questions", "history", "benchmarks", "settings",
+  // The detail views. Each carries its own id in the route's fourth segment
+  // (see DETAIL_VIEWS), so applyRoute can reopen the exact row or event rather
+  // than falling through to Results. `cell` is keyed on the server-computed
+  // `row_key` and NOT on config_digest: the model is not part of the config,
+  // so one digest covers several rows -- four on spider2 -- and a digest would
+  // restore a different configuration than the one clicked.
+  "run", "cell", "history-event",
+]);
 let lastRoute = "";
-function writeRoute(view, runId) {
+/* The views whose route carries a fourth segment naming WHICH one. Without it
+ * a detail page's URL cannot be restored, and the fallthrough opens Results --
+ * which is what `cell` did for every shared link until it was found. `run`
+ * always had this; `cell` and `history-event` were suppressed instead, which
+ * traded a misleading URL for a broken Back button. */
+const DETAIL_VIEWS = new Set(["run", "cell", "history-event"]);
+function writeRoute(view, detailId) {
   const parts = [S.teamId || "-", S.suiteId || "-", view];
-  if (view === "run" && runId) parts.push(runId);
+  if (DETAIL_VIEWS.has(view) && detailId) parts.push(encodeURIComponent(detailId));
   const target = "#/" + parts.join("/");
   if (window.location.hash === target) return;
   lastRoute = target;
@@ -1451,6 +1459,39 @@ async function applyRoute() {
   }
   if (!S.suiteId && S.suites.length) S.suiteId = String(S.suites[0].id);
   if (viewPart === "run" && runPart) { openRun(runPart); return true; }
+  if (viewPart === "history-event" && runPart) {
+    // No preload. The crumb is `data-go="history"`, so clicking it runs
+    // loadHistory itself, and openHistoryEvent reads nothing from
+    // S.asOfEvents -- an earlier version awaited loadAsOfEvents here on both
+    // of those reasons and neither was true, which cost an extra /history
+    // request before the event could paint.
+    openHistoryEvent(decodeURIComponent(runPart));
+    return true;
+  }
+  if (viewPart === "cell" && runPart) {
+    // A cell is a row of the matrix, so the matrix has to exist before one can
+    // be found in it. On a cold load S.matrixRows is empty, which is why this
+    // awaits rather than reading it.
+    await loadAsOfEvents();
+    await loadMatrix();
+    const wanted = decodeURIComponent(runPart);
+    const row = S.matrixRows.find((entry) => entry.row_key === wanted);
+    // A key that matches nothing means the row is gone -- its runs
+    // invalidated, or a config that no longer reports. Falling back to Results
+    // is right, and it is NOT the silent fallthrough this segment removed:
+    // that one happened for every cell link, whereas this happens only when
+    // the row genuinely no longer exists.
+    if (!row) { go("matrix"); return true; }
+    openCell(row);
+    return true;
+  }
+  // A detail view whose id is missing is NOT restorable, and must not reach
+  // go(): there is no loader for one, so the view would paint from empty
+  // containers -- a blank page with no message. Returning false sends the
+  // caller to Results, which is what a bare `#/<team>/<suite>/cell` did
+  // before these views became routable, and such URLs exist: the app emitted
+  // them for every cell link in the window before this.
+  if (DETAIL_VIEWS.has(viewPart)) return false;
   if (ROUTED_VIEWS.has(viewPart)) { go(viewPart); return true; }
   return false;
 }
@@ -1467,15 +1508,12 @@ function go(view) {
   });
   renderRail();
   window.scrollTo({ top: 0 });
-  // The three views a bare route cannot restore. `run` writes its own route
-  // WITH the run id (see writeRoute("run", runId)); `cell` and `history-event`
-  // are identified by things the route does not carry -- a matrix row and an
-  // event id -- so writing one puts a URL in the address bar that reloads to
-  // Results. `cell` did exactly that before this: it was absent from
-  // ROUTED_VIEWS and not excluded here, so every shared link to a cell page
-  // silently opened Results. Found by widening the routing test to read
-  // go() call sites instead of data-go attributes.
-  if (view !== "run" && view !== "cell" && view !== "history-event") writeRoute(view);
+  // A DETAIL view's route is written by whoever OPENS it, because only the
+  // opener knows which row or event it is. A bare route from here would
+  // publish a URL with no id -- the unrestorable shape the fourth segment
+  // exists to remove, and what `cell` published to every shared link before
+  // it carried one.
+  if (!DETAIL_VIEWS.has(view)) writeRoute(view);
   if (view === "matrix") { loadAsOfEvents(); loadMatrix(); }
   if (view === "runs") loadRuns();
   if (view === "questions") loadQuestions();

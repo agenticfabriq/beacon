@@ -73,16 +73,10 @@ def engine(db_url: str) -> Iterator[Engine]:
     config = Config(f"{MIGRATIONS_DIR}/alembic.ini")
     config.set_main_option("script_location", MIGRATIONS_DIR)
     command.upgrade(config, "head")
-    with engine.begin() as connection:
-        connection.execute(text("DROP ROLE IF EXISTS beacon_app"))
-        connection.execute(text("CREATE ROLE beacon_app"))
-        connection.execute(text("GRANT USAGE ON SCHEMA public TO beacon_app"))
-        connection.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO beacon_app"
-            )
-        )
-        connection.execute(text("GRANT EXECUTE ON FUNCTION current_user_id() TO beacon_app"))
+    # The serving role is provisioned by migration 0025, not here. Dropping it
+    # is no longer possible once it holds grants, and a parallel provisioning
+    # path is what let the role exist without LOGIN while 0025's guard skipped
+    # its own CREATE.
     yield engine
     with engine.begin() as connection:
         connection.execute(text("DROP SCHEMA public CASCADE"))

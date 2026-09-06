@@ -23,6 +23,7 @@ from beacon_storage.repository.results import ResultRepo
 from beacon_storage.repository.runs import RunRepo
 from beacon_storage.repository.solutions import SolutionRepo
 from beacon_storage.repository.suites import SuiteRepo
+from beacon_ui.api.routes.matrix import _row_key
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -547,3 +548,216 @@ def test_an_event_from_another_benchmark_is_refused(
         headers={"X-API-Key": world.alice_key},
     )
     assert response.status_code == 404, response.text
+
+
+# --------------------------------------------------------------------------
+# row_key: naming one row in a URL
+# --------------------------------------------------------------------------
+
+
+def test_row_key_separates_rows_that_share_a_config_digest(
+    api_client: TestClient, world: _World, fx: _Fixture
+) -> None:
+    """The digest cannot name a row, and this is why.
+
+    ``config_digest`` hashes the run CONFIG, and ``model_id`` is not in the
+    config -- so two models under one config are two rows with one digest.
+    Measured on the real corpus: one spider2 digest is shared by four rows, and
+    a cell page keyed on it restored the right configuration for one of the
+    four. ``row_key`` is derived from the full group tuple instead.
+    """
+    for model in ("model-a", "model-b"):
+        run = RunRepo(fx.session).create(
+            team_id=world.acme_team_id,
+            suite_id=fx.suite.id,
+            solution_id=fx.solution.id,
+            suite=SUITE,
+            dataset_version="v1",
+            mode=HarnessMode.EVAL,
+            pass_idx=0,
+            sweep_arm=model,
+            config={"engine": "duckdb"},
+            model_id=model,
+            config_label="shared",
+            # The SAME digest for both, which is what the real data does when
+            # two models run one configuration.
+            config_digest="one-digest",
+            created_by=world.alice_id,
+        )
+        ResultRepo(fx.session).create(
+            team_id=world.acme_team_id,
+            run_id=run.id,
+            item_id=str(fx.items[0].item_id),
+            attempt_idx=0,
+            output={"sql": "SELECT 1"},
+            output_kind="sql",
+            tokens_input=1,
+            tokens_output=1,
+            runtime_ms=1,
+            status=ResultStatus.COMPLETED,
+            outcome=VerdictOutcome.PASS,
+            error=None,
+        )
+    fx.session.commit()
+
+    body = _matrix(api_client, world, fx.suite.id)
+
+    rows = body["rows"]
+    assert len(rows) == 2, "two models under one config are two rows"
+    assert len({row["config_digest"] for row in rows}) == 1, (
+        "the premise: both rows carry the same digest"
+    )
+    keys = {row["row_key"] for row in rows}
+    assert len(keys) == 2, f"row_key must separate them, or a cell URL opens the wrong row: {keys}"
+    assert all(row["row_key"] for row in rows), "every row needs a handle"
+
+
+def test_row_key_is_unique_across_every_row(
+    api_client: TestClient, world: _World, fx: _Fixture
+) -> None:
+    """One key per row, by construction -- asserted rather than assumed.
+
+    The key is a hash of six of the eight expressions the statement groups by;
+    the two omitted are functionally determined by ``solution_id``, which is
+    included, so uniqueness still follows from the grouping. That reasoning is only as good as the
+    two staying in step, which is what this checks.
+    """
+    for index, model in enumerate(("a", "b", "c")):
+        for label in ("one", "two"):
+            run = RunRepo(fx.session).create(
+                team_id=world.acme_team_id,
+                suite_id=fx.suite.id,
+                solution_id=fx.solution.id,
+                suite=SUITE,
+                dataset_version="v1",
+                mode=HarnessMode.EVAL,
+                pass_idx=index,
+                sweep_arm=f"{model}-{label}",
+                config={"engine": "duckdb", "retrieval_k": index},
+                model_id=model,
+                config_label=label,
+                config_digest=f"d-{label}",
+                created_by=world.alice_id,
+            )
+            ResultRepo(fx.session).create(
+                team_id=world.acme_team_id,
+                run_id=run.id,
+                item_id=str(fx.items[0].item_id),
+                attempt_idx=0,
+                output={"sql": "SELECT 1"},
+                output_kind="sql",
+                tokens_input=1,
+                tokens_output=1,
+                runtime_ms=1,
+                status=ResultStatus.COMPLETED,
+                outcome=VerdictOutcome.PASS,
+                error=None,
+            )
+    fx.session.commit()
+
+    body = _matrix(api_client, world, fx.suite.id)
+
+    keys = [row["row_key"] for row in body["rows"]]
+    assert len(keys) == len(set(keys)), f"{len(keys)} rows produced {len(set(keys))} distinct keys"
+    assert len(body["rows"]) == 6, "three models x two configs"
+
+
+def test_every_field_of_the_row_key_is_load_bearing() -> None:
+    """Dropping ANY of the six collides two rows the matrix keeps apart.
+
+    Written because the two tests above do not do this. Both vary only
+    ``model_id`` and ``config_label``, and everything else they set is
+    functionally determined by those -- so removing ``solution_id``,
+    ``config_digest``, ``engine`` or ``retrieval_k`` from the key left both
+    green. ``config_digest`` is the sharpest: the matrix's own comment says a
+    knob present only in the digest splits a row, so dropping it collides two
+    genuinely distinct configurations and the cell page opens the wrong one.
+
+    A unit test on the function, deliberately. The integration tests can only
+    reach fields the seeding varies, and reaching all six through seeded runs
+    means six near-identical fixtures for something the function answers
+    directly.
+    """
+    base = {
+        "solution_id": "sol-1",
+        "model_id": "model-1",
+        "config_label": "label-1",
+        "config_digest": "digest-1",
+        "engine": "duckdb",
+        "retrieval_k": "8",
+    }
+    reference = _row_key(**base)
+
+    for field in base:
+        varied = dict(base)
+        varied[field] = "OTHER"
+        assert _row_key(**varied) != reference, (
+            f"{field} does not affect row_key, so two rows differing only in it "
+            "share a handle and the wrong one opens"
+        )
+
+
+def test_the_row_key_keeps_absent_and_empty_apart() -> None:
+    """NULL and '' are different groups, so they must be different keys.
+
+    ``model_id`` and ``config_label`` are both nullable. The GROUP BY treats
+    NULL and the empty string as distinct groups, so a key built with
+    ``str(x or "")`` -- which an earlier version used -- gave those two rows
+    one handle.
+    """
+    for field in ("model_id", "config_label", "engine", "retrieval_k"):
+        base = {
+            "solution_id": "sol",
+            "model_id": "m",
+            "config_label": "l",
+            "config_digest": "d",
+            "engine": "e",
+            "retrieval_k": "1",
+        }
+        absent = dict(base, **{field: None})
+        empty = dict(base, **{field: ""})
+        assert _row_key(**absent) != _row_key(**empty), (
+            f"an absent {field} and an empty {field} share a key"
+        )
+
+
+def test_the_row_key_cannot_be_forged_by_a_field_that_looks_like_a_boundary() -> None:
+    """A value cannot impersonate a field boundary, whatever bytes it holds.
+
+    ``model_id`` and ``config_label`` are plain ``String(200)`` fed from the
+    run-create payload, so any byte can appear in them. An earlier version
+    joined the fields on US (0x1f) and asserted in prose that no value could
+    contain one -- measured, ``model_id='a\\x1fb'`` and ``config_label='b\\x1fc'``
+    produced the same key, so two rows the GROUP BY keeps apart shared a handle
+    and the cell URL opened the other configuration.
+
+    Length-prefixing fixes it whatever the bytes are. The cases below include
+    values crafted against the PREFIX itself (``'1:a'``), because a separator
+    scheme is only as good as the thing a field cannot contain, and the answer
+    here has to be "nothing at all".
+    """
+    fields = ("solution_id", "model_id", "config_label", "config_digest")
+    base = {
+        "solution_id": "sol",
+        "model_id": "m",
+        "config_label": "l",
+        "config_digest": "d",
+        "engine": "e",
+        "retrieval_k": "1",
+    }
+    hostile = ("a\x1fb", "a:b", "1:a", "", "6:sol", "\x00")
+    keys: dict[str, tuple[str, str]] = {}
+    for field in fields:
+        for value in hostile:
+            key = _row_key(**dict(base, **{field: value}))
+            assert key not in keys, (
+                f"{field}={value!r} collides with {keys[key][0]}={keys[key][1]!r}: "
+                "two rows the matrix keeps apart would share one URL"
+            )
+            keys[key] = (field, value)
+
+    # And the pair that actually collided, named explicitly so a regression is
+    # recognisable rather than just one of many.
+    assert _row_key("sol", "a\x1fb", "c", "d", "e", "1") != _row_key(
+        "sol", "a", "b\x1fc", "d", "e", "1"
+    ), "the separator collision is back"

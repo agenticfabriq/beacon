@@ -357,21 +357,27 @@ def _go_body(page: str) -> str:
 
 
 def test_every_routed_view_can_be_restored_from_its_url() -> None:
-    """A view `go()` writes a route for must be one `applyRoute` can restore.
+    """Every view is restorable, and detail views carry their own id.
 
-    `go()` writes a route for every view but its named exclusions, so a view
-    that is neither excluded nor in ROUTED_VIEWS puts its own URL in the
-    address bar and then falls through to `go("matrix")` on reload -- a shared
-    link silently opens Results.
+    A view `go()` writes a route for must be one `applyRoute` can restore, or
+    the URL is a link to the wrong page: the fallthrough opens Results. That
+    happened to `history`, and to `cell` for far longer.
 
-    **Enumerated from `go("...")` CALL SITES, not `data-go` attributes.** Two
-    earlier versions of this test read attributes and were blind to the views
-    reached by click: first `benchmarks` (`class="bench"`, not `class="nav"`),
-    then `cell`, which was a LIVE instance of the defect -- `go("cell")` wrote
-    a route, `cell` was in neither ROUTED_VIEWS nor the exclusions, and every
-    shared link to a cell page opened Results. A green run was
-    indistinguishable from that failure. Call sites are what `go()` actually
-    receives, so they cannot miss a navigable view.
+    The shape of the fix changed, so the invariant did. Detail views used to be
+    SUPPRESSED -- no route at all, which traded a misleading URL for a broken
+    Back button. They now carry a fourth segment naming which row or event,
+    which means:
+
+    * every navigable view is in ROUTED_VIEWS, with no exclusions left;
+    * `go()` writes a bare route for exactly the non-detail views, because a
+      bare route for a detail view is the unrestorable shape;
+    * every detail view has a `writeRoute(view, id)` call passing an id;
+    * `applyRoute` restores each of them.
+
+    Enumerated from `go("...")` CALL SITES, not attributes. Two earlier
+    versions read attributes and missed the views reached by click: first
+    `benchmarks` on `class="bench"`, then `cell`, which was a LIVE instance of
+    the defect -- its green was indistinguishable from the bug.
     """
     page = _page()
 
@@ -379,78 +385,143 @@ def test_every_routed_view_can_be_restored_from_its_url() -> None:
     assert routed, "no ROUTED_VIEWS found"
     views = set(re.findall(r'"([^"]+)"', routed.group(1)))
 
-    go_body = _go_body(page)
-    # The exclusion condition, read as a whole rather than as a bag of names:
-    # `view !== "a" && view !== "b"` and `view !== "a" || view !== "b"` contain
-    # the same names and mean opposite things -- the second is always true, so
-    # NOTHING writes a route. A name-only read passed that mutation.
-    guard_line = re.search(r"if \((view !== [^)]+)\) writeRoute\(view\);", go_body)
-    assert guard_line, "no writeRoute guard found in go()"
-    condition = guard_line.group(1)
-    assert "||" not in condition, (
-        f"the writeRoute guard must be a conjunction; `||` over !== clauses is "
-        f"always true and suppresses every route. Got: {condition}"
-    )
-    skipped = set(re.findall(r'view !== "([^"]+)"', condition))
-    assert skipped == {"run", "cell", "history-event"}, (
-        "the views that write no route are load-bearing and each has a reason "
-        f"in go()'s comment; got {sorted(skipped)}"
+    detail_decl = re.search(r"const DETAIL_VIEWS = new Set\(\[(.*?)\]\);", page, re.S)
+    assert detail_decl, "no DETAIL_VIEWS found"
+    detail = set(re.findall(r'"([^"]+)"', detail_decl.group(1)))
+    # PINNED, not merely non-empty. Every check below is scoped to this set, so
+    # deriving the expectation from it means dropping a member silently drops
+    # the checks for it: remove "cell" and openCell's `writeRoute("cell",
+    # row.row_key)` still parses but the push is gated on DETAIL_VIEWS, so the
+    # id is discarded and the unrestorable cell URL this test is named for
+    # comes back -- with the suite green.
+    assert detail == {"run", "cell", "history-event"}, (
+        f"DETAIL_VIEWS membership is load-bearing and changed to {sorted(detail)}. "
+        "A view removed from it stops writing its id, and one added to it stops "
+        "getting a bare route from go(). Update this expectation deliberately."
     )
 
-    # Every view anything navigates to: go() call sites plus data-go targets.
+    # 1. Everything navigable must be restorable. No exclusions remain.
     navigable = set(re.findall(r'go\("([^"]+)"\)', page))
     navigable |= set(re.findall(r'data-go="([^"]+)"', page))
     assert navigable, "no navigable views found"
-
-    missing = sorted(navigable - views - skipped)
+    missing = sorted(navigable - views)
     assert not missing, (
-        f"view(s) that write a route but cannot be restored from it: {missing}. "
-        "Either add them to ROUTED_VIEWS or exclude them from writeRoute in go()."
+        f"view(s) reachable by navigation but absent from ROUTED_VIEWS: {missing}. "
+        "A route is written for them and applyRoute cannot restore it, so a "
+        "reload or a shared link falls through to Results."
+    )
+    assert detail <= views, (
+        f"detail view(s) not routable: {sorted(detail - views)}; each carries an id "
+        "in the route's fourth segment and must be restorable from it"
     )
 
-    # The other half of the enumeration: a `writeRoute("x")` ANYWHERE, not just
-    # the guarded call in go(). Reading only go()'s body left a one-line
-    # mutation green -- add `writeRoute("cell")` beside `go("cell")`, the shape
-    # already used for `run`, and the unrestorable URL is back while every
-    # assertion above still passes.
+    # 2. `go()` writes a bare route for exactly the non-detail views. Read as a
+    #    whole condition, not as a bag of names: a name-only read passed a
+    #    mutation flipping `&&` to `||`, which is always true and suppressed
+    #    every route.
+    go_body = _go_body(page)
+    guard_line = re.search(r"if \(([^)]*\)?[^)]*)\) writeRoute\(view\);", go_body)
+    assert guard_line, "no writeRoute guard found in go()"
+    condition = guard_line.group(1)
+    assert condition == "!DETAIL_VIEWS.has(view)", (
+        "go() must write a bare route for exactly the non-detail views; a detail "
+        f"view's route is written by its opener, with an id. Got: {condition}"
+    )
+
+    # 3. Each detail view has an opener passing an id, and every writeRoute
+    #    names a routed view. `writeRoute(view)` inside go() is the bare call
+    #    and is excluded by requiring a second argument here.
     code = _js_without_comments(page)
-    written = set(re.findall(r"""writeRoute\(\s*['"]([^'"]+)['"]""", code))
-    unrestorable = sorted(written - views - {"run"})
-    assert not unrestorable, (
-        f"writeRoute called for view(s) that cannot be restored: {unrestorable}. "
-        "`run` is the one exception, and the assertion below is what earns it."
+    with_id = {
+        name
+        for name, args in re.findall(r"""writeRoute\(\s*['"]([^'"]+)['"]\s*(,[^)]*)\)""", code)
+        if args.strip().startswith(",") and args.strip(" ,")
+    }
+    for view in sorted(detail):
+        assert view in with_id, (
+            f"detail view {view!r} has no writeRoute({view!r}, <id>) call, so its URL "
+            "carries no id and cannot be restored"
+        )
+    # WHICH id, not merely that there is one. Requiring only a second argument
+    # let `writeRoute("cell", row.config_digest)` back in, which is the defect
+    # three comments in this file are written to prevent: the model is not part
+    # of the config, so four spider2 rows share one digest and the cell page
+    # opens whichever comes first.
+    assert re.search(r'writeRoute\("cell",\s*row\.row_key\)', code), (
+        "the cell route must be keyed on row_key. config_digest cannot name a "
+        "row -- one digest covers four rows on the real corpus."
+    )
+    assert re.search(r"row_key === wanted|entry\.row_key", code), (
+        "applyRoute must look the cell up BY row_key, or the key written into "
+        "the URL is not the key read back out"
+    )
+    # The BODY, not only the call sites. Deleting the push leaves every call
+    # site intact and every detail route bare, so applyRoute hits the id-less
+    # refusal and a shared cell link falls through to Results -- the failure
+    # this test is named for, with the call-site assertions still satisfied.
+    write_body = re.search(r"function writeRoute\([^)]*\) \{(.*?)\n\}", code, re.S)
+    assert write_body, "no writeRoute body found"
+    assert "parts.push(encodeURIComponent(detailId))" in write_body.group(1), (
+        "writeRoute does not append the detail id, so every detail route is bare "
+        "however carefully its callers pass one"
+    )
+    assert "DETAIL_VIEWS.has(view)" in write_body.group(1), (
+        "the push must be gated on DETAIL_VIEWS, or a non-detail view acquires a "
+        "fourth segment applyRoute will not read"
     )
 
-    # `run` is whitelisted above because it passes its own id -- so READ that,
-    # rather than trusting the name. `writeRoute` pushes the id conditionally,
-    # so dropping the second argument at the openRun call site writes a bare
-    # `.../run` that applyRoute cannot restore, and the whitelist would have
-    # excused it.
-    run_calls = re.findall(r"""writeRoute\(\s*['"]run['"]([^)]*)\)""", code)
-    assert run_calls, 'no writeRoute("run", ...) call found'
-    for args in run_calls:
-        assert args.strip().startswith(","), (
-            'writeRoute("run") must pass the run id: applyRoute needs it to '
-            f"restore a run, and without it the route falls through to Results. Got: {args!r}"
+    written = set(re.findall(r"""writeRoute\(\s*['"]([^'"]+)['"]""", code))
+    unrestorable = sorted(written - views)
+    assert not unrestorable, (
+        f"writeRoute called for view(s) that cannot be restored: {unrestorable}"
+    )
+
+    # 4. applyRoute must actually restore each detail view. Without this the
+    #    route carries an id nothing reads, which reloads to Results while the
+    #    URL claims otherwise.
+    apply_body = re.search(r"async function applyRoute\(\) \{(.*?)\n\}", page, re.S)
+    assert apply_body, "no applyRoute found"
+    body = apply_body.group(1)
+    for view in sorted(detail):
+        assert f'viewPart === "{view}"' in body, (
+            f"applyRoute does not restore {view!r}, so its id is written and never read"
         )
 
-    assert "history-event" not in views, (
-        "history-event is excluded from writeRoute, so listing it as routable "
-        "claims a restore that cannot work"
+    # 5. An ID-LESS detail route must not be treated as restorable. Because the
+    #    detail views are in ROUTED_VIEWS, the generic
+    #    `ROUTED_VIEWS.has(viewPart)` line would otherwise match a bare
+    #    `#/<team>/<suite>/cell` and call go("cell") -- which has no loader, so
+    #    the view paints from empty containers: a blank page with no message,
+    #    where before it fell through to Results. Those URLs exist; the app
+    #    emitted one for every cell link before the id was carried.
+    assert "if (DETAIL_VIEWS.has(viewPart)) return false;" in body, (
+        "applyRoute must refuse a detail view with no id, or a truncated detail "
+        "URL renders an empty page instead of falling back to Results"
     )
-    assert "cell" not in views, (
-        "cell is excluded from writeRoute for the same reason: the route "
-        "carries no matrix row, so it could only restore an empty page"
-    )
+    assert body.index("if (DETAIL_VIEWS.has(viewPart)) return false;") > max(
+        body.index(f'viewPart === "{view}"') for view in detail
+    ), "the id-less refusal must come AFTER the branches that restore an id-ful route"
 
 
 def test_the_suite_switch_bumps_the_generation_and_clears_the_panels() -> None:
-    """Both halves, at the one site that changes the suite from the rail."""
+    """Both halves, at the one site that changes the suite from the rail.
+
+    Restored: it was deleted by accident when the routing test above was
+    rewritten, and nothing else covers what it holds.
+    ``test_every_suite_scoped_loader_drops_a_stale_response`` checks each
+    loader CAPTURES and compares ``S.suiteGen``, which is dead code if nothing
+    ever bumps it -- so without this, deleting ``S.suiteGen += 1`` leaves all
+    five guards permanently inert and the previous suite's rows paint over the
+    new suite's table, with the suite green.
+    """
     page = _page()
     handler = re.search(r'const suiteRow = t\.closest\("\[data-suite\]"\);(.*?)\n  \}', page, re.S)
     assert handler, "the suite-row click handler must exist"
 
-    assert "S.suiteGen += 1;" in handler.group(1)
+    assert "S.suiteGen += 1;" in handler.group(1), (
+        "nothing bumps the suite generation, so every loader's staleness guard "
+        "is permanently satisfied and can never drop a stale response"
+    )
     assert "clearSuiteScopedPanels();" in handler.group(1)
     assert handler.group(1).index("clearSuiteScopedPanels();") < handler.group(1).index(
         'go("matrix")'
