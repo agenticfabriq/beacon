@@ -301,7 +301,7 @@ def test_every_suite_scoped_loader_drops_a_stale_response() -> None:
     """
     page = _page()
 
-    for loader in ("loadMatrix", "loadRuns", "loadQuestions"):
+    for loader in ("loadMatrix", "loadRuns", "loadQuestions", "loadHistory"):
         body = re.search(rf"const {loader} = guard\(async \(\) => \{{(.*?)\n\}}\);", page, re.S)
         assert body, f"no {loader} found"
         text = body.group(1)

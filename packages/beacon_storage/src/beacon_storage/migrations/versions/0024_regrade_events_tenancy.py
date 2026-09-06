@@ -95,11 +95,28 @@ def upgrade() -> None:
     # suite UUID and not `suite_name`.
     op.create_index("idx_regrade_events_suite_id", "regrade_events", ["suite_id", "created_at"])
 
-    # Same shape as `result_outcomes` in 0023, and the same caveat applies:
-    # `m.user_id = current_user_id()` is defence in depth, not the isolation,
-    # because `memberships` is itself FORCE RLS and the subquery therefore only
-    # ever sees the caller's own rows. It stays because this table's isolation
-    # otherwise depends invisibly on another table's policy.
+    # Same shape as `result_outcomes` in 0023, and TWO caveats apply.
+    #
+    # First, and larger than the one 0023 records: **this policy constrains
+    # nothing in the configuration this repo ships.** `DATABASE_URL` in
+    # `Makefile` and `docker-compose.yml` is the `beacon` role, which owns the
+    # cluster and carries `rolsuper` and `rolbypassrls`, so RLS is never
+    # consulted for it -- measured, a caller with no membership at all still
+    # reads every row. `beacon_app`, the constrained role the tests drop to, is
+    # granted nothing by any migration and exists only in fixtures. So for this
+    # route the isolation that actually holds today is `require_permission` in
+    # the API layer, and this policy is defence in depth that becomes
+    # load-bearing the moment the app connects as a non-superuser -- which it
+    # should. The docstring above says the column and policy are the
+    # precondition for serving the table; they are the precondition, and they
+    # are not by themselves sufficient. `test_rls_regrade_events.py` asserts
+    # this gap so it cannot be forgotten, and fails once it is closed.
+    #
+    # Second, the one 0023 records: `m.user_id = current_user_id()` is defence
+    # in depth rather than the isolation, because `memberships` is itself FORCE
+    # RLS and the subquery therefore only ever sees the caller's own rows. It
+    # stays because this table's isolation otherwise depends invisibly on
+    # another table's policy.
     op.execute("ALTER TABLE regrade_events ENABLE ROW LEVEL SECURITY;")
     op.execute("ALTER TABLE regrade_events FORCE ROW LEVEL SECURITY;")
     op.execute(

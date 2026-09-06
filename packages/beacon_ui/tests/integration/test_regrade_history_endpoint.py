@@ -1,9 +1,21 @@
 """The History endpoints: what moved this benchmark's numbers, and for whom.
 
 These read ``regrade_events``, which 0022 created without tenancy on the
-grounds that no route served it. 0024 added ``team_id`` and RLS precisely
-because these endpoints exist, so the cross-tenant test here is not belt and
-braces -- it is the test that the reason for 0024 actually holds.
+grounds that no route served it; 0024 added ``team_id`` and a policy because
+these endpoints exist.
+
+**The cross-tenant test below does not reach RLS, and an earlier version of
+this docstring wrongly claimed it did.** Two reasons, both measured. Carol
+holds no membership in acme, so ``require_permission(scope_kind="suite")``
+refuses before any query runs -- which is the isolation that actually protects
+this route. And the ``api_client`` fixture connects as the cluster owner, which
+carries ``rolbypassrls``, so no test at this layer can exercise a policy at
+all. Deleting the policy from 0024 leaves every test in this file green.
+
+What this file tests is the API contract: the permission layer, the suite
+scoping, the arithmetic, and the empty state. The policy is tested behaviourally
+in ``beacon_storage/tests/integration/test_rls_regrade_events.py``, under a
+role that RLS applies to.
 """
 
 from typing import Protocol
@@ -124,7 +136,12 @@ def test_history_404s_for_an_unknown_suite(api_client: TestClient, world: _World
 def test_another_team_cannot_read_this_benchmarks_history(
     api_client: TestClient, world: _World, session: Session
 ) -> None:
-    """The reason 0024 exists. Carol is on globex; the event belongs to acme."""
+    """Carol is on globex; the event belongs to acme.
+
+    This is the PERMISSION layer, not RLS -- see the module docstring. It is
+    still the check that matters for the route, because that layer is what
+    denies the read in the deployed configuration.
+    """
     _event(session, world, changes=[])
 
     response = api_client.get(

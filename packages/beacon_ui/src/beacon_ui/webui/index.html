@@ -314,8 +314,10 @@
     <div class="view" id="v-history">
       <div class="crumb" id="history-crumb"></div>
       <h1>History</h1>
-      <p class="sub">Every recorded change to this benchmark's numbers — what moved, when, under
-      which grading rule, and why. Open one to see the before and after per run.</p>
+      <p class="sub">Recorded changes to this benchmark's numbers — what moved, when, under which
+      grading rule, and why. Open one to see the before and after per run. The
+      <b>hundred most recent</b> are listed; this benchmark has one, and a pager is owed here
+      before that stops being true.</p>
       <div id="history-body"></div>
     </div>
 
@@ -845,7 +847,12 @@ const loadHistory = guard(async () => {
   try {
     events = asList(await api("history", { suite_id: S.suiteId }), "events");
   } catch (error) {
-    body.innerHTML = `<div class="empty">Could not load history — ${esc(error.message)}.</div>`;
+    /* Not on a 401: `api` calls signOut() first, so the app is already behind
+     * the sign-in screen and this notice would explain the wrong thing. Same
+     * exclusion loadMatrix makes, for the same reason. */
+    if (error.message !== "signed out") {
+      body.innerHTML = `<div class="empty">Could not load history — ${esc(error.message)}.</div>`;
+    }
     return;
   }
   if (gen !== S.suiteGen) return;
@@ -877,7 +884,9 @@ const openHistoryEvent = guard(async (eventId) => {
   try {
     detail = await api("historyEvent", { suite_id: S.suiteId, event_id: eventId });
   } catch (error) {
-    body.innerHTML = `<div class="empty">Could not load this event — ${esc(error.message)}.</div>`;
+    if (error.message !== "signed out") {
+      body.innerHTML = `<div class="empty">Could not load this event — ${esc(error.message)}.</div>`;
+    }
     return;
   }
   const event = detail.event;
@@ -886,8 +895,8 @@ const openHistoryEvent = guard(async (eventId) => {
     `${event.n_flipped} outcome${event.n_flipped === 1 ? "" : "s"} moved`;
   document.getElementById("hev-sub").innerHTML =
     `${esc(event.grader)} <b>${esc(event.grader_version)}</b> · headline ` +
-    `<b>${esc(event.headline_metric)}</b> · ${event.n_flipped} of ${event.n_graded} re-derived · ` +
-    `${detail.runs_affected} of ${event.n_runs} runs affected`;
+    `<b>${esc(event.headline_metric)}</b> · ${event.n_graded} results re-derived, ` +
+    `<b>${event.n_flipped} moved</b> · ${detail.runs_affected} of ${event.n_runs} runs affected`;
   /* Shown verbatim. The string is an operator's explanation, not a
    * measurement, so the display must not tidy it into looking computed. */
   document.getElementById("hev-reason").textContent =
@@ -1235,7 +1244,13 @@ const loadSettings = guard(async () => {
  * team's list, so refreshing on another team's benchmark fell back to the
  * default suite (found the hard way on fs_payments). A team or suite that
  * no longer exists, or is not visible, falls back to defaults. */
-const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "benchmarks", "settings"]);
+/* "history" belongs here because go() writes a route for every view except
+ * `run`: without it the address bar said .../history while a reload fell
+ * through applyRoute to go("matrix") and landed on Results, so a shared link
+ * silently went somewhere else. `history-event` is deliberately NOT routed --
+ * the route carries no event id, so restoring it would open the list's view
+ * with nothing in it. Its route is suppressed in go() instead. */
+const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "history", "benchmarks", "settings"]);
 let lastRoute = "";
 function writeRoute(view, runId) {
   const parts = [S.teamId || "-", S.suiteId || "-", view];
@@ -1291,7 +1306,7 @@ function go(view) {
   });
   renderRail();
   window.scrollTo({ top: 0 });
-  if (view !== "run") writeRoute(view);
+  if (view !== "run" && view !== "history-event") writeRoute(view);
   if (view === "matrix") loadMatrix();
   if (view === "runs") loadRuns();
   if (view === "questions") loadQuestions();
