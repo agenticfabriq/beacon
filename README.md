@@ -95,11 +95,21 @@ make db-up
 make migrate
 ```
 
-The default local database URL is:
+Two database URLs, and the difference matters. Anything that SERVES requests
+connects as `beacon_app`, which is constrained: row-level security applies to
+it, so a policy decides what each request can read. Migrations connect as
+`beacon`, which owns the schema and can run DDL — and, being the cluster
+owner, bypasses every policy. Running the API as `beacon` leaves the policies
+inert and `require_permission` as the only isolation.
 
 ```text
-postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon
+serving:    postgresql+psycopg://beacon_app:beacon_dev@localhost:5432/beacon
+migrating:  postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon
 ```
+
+`make demo` sets `beacon_app`'s local password for you (`make
+app-role-password`, which runs after `migrate` because the migration is what
+creates the role). A deployment sets its own out of band.
 
 If `5432` is taken, pick another port and keep it consistent:
 
@@ -111,7 +121,7 @@ POSTGRES_PORT=55432 make migrate
 Seed demo data. It prints API keys — keep one:
 
 ```bash
-DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
+DATABASE_URL=postgresql+psycopg://beacon_app:beacon_dev@localhost:5432/beacon \
   uv run beacon demo seed
 ```
 
@@ -120,7 +130,7 @@ DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
 One process. The UI is a single page served by the API itself:
 
 ```bash
-DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
+DATABASE_URL=postgresql+psycopg://beacon_app:beacon_dev@localhost:5432/beacon \
   uv run uvicorn beacon_ui.api.app:app --reload --port 8000
 ```
 

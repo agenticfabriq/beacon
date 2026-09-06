@@ -19,17 +19,16 @@ pointing the app's DSN at it, which is a deployment change.
 created here can be granted privileges but cannot authenticate until an
 operator gives it a secret out of band, so a checked-in migration never
 carries one. And it does not touch ``DATABASE_URL``: switching the running app
-is a separate step, and one that is NOT yet safe. Under a constrained role RLS
-refuses writes too -- these policies have no ``WITH CHECK``, so Postgres reuses
-USING as the insert check and a team cannot be created by someone who is not
-yet a member of it. The Makefile records the full list; the switch needs
-``WITH CHECK`` clauses and a reordering of the team-creation path first.
+is a separate step, and it needed one more migration first. Under this one
+alone RLS refused the WRITES -- the tenant policies had no ``WITH CHECK``, so
+Postgres reused USING as the insert check and a team could not be created by
+someone not yet a member of it. 0026 fixes that, and the serving DSN is
+switched there.
 
 **Why the app still needs a second, owning role.** Migrations run DDL and the
 test fixtures drop and recreate the schema; neither is something the serving
 role should be able to do. So ``beacon`` runs migrations and ``beacon_app``
-will serve -- see ``MIGRATE_DATABASE_URL`` in the Makefile, which is split now
-so that the switch is one line when its preconditions are met.
+serves -- see ``MIGRATE_DATABASE_URL`` in the Makefile.
 
 **Why this is safe with respect to authentication.** The policies read
 ``current_user_id() IS NULL OR ...``, so a connection that never sets
@@ -62,12 +61,10 @@ branch_labels = None
 depends_on = None
 
 # A module constant, never a parameter. Postgres has no placeholder for an
-# IDENTIFIER in GRANT or ALTER ROLE, so every statement below interpolates it.
-# Only the few that ruff flags as query-shaped carry `noqa: S608`; the rest
-# interpolate the same constant and need no suppression, so the presence of a
-# noqa marks what the linter noticed rather than what is interpolated. Either
-# way it is sound only because this value is fixed here -- a role name taken
-# from anywhere a caller can reach would make every one of them an injection
+# IDENTIFIER in GRANT or ALTER ROLE, so every statement below interpolates it
+# -- see the S608 note in ruff.toml, which covers this directory. That is sound
+# only because this value is fixed here: a role name taken from anywhere a
+# caller can reach would make every one of those statements an injection
 # point.
 APP_ROLE = "beacon_app"
 
@@ -87,7 +84,7 @@ def upgrade() -> None:
         sa.text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": APP_ROLE}
     ).scalar()
     if not exists:
-        op.execute(f"CREATE ROLE {APP_ROLE}")  # noqa: S608 -- identifier, see APP_ROLE
+        op.execute(f"CREATE ROLE {APP_ROLE}")
 
     # LOGIN is set SEPARATELY and unconditionally, not as part of CREATE. The
     # role may already exist without it -- the test fixture creates a bare
@@ -125,21 +122,21 @@ def upgrade() -> None:
     # Future tables, so the next migration does not need one of these.
     migration_role = bind.execute(sa.text("SELECT current_user")).scalar_one()
     defaults = f"ALTER DEFAULT PRIVILEGES FOR ROLE {migration_role} IN SCHEMA public"
-    op.execute(f"{defaults} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}")  # noqa: S608
-    op.execute(f"{defaults} GRANT USAGE, SELECT ON SEQUENCES TO {APP_ROLE}")  # noqa: S608
+    op.execute(f"{defaults} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}")
+    op.execute(f"{defaults} GRANT USAGE, SELECT ON SEQUENCES TO {APP_ROLE}")
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     migration_role = bind.execute(sa.text("SELECT current_user")).scalar_one()
     defaults = f"ALTER DEFAULT PRIVILEGES FOR ROLE {migration_role} IN SCHEMA public"
-    op.execute(f"{defaults} REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM {APP_ROLE}")  # noqa: S608
-    op.execute(f"{defaults} REVOKE USAGE, SELECT ON SEQUENCES FROM {APP_ROLE}")  # noqa: S608
+    op.execute(f"{defaults} REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM {APP_ROLE}")
+    op.execute(f"{defaults} REVOKE USAGE, SELECT ON SEQUENCES FROM {APP_ROLE}")
     op.execute(f"REVOKE EXECUTE ON FUNCTION current_user_id() FROM {APP_ROLE}")
     seqs = "ON ALL SEQUENCES IN SCHEMA public"
-    op.execute(f"REVOKE USAGE, SELECT {seqs} FROM {APP_ROLE}")  # noqa: S608
+    op.execute(f"REVOKE USAGE, SELECT {seqs} FROM {APP_ROLE}")
     all_tables = "ON ALL TABLES IN SCHEMA public"
-    op.execute(f"REVOKE SELECT, INSERT, UPDATE, DELETE {all_tables} FROM {APP_ROLE}")  # noqa: S608
+    op.execute(f"REVOKE SELECT, INSERT, UPDATE, DELETE {all_tables} FROM {APP_ROLE}")
     op.execute(f"REVOKE USAGE ON SCHEMA public FROM {APP_ROLE}")
     # The ROLE is deliberately left in place. It may predate this migration and
     # may be named in a deployment's DSN; dropping it out from under a running

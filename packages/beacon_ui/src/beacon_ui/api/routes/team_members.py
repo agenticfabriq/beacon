@@ -51,15 +51,24 @@ def add_team_member(
     email when the subject is new).
     """
     repo = UserRepo(session)
-    target_user = repo.get_by_email(str(body.user_email))
-    if target_user is not None and not target_user.is_active:
+    email = str(body.user_email)
+    # `find_for_invite`, not `get_by_email`: the ordinary read is bounded by
+    # `users_read`, so an invitee who is not yet a co-member is invisible and
+    # the branch below would create a duplicate account -- a unique-constraint
+    # violation no handler catches, so a 500. See that method for why the
+    # lookup is owner-privileged and why it returns two fields rather than a
+    # User.
+    existing = repo.find_for_invite(email)
+    if existing is not None and not existing.is_active:
         raise HTTPException(status.HTTP_409_CONFLICT, "user exists but is deactivated")
-    if target_user is None:
-        email = str(body.user_email)
-        target_user = repo.create(email=email, name=email.split("@")[0])
+    target_user_id = (
+        existing.id
+        if existing is not None
+        else repo.create(email=email, name=email.split("@")[0]).id
+    )
 
     membership = MembershipRepo(session).grant(
-        user_id=target_user.id,
+        user_id=target_user_id,
         scope_kind=ScopeKind.TEAM,
         scope_id=team_id,
         role=Role(body.role),

@@ -97,21 +97,24 @@ def upgrade() -> None:
 
     # Same shape as `result_outcomes` in 0023, and one caveat applies.
     #
-    # This policy is INERT where it is deployed: the app connects as `beacon`,
-    # the cluster owner, whose queries never consult a policy, so
-    # `require_permission` is the isolation that actually holds. 0025 grants a
-    # constrained `beacon_app` -- the schema half of the fix -- but the serving
-    # DSN is not switched, because under a constrained role RLS also refuses
-    # the WRITES: these policies carry no `WITH CHECK`, so Postgres reuses
-    # USING as the insert check and a team cannot be created by someone who is
-    # not yet a member of it. See the Makefile's note and
-    # `test_a_constrained_role_cannot_insert_a_team`.
+    # This policy is LIVE. It was inert when it shipped -- the app connected as
+    # `beacon`, the cluster owner, whose queries never consult a policy -- and
+    # two migrations closed that: 0025 grants a constrained `beacon_app`, and
+    # 0026 rewrote the identity-table policies so team administration works
+    # under one. Under 0025 alone RLS refused the WRITES, because those
+    # policies had no `WITH CHECK` and Postgres reuses USING as the insert
+    # check. `test_the_serving_role_does_not_bypass_rls` keeps the DSN honest.
     #
-    # The remaining caveat, which 0023 also records: `m.user_id =
-    # current_user_id()` is defence in depth rather than the isolation, because
-    # `memberships` is itself FORCE RLS and the subquery therefore only ever
-    # sees the caller's own rows. It stays because this table's isolation would
-    # otherwise depend invisibly on another table's policy.
+    # The remaining caveat, restated because 0026 falsified its old premise.
+    # `m.user_id = current_user_id()` is still defence in depth rather than the
+    # isolation, but NOT because memberships only ever shows the caller's own
+    # rows -- `memberships_read` now exposes the whole roster of any scope the
+    # caller belongs to, and a team member counts two rows where they used to
+    # count one. The conclusion survives for a narrower reason: the rows now
+    # exposed are confined to the caller's OWN scopes, so the subquery still
+    # cannot match a team they do not belong to. Deleting the clause would make
+    # that a dependency on another table's policy rather than on this one's
+    # text, which is why it stays.
     #
     # Note the policy's null branch: a connection that never sets
     # `app.current_user_id` sees everything. That is load-bearing, not a hole --

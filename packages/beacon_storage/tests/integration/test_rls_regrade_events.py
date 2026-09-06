@@ -10,10 +10,11 @@ this table's policy and ``memberships``'. Note ``memberships`` is NOT what
 isolates this table today -- the policy scopes on ``current_user_id()``
 directly -- and the predicate test explains why it is still read.
 
-These policies are still INERT where this is deployed: the app connects as the
-cluster owner, which never consults one. 0025 grants a constrained
-``beacon_app`` so that can change, but the serving DSN is not switched yet --
-``test_a_constrained_role_cannot_insert_a_team`` records why.
+These policies are live: 0025 grants a constrained ``beacon_app``, 0026
+rewrote the identity-table policies so administration works under one, and the
+serving DSN names it. ``test_the_serving_role_does_not_bypass_rls`` keeps it
+that way, and ``test_rls_admin_policies.py`` covers what administration may
+and may not do.
 """
 
 from __future__ import annotations
@@ -92,10 +93,12 @@ def test_the_policy_actually_isolates_teams(engine: Engine) -> None:
     check both pass.
 
     What it does NOT catch is deleting ``m.user_id = current_user_id()``, and
-    saying so matters: ``memberships`` is itself under FORCE RLS, so the
-    subquery only ever sees the caller's own rows. A maintainer who deletes
-    that clause and sees green should conclude it is redundant defence in depth
-    -- which it is -- and not that this test is broken.
+    the reason changed with 0026. It used to be that ``memberships`` showed
+    only the caller's own rows; ``memberships_read`` now exposes the roster of
+    any scope the caller belongs to. The clause is still redundant, because
+    those rows are confined to the caller's own scopes -- so a maintainer who
+    deletes it and sees green should conclude that, not that this test is
+    broken. It stays so the reasoning lives in this table's own text.
     """
     factory = make_session_factory(engine)
 
@@ -129,95 +132,71 @@ def test_the_policy_actually_isolates_teams(engine: Engine) -> None:
         )
 
 
-def test_the_policies_are_still_inert_where_this_is_deployed(engine: Engine) -> None:
-    """The app's configured role bypasses RLS, so no policy here decides anything.
+def test_the_serving_role_does_not_bypass_rls(engine: Engine) -> None:
+    """The app's configured role must be constrained, or no policy decides anything.
 
-    Kept because the gap is still open, and it is open for a reason that was
-    discovered by trying to close it. 0025 grants a constrained ``beacon_app``,
-    which is the schema half. Pointing the serving DSN at it does NOT work
-    yet: see ``test_a_constrained_role_cannot_insert_a_team`` below.
+    This replaces a test that asserted the OPPOSITE, twice over. The first
+    version kept a known gap visible: the app connected as the cluster owner,
+    whose queries never consult a policy. 0025 granted a constrained role and
+    0026 rewrote the tenant policies so administration works under one, so the
+    gap is shut and this is the inverse -- it fails if the DSN is ever pointed
+    back at a role that bypasses.
 
-    Reads the DECLARED app DSN from the Makefile, then that role's privileges.
-    Both halves are needed and each was wrong once -- reading privileges off
-    the TEST connection cannot see the app's role, and reading the name alone
-    stays green when the role is constrained in place.
-
-    This FAILS once the serving DSN names a constrained role, which is the
-    signal to delete it and to correct the notes in 0024 and the Makefile.
+    Reads every DECLARED serving DSN -- the Makefile, ``.env.example`` and the
+    README's launch commands -- and then each named role's privileges. Both
+    halves are needed and each was wrong once: privileges read off the TEST
+    connection cannot see the app's role, and a name alone stays green when a
+    role is constrained, or unconstrained, in place. Reading only the Makefile
+    was a third gap: the README and ``.env.example`` still named the owner
+    after the switch, so the documented path left the policies inert.
     """
-    makefile = (pathlib.Path(__file__).parents[4] / "Makefile").read_text()
-    declared = [line for line in makefile.splitlines() if line.startswith("DATABASE_URL ?=")]
-    assert len(declared) == 1, (
-        f"expected exactly one app DATABASE_URL default in the Makefile, found {declared}"
+    root = pathlib.Path(__file__).parents[4]
+    # EVERY place an operator gets a DSN, not just the Makefile. `.env.example`
+    # is what the README says to copy to `.env`, and `ApiConfig` loads that --
+    # so a guard reading only the Makefile leaves the documented path free to
+    # point at the owning role with every policy inert, which is the condition
+    # this whole thread was about.
+    declared: dict[str, str] = {}
+    for line in (root / "Makefile").read_text().splitlines():
+        if line.startswith("DATABASE_URL ?="):
+            declared["Makefile"] = line
+    for line in (root / ".env.example").read_text().splitlines():
+        if line.startswith("DATABASE_URL="):
+            declared[".env.example"] = line
+    for number, line in enumerate((root / "README.md").read_text().splitlines(), 1):
+        if "DATABASE_URL=postgresql" in line:
+            declared[f"README.md:{number}"] = line
+    assert "Makefile" in declared and ".env.example" in declared, (
+        f"expected a serving DSN in both the Makefile and .env.example: {sorted(declared)}"
     )
-    match = re.search(r"://([^:@/]+)", declared[0])
-    assert match, f"could not read a role out of {declared[0]!r}"
-    role = match.group(1)
+
+    roles = {}
+    for where, line in declared.items():
+        match = re.search(r"://([^:@/]+)", line)
+        assert match, f"could not read a role out of {where}: {line!r}"
+        roles[where] = match.group(1)
 
     with engine.connect() as conn:
-        attrs = conn.execute(
-            sa.text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = :r"),
-            {"r": role},
-        ).one_or_none()
+        rows = conn.execute(
+            sa.text(
+                "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = ANY(:names)"
+            ),
+            {"names": sorted(set(roles.values()))},
+        ).all()
+    attrs = {r[0]: (r[1], r[2]) for r in rows}
 
-    assert attrs is not None, (
-        f"the app's configured role {role!r} does not exist in this database, so "
-        "whether it bypasses RLS cannot be read here"
-    )
-    assert bool(attrs[0] or attrs[1]), (
-        f"the app is now configured as {role!r}, which does not bypass RLS "
-        f"(rolsuper={attrs[0]}, rolbypassrls={attrs[1]}). If the write paths were "
-        "fixed too, delete this test and update 0024 and the Makefile. Do not widen "
-        "the assertion to make it pass."
-    )
-
-
-def test_a_constrained_role_cannot_insert_a_team(engine: Engine) -> None:
-    """Why the serving DSN is not switched: RLS refuses the writes.
-
-    Every tenant policy is ``FOR ALL USING (...)`` with no ``WITH CHECK``, and
-    Postgres reuses USING as the INSERT check. So under a constrained role a
-    write must satisfy the same membership predicate a read does -- and a
-    brand-new team has no membership, so its creator cannot insert it.
-
-    ``TeamService.create`` inserts the team BEFORE granting the creator's
-    membership, so ``POST /v1/teams`` would 500. ``add_team_member`` inserts a
-    ``users`` row and a ``memberships`` row for someone OTHER than the actor,
-    so both fail. This is the precondition for the switch, recorded as a test
-    so it cannot be rediscovered the hard way.
-
-    It passes while the gap exists. Once ``WITH CHECK`` clauses are added it
-    will fail, which is the point: that is when the switch becomes safe.
-    """
-    factory = make_session_factory(engine)
-    with factory() as session:
-        user = UserRepo(session).create(email="wc-probe@example.com", name="W")
-        team = TeamRepo(session).create(name="wc-probe-team")
-        session.flush()
-        MembershipRepo(session).grant(
-            user_id=user.id,
-            scope_kind=ScopeKind.TEAM,
-            scope_id=team.id,
-            role=Role.TEAM_ADMIN,
+    for where, role in sorted(roles.items()):
+        assert role in attrs, (
+            f"{where} names role {role!r}, which does not exist in this database, so "
+            "whether it bypasses RLS cannot be read here"
         )
-        session.commit()
-        uid = user.id
-
-    with factory() as session:
-        session.execute(text("SET LOCAL ROLE beacon_app"))
-        set_current_user(session, uid)
-        with pytest.raises(ProgrammingError) as caught:
-            session.execute(
-                text(
-                    "INSERT INTO teams (id, name, created_at, updated_at) "
-                    "VALUES (gen_random_uuid(), 'wc-probe-2', now(), now())"
-                )
-            )
-        assert "row-level security" in str(caught.value), (
-            "expected the insert to be refused BY THE POLICY; a different failure "
-            f"means this test is measuring something else: {caught.value}"
+        rolsuper, bypass = attrs[role]
+        assert not rolsuper and not bypass, (
+            f"{where} tells an operator to connect as {role!r}, which has "
+            f"rolsuper={rolsuper} rolbypassrls={bypass}. A role with either attribute "
+            "never consults a policy, so every policy in this schema would be inert "
+            "and require_permission would be the only isolation."
         )
-        session.rollback()
 
 
 def test_the_serving_role_cannot_run_ddl(engine: Engine) -> None:

@@ -7,3 +7,18 @@ ignore = ["S101"]  # asserts ok in tests
 
 [lint.per-file-ignores]
 "**/tests/**" = ["S105", "S106"]
+# Migrations are static DDL. Postgres has no placeholder for an IDENTIFIER in
+# GRANT, ALTER ROLE or CREATE POLICY, so a role name or a policy predicate has
+# to be interpolated -- and every value interpolated in these files is a
+# module-level constant written in the file itself, never anything a caller can
+# reach. Scattered `noqa: S608` comments were worse than this: ruff flags only
+# the statements it reads as query-shaped, so their presence marked what the
+# linter noticed rather than what was interpolated, and they cannot be placed
+# on a multi-line f-string at all.
+#
+# What this does NOT do is enforce anything: a future migration interpolating
+# an outside value would go unflagged here. Nothing lints that, so it rests on
+# the shape of these files -- a migration runs from a fixed script with no
+# parameters and no caller, so there is no outside value for it to take. If one
+# ever needs one, it belongs in application code, not in a migration.
+"**/migrations/versions/*.py" = ["S608"]
