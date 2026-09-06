@@ -4,7 +4,9 @@
 two checks ``result_outcomes`` has: no predicate assertion and no behavioural
 one. Measured at the time: rewriting the policy to ``USING (true)`` left every
 test in that change green. A guard whose passing value is indistinguishable
-from its failure is the defect this suite keeps finding, so it gets both here.
+from its failure is the defect this suite keeps finding, so it gets both here: a
+behavioural check under a role RLS applies to, and a predicate check that reads
+this table's policy AND ``memberships``', which its isolation is scoped through.
 
 Read ``test_the_policy_is_not_the_isolation_where_this_is_deployed`` before
 concluding that a green run here means the deployed API is isolated. It does
@@ -13,6 +15,8 @@ not, and that test says why.
 
 from __future__ import annotations
 
+import pathlib
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -121,43 +125,81 @@ def test_the_policy_actually_isolates_teams(engine: Engine) -> None:
         )
 
 
-def test_the_policy_is_not_the_isolation_where_this_is_deployed(engine: Engine) -> None:
-    """The role the API actually connects as bypasses this policy entirely.
+def test_the_policy_is_not_the_isolation_where_this_is_deployed() -> None:
+    """The role the API is configured to connect as bypasses this policy.
 
-    This is the uncomfortable half, and it is asserted rather than left in a
-    commit message because 0024's docstring presents the policy as the
-    precondition for serving the table -- which overstates what it does in the
-    configuration this repo ships.
+    0024's comment presents the tenant column and policy as the precondition
+    for serving this table. They are the precondition, and they are not by
+    themselves sufficient, because the app connects as the cluster owner.
 
-    Measured: ``DATABASE_URL`` in ``Makefile`` and ``docker-compose.yml`` is
-    the ``beacon`` role, which is the cluster owner and carries both
-    ``rolsuper`` and ``rolbypassrls``. ``beacon_app`` -- the role the test
-    above drops to, and the only one the policy can constrain -- is granted
-    nothing by any migration and exists only in these fixtures.
+    **This reads the DECLARED app DSN, not this test's connection.** The first
+    version asserted on ``current_user`` of the test engine, which cannot fail
+    the way the docstring promised: ``make test`` points ``DATABASE_URL`` at a
+    separate ``TEST_DATABASE_URL`` literal, so closing the gap -- changing the
+    app's DSN to ``beacon_app`` -- would have left it green and 0024 would have
+    gone on warning about a gap that was shut. That is the same
+    check-that-cannot-fail this file was added to remove, so it is worth
+    naming: the subject of the claim is the shipped configuration, and the
+    assertion has to read the shipped configuration.
 
-    So for the History route, and for every other RLS table, the isolation
-    that actually holds today is ``require_permission`` in the API layer. The
-    policy is real defence in depth the moment the API connects as a
-    non-superuser, and it should; until then a reader must not mistake a green
-    run above for a claim about production.
+    ``beacon_app`` -- the constrained role the behavioural test drops to -- is
+    granted nothing by any migration and exists only in fixtures.
 
-    This test passes when the gap exists. It FAILS once ``beacon_app`` gains
-    the grants and the app switches to it -- at which point delete it and
-    update 0024's docstring, because the thing it documents will have been
-    fixed.
+    This test passes while the gap exists and FAILS once the app's DSN names a
+    constrained role. At that point delete it and drop the warning from 0024,
+    because the thing it documents will have been fixed.
+    """
+    makefile = (pathlib.Path(__file__).parents[4] / "Makefile").read_text()
+    declared = [line for line in makefile.splitlines() if line.startswith("DATABASE_URL ?=")]
+    assert len(declared) == 1, (
+        f"expected exactly one app DATABASE_URL default in the Makefile, found {declared}"
+    )
+    role = re.search(r"://([^:@/]+)", declared[0])
+    assert role, f"could not read a role out of {declared[0]!r}"
+
+    assert role.group(1) == "beacon", (
+        f"the app is now configured to connect as {role.group(1)!r}. If that role is "
+        "constrained, this test has served its purpose: delete it and remove the "
+        "warning from 0024, which says the policy is not load-bearing. Do not simply "
+        "widen this assertion -- the warning in the migration is the thing that has to "
+        "change."
+    )
+
+
+def test_the_policy_predicate_is_not_a_blanket_allow(engine: Engine) -> None:
+    """The other check ``result_outcomes`` has, which 0024 also shipped without.
+
+    The behavioural test above catches this table's own policy going to
+    ``USING (true)``. It does NOT catch ``memberships``' policy being widened,
+    because this table's isolation is scoped THROUGH that subquery: relax
+    memberships and every membership row becomes visible to every caller, so
+    the ``EXISTS`` here starts matching for teams the caller does not belong
+    to -- without anyone editing 0024.
+
+    So both predicates are read: this table's, and the one it depends on.
     """
     with engine.connect() as conn:
-        deployed_role = conn.execute(sa.text("SELECT current_user")).scalar_one()
-        attrs = conn.execute(
+        rows = conn.execute(
             sa.text(
-                "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+                "SELECT c.relname, pg_get_expr(p.polqual, p.polrelid) FROM pg_policy p"
+                " JOIN pg_class c ON c.oid = p.polrelid"
+                " JOIN pg_namespace n ON n.oid = c.relnamespace"
+                " WHERE n.nspname = 'public'"
+                " AND c.relname IN ('regrade_events', 'memberships')"
+                " AND p.polqual IS NOT NULL"
             )
-        ).one()
+        ).all()
 
-    bypasses = bool(attrs[0] or attrs[1])
-    assert bypasses, (
-        f"the connection role {deployed_role!r} no longer bypasses RLS. "
-        "If the API now connects as a constrained role, this test has served "
-        "its purpose: delete it and correct 0024's docstring, which currently "
-        "warns that the policy is not load-bearing."
+    predicates: dict[str, str] = {str(row[0]): str(row[1]) for row in rows}
+    for table in ("regrade_events", "memberships"):
+        assert table in predicates, f"expected a USING predicate on {table}'s policy"
+        expr = predicates[table]
+        assert expr.strip().lower() != "true", (
+            f"{table}'s policy must not be a blanket allow: regrade_events "
+            "isolation is scoped through it"
+        )
+        assert "current_user_id()" in expr, f"{table} must stay user-scoped; got: {expr}"
+    assert "team_id" in predicates["regrade_events"], (
+        "regrade_events' policy must scope on its own tenant column; got: "
+        f"{predicates['regrade_events']}"
     )

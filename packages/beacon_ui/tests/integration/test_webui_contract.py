@@ -315,6 +315,42 @@ def test_every_suite_scoped_loader_drops_a_stale_response() -> None:
         )
 
 
+def test_every_routed_view_can_be_restored_from_its_url() -> None:
+    """A view `go()` writes a route for must be one `applyRoute` can restore.
+
+    `go()` writes a route for every view except the two named exclusions, so a
+    view missing from ROUTED_VIEWS puts its own URL in the address bar and then
+    falls through to `go("matrix")` on reload -- a shared link silently opens
+    Results. That is what happened to `history`, and nothing failed.
+
+    `history-event` is the deliberate other side: its route carries no event
+    id, so restoring it could only open an empty detail page. It is excluded
+    from `writeRoute` instead of added here, and this pins BOTH halves so
+    neither can be re-broken quietly.
+    """
+    page = _page()
+
+    routed = re.search(r"const ROUTED_VIEWS = new Set\(\[(.*?)\]\);", page, re.S)
+    assert routed, "no ROUTED_VIEWS found"
+    views = set(re.findall(r'"([^"]+)"', routed.group(1)))
+
+    nav = set(re.findall(r'class="nav" data-go="([^"]+)"', page))
+    assert nav, "no nav buttons found"
+    missing = sorted(nav - views)
+    assert not missing, f"nav view(s) that write a route but cannot be restored from it: {missing}"
+
+    # The exclusions in `go()` are the only views allowed to write no route.
+    excluded = set(re.findall(r'view !== "([^"]+)"', page))
+    assert "history-event" in excluded, (
+        "history-event must not write a route: it carries no event id, so the "
+        "route could only restore an empty detail page"
+    )
+    assert "history-event" not in views, (
+        "history-event is excluded from writeRoute, so listing it as routable "
+        "claims a restore that cannot work"
+    )
+
+
 def test_the_suite_switch_bumps_the_generation_and_clears_the_panels() -> None:
     """Both halves, at the one site that changes the suite from the rail."""
     page = _page()

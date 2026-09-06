@@ -98,9 +98,10 @@ def upgrade() -> None:
     # Same shape as `result_outcomes` in 0023, and TWO caveats apply.
     #
     # First, and larger than the one 0023 records: **this policy constrains
-    # nothing in the configuration this repo ships.** `DATABASE_URL` in
-    # `Makefile` and `docker-compose.yml` is the `beacon` role, which owns the
-    # cluster and carries `rolsuper` and `rolbypassrls`, so RLS is never
+    # nothing in the configuration this repo ships.** The app's `DATABASE_URL`
+    # default in `Makefile` names the `beacon` role, which is the same role
+    # `docker-compose.yml` creates as `POSTGRES_USER` and therefore owns the
+    # cluster: it carries `rolsuper` and `rolbypassrls`, so RLS is never
     # consulted for it -- measured, a caller with no membership at all still
     # reads every row. `beacon_app`, the constrained role the tests drop to, is
     # granted nothing by any migration and exists only in fixtures. So for this
