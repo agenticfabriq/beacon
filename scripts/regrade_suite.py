@@ -354,6 +354,11 @@ def main() -> int:
             # changed nothing" is a fact worth having -- without it, silence
             # is indistinguishable from never having run.
             event = RegradeEvent(
+                # Snapshotted from the suite, which is where 0024's backfill
+                # took it from. Not optional: the column is NOT NULL and the
+                # RLS policy is built on it, so a writer that omits it fails
+                # loudly here rather than producing a row nobody can read.
+                team_id=suite.team_id,
                 suite_id=suite.id,
                 suite_name=suite.name,
                 grader=grader.name,

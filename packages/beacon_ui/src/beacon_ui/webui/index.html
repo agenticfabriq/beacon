@@ -195,6 +195,7 @@
       <button class="nav" data-go="matrix" aria-current="page"><i></i>Results</button>
       <button class="nav" data-go="runs"><i></i>Runs</button>
       <button class="nav" data-go="questions"><i></i>Questions</button>
+      <button class="nav" data-go="history"><i></i>History</button>
     </div>
     <div class="rail-foot">
       <button class="nav" data-go="settings"><i></i>Settings</button>
@@ -308,6 +309,22 @@
         <tbody id="questions-rows"></tbody></table></div>
       <div class="pager"><button class="btn" id="q-prev">‹ prev</button>
         <span id="q-page"></span><button class="btn" id="q-next">next ›</button></div>
+    </div>
+
+    <div class="view" id="v-history">
+      <div class="crumb" id="history-crumb"></div>
+      <h1>History</h1>
+      <p class="sub">Every recorded change to this benchmark's numbers — what moved, when, under
+      which grading rule, and why. Open one to see the before and after per run.</p>
+      <div id="history-body"></div>
+    </div>
+
+    <div class="view" id="v-history-event">
+      <div class="crumb"><button data-go="history">History</button> › <span id="hev-crumb"></span></div>
+      <h1 id="hev-title"></h1>
+      <p class="sub" id="hev-sub"></p>
+      <p class="sub" id="hev-reason" style="color:var(--ink-2);margin-top:7px"></p>
+      <div id="hev-body"></div>
     </div>
 
     <div class="view" id="v-benchmarks">
@@ -432,6 +449,8 @@ const ENDPOINTS = {
   suiteItems:   ["GET",    "/v1/suites/{suite_id}/items"],
   matrix:       ["GET",    "/v1/suites/{suite_id}/results-matrix"],
   attribution:  ["GET",    "/v1/suites/{suite_id}/attribution"],
+  history:      ["GET",    "/v1/suites/{suite_id}/history"],
+  historyEvent: ["GET",    "/v1/suites/{suite_id}/history/{event_id}"],
   runs:         ["GET",    "/v1/suites/{suite_id}/runs"],
   run:          ["GET",    "/v1/runs/{run_id}"],
   invalidate:   ["POST",   "/v1/runs/{run_id}/invalidate"],
@@ -550,6 +569,17 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g,
   (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const pct = (value) => (value === null || value === undefined) ? "n/a" : (value * 100).toFixed(1) + "%";
 const short = (value) => String(value ?? "").slice(0, 8);
+/* 11, not 8. Beacon ids are UUIDv7 -- write-ordered -- so runs written in one
+ * batch share a long prefix: measured on this corpus, 28 runs of one benchmark
+ * collapse to 9 distinct 8-character strings and one of them labels 5 runs.
+ * Uniqueness needs 11 across every run in the database. `short` above is still
+ * 8 everywhere else and is a display defect there too; this is the one view
+ * whose whole purpose is attributing a number to a run, so it cannot show an
+ * id that names five of them. */
+const shortRun = (value) => String(value ?? "").slice(0, 11);
+/* Timestamps arrive as ISO strings. Trimmed, not localised: the same string
+ * has to be quotable back to an operator reading a regrade log. */
+const when = (value) => String(value ?? "").slice(0, 16).replace("T", " ");
 // `null + null` is 0 in JavaScript, so an unrecorded cost must never reach a
 // sum -- it would print "0 tokens" for an attempt nobody measured. A total
 // needs both halves: an output count with the prompt assumed free understates
@@ -786,6 +816,118 @@ const openCell = guard(async (row) => {
       <td class="num dim">${run.summary?.n_items ?? ""}</td>
       <td class="dim" style="font-size:11px">open →</td></tr>`).join("") +
     "</tbody></table></div>";
+});
+
+
+/* ---------------------------- history ---------------------------- */
+/* What moved this benchmark's numbers. Reads `regrade_events` and rewinds
+ * NOTHING -- every figure elsewhere in this UI is still the current one. */
+
+/* The empty state carries the load here, so it is not a shrug. "No change
+ * recorded" and "nothing changed" are opposite facts that look identical, and
+ * recording only began when the tables were applied: anything earlier is
+ * genuinely unrecoverable, and saying so is the honest answer rather than an
+ * apology. */
+const NO_HISTORY =
+  '<div class="empty"><b>No change recorded for this benchmark.</b><br><br>' +
+  'That is not the same as “nothing changed”. Recording began when a regrade first ran against ' +
+  'the event log; a correction made before that has no row here and cannot be recovered from ' +
+  'the database.</div>';
+
+const loadHistory = guard(async () => {
+  const gen = S.suiteGen;
+  const body = document.getElementById("history-body");
+  const suite = S.suites.find((entry) => String(entry.id) === S.suiteId);
+  document.getElementById("history-crumb").textContent = suite ? suite.name : "";
+  if (!S.suiteId) { body.innerHTML = NO_BENCH; return; }
+  body.innerHTML = '<div class="empty">Loading…</div>';
+  let events;
+  try {
+    events = asList(await api("history", { suite_id: S.suiteId }), "events");
+  } catch (error) {
+    body.innerHTML = `<div class="empty">Could not load history — ${esc(error.message)}.</div>`;
+    return;
+  }
+  if (gen !== S.suiteGen) return;
+  if (!events.length) { body.innerHTML = NO_HISTORY; return; }
+  body.innerHTML = `<div class="tw"><table>
+    <thead><tr><th>When</th><th>Graded by</th><th>Headline</th>
+      <th class="num" title="Outcomes whose value changed in this regrade">moved</th>
+      <th class="num" title="Results the regrade re-derived. Larger than 'moved': most re-derivations land on the same answer.">of</th>
+      <th>Reason</th><th></th></tr></thead><tbody>` +
+    events.map((event) => `<tr class="click" data-hev="${esc(event.id)}">
+      <td>${esc(when(event.recorded_at))}</td>
+      <td>${esc(event.grader)} <b>${esc(event.grader_version)}</b></td>
+      <td>${esc(event.headline_metric)}</td>
+      <td class="num ${event.n_flipped ? "ex" : "dim"}">${event.n_flipped}</td>
+      <td class="num dim">${event.n_graded}</td>
+      <td class="dim">${esc(event.reason || "— no reason recorded —")}</td>
+      <td class="dim" style="font-size:11px">open →</td></tr>`).join("") +
+    "</tbody></table></div>";
+});
+
+const openHistoryEvent = guard(async (eventId) => {
+  go("history-event");
+  const body = document.getElementById("hev-body");
+  body.innerHTML = '<div class="empty">Loading…</div>';
+  document.getElementById("hev-title").textContent = "";
+  document.getElementById("hev-sub").textContent = "";
+  document.getElementById("hev-reason").textContent = "";
+  let detail;
+  try {
+    detail = await api("historyEvent", { suite_id: S.suiteId, event_id: eventId });
+  } catch (error) {
+    body.innerHTML = `<div class="empty">Could not load this event — ${esc(error.message)}.</div>`;
+    return;
+  }
+  const event = detail.event;
+  document.getElementById("hev-crumb").textContent = when(event.recorded_at);
+  document.getElementById("hev-title").textContent =
+    `${event.n_flipped} outcome${event.n_flipped === 1 ? "" : "s"} moved`;
+  document.getElementById("hev-sub").innerHTML =
+    `${esc(event.grader)} <b>${esc(event.grader_version)}</b> · headline ` +
+    `<b>${esc(event.headline_metric)}</b> · ${event.n_flipped} of ${event.n_graded} re-derived · ` +
+    `${detail.runs_affected} of ${event.n_runs} runs affected`;
+  /* Shown verbatim. The string is an operator's explanation, not a
+   * measurement, so the display must not tidy it into looking computed. */
+  document.getElementById("hev-reason").textContent =
+    event.reason ? `“${event.reason}”` : "No reason was recorded for this regrade.";
+
+  const transitions = Object.entries(detail.transitions || {});
+  const chips = transitions.length
+    ? '<div class="chips">' + transitions
+        .sort((a, b) => b[1] - a[1])
+        .map(([move, n]) => `<span class="chip" style="cursor:default">${esc(move.replace("->", " → "))}
+          <b>${n}</b></span>`).join("") + "</div>"
+    : "";
+
+  /* `−PASS` is rendered even when it is zero in every row. An event that only
+   * ever raised numbers is a property of THAT event, not of regrades, and a
+   * reader cannot tell which they are looking at if the column that would
+   * show a loss is absent. */
+  body.innerHTML = chips + (detail.runs.length
+    ? `<div class="tw" style="margin-top:12px"><table>
+        <thead><tr><th>Run</th><th>Model</th><th>Config</th>
+          <th class="num" title="This run's PASS count TODAY. Not rewound -- nothing in this UI is.">PASS now</th>
+          <th class="num">+PASS</th><th class="num">−PASS</th>
+          <th class="num" title="PASS now, minus what this event gained, plus what it lost. Arithmetic you can check on this row.">PASS before</th>
+          <th></th></tr></thead><tbody>` +
+      detail.runs.map((run) => `<tr class="click" data-run="${esc(run.run_id)}">
+        <td>${esc(shortRun(run.run_id))}</td>
+        <td>${esc(run.model_id || "?")}</td>
+        <td class="dim">${esc(run.config_label || "")}</td>
+        <td class="num">${run.pass_now}</td>
+        <td class="num ${run.gained ? "ex" : "dim"}">${run.gained ? "+" + run.gained : "0"}</td>
+        <td class="num ${run.lost ? "wr" : "dim"}">${run.lost ? "-" + run.lost : "0"}</td>
+        <td class="num">${run.pass_before}</td>
+        <td class="dim" style="font-size:11px">open →</td></tr>`).join("") +
+      `</tbody><tfoot><tr><td colspan="3"><b>${detail.runs_affected} run${
+        detail.runs_affected === 1 ? "" : "s"} affected</b></td><td class="num"></td>
+        <td class="num ex">+${detail.runs.reduce((n, r) => n + r.gained, 0)}</td>
+        <td class="num dim">-${detail.runs.reduce((n, r) => n + r.lost, 0)}</td>
+        <td class="num"></td><td></td></tr></tfoot></table></div>`
+    : '<div class="empty">This regrade changed no outcome. That is a real result — the ' +
+      're-derivation ran and agreed with what was already stored.</div>');
 });
 
 /* ---------------------------- runs ---------------------------- */
@@ -1153,6 +1295,7 @@ function go(view) {
   if (view === "matrix") loadMatrix();
   if (view === "runs") loadRuns();
   if (view === "questions") loadQuestions();
+  if (view === "history") loadHistory();
   if (view === "benchmarks") loadBenchmarks();
   if (view === "settings") loadSettings();
 }
@@ -1236,6 +1379,8 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const hev = withData("hev");
+  if (hev) { openHistoryEvent(hev); return; }
   const cellRow = t.closest("[data-cell]");
   if (cellRow) {
     const rows = JSON.parse(document.getElementById("matrix-rows").dataset.payload || "[]");

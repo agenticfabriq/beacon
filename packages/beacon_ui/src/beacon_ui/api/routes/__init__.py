@@ -9,6 +9,7 @@ from beacon_ui.api.routes import ingest as ingest_routes
 from beacon_ui.api.routes import leaderboards as leaderboards_routes
 from beacon_ui.api.routes import matrix as matrix_routes
 from beacon_ui.api.routes import me as me_routes
+from beacon_ui.api.routes import regrade_history as regrade_history_routes
 from beacon_ui.api.routes import results as results_routes
 from beacon_ui.api.routes import runs as runs_routes
 from beacon_ui.api.routes import suites as suites_routes
@@ -35,5 +36,6 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(runs_routes.router)
     app.include_router(results_routes.router)
     app.include_router(matrix_routes.router)
+    app.include_router(regrade_history_routes.router)
     app.include_router(webui_routes.router)
     app.include_router(ingest_routes.router)

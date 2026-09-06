@@ -28,13 +28,24 @@ class RegradeEvent(Base, IdMixin, TimestampsMixin):
     records nothing, which is the correct behaviour rather than an omission:
     it changed nothing to explain.
 
-    No ``team_id`` and no RLS policy, on the same footing as ``DatasetLoad``:
-    operator-written metadata that no API route serves. Serving it would need
-    a tenant column and a policy FIRST -- see ``0022``'s note, including why
-    backfilling one later is lossy.
+    ``team_id`` and RLS arrived in ``0024``, when the History route made this
+    table something an API serves. 0022 shipped it without either and named
+    the condition for adding them -- "serving it would need a tenant column
+    and a policy FIRST" -- so this is that condition being met rather than a
+    correction. The backfill was honest because every row had a ``suite_id``
+    to inherit from; the migration refuses rather than defaults if that stops
+    being true.
     """
 
     __tablename__ = "regrade_events"
+
+    # A SNAPSHOT of who owned the regrade, not a join key. `suite_id` below is
+    # ON DELETE SET NULL, so reading tenancy through the suite would lose it
+    # the moment a suite is deleted -- and the history explaining a published
+    # number should outlive the suite's row.
+    team_id: Mapped[UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
 
     # The derivation. Both halves, because they move independently and the
     # version alone is the wrong key: 90 of the 93 outcomes corrected on
@@ -84,5 +95,11 @@ class RegradeEvent(Base, IdMixin, TimestampsMixin):
             " AND n_skipped >= 0 AND n_refused >= 0 AND n_flipped >= 0",
             name="ck_regrade_event_counts_non_negative",
         ),
+        # By NAME for `regrade_history.py`, which an operator calls with the
+        # name they have; by ID for the route, whose URL carries a UUID. Not
+        # interchangeable: a suite deleted and recreated under one name would
+        # otherwise serve the previous suite's history.
         Index("idx_regrade_events_suite", "suite_name", "created_at"),
+        Index("idx_regrade_events_suite_id", "suite_id", "created_at"),
+        Index("idx_regrade_events_team", "team_id"),
     )
