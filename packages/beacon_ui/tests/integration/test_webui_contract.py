@@ -315,6 +315,17 @@ def test_every_suite_scoped_loader_drops_a_stale_response() -> None:
         )
 
 
+def _js_without_comments(page: str) -> str:
+    """The page with JS comments removed.
+
+    A regex over raw text reads prose as code: documenting an exclusion by
+    writing ``writeRoute("cell")`` inside a comment would fail a test naming a
+    call that does not exist. `://` is protected so URLs survive.
+    """
+    body = re.sub(r"/\*.*?\*/", "", page, flags=re.S)
+    return re.sub(r"(?<!:)//[^\n]*", "", body)
+
+
 def _go_body(page: str) -> str:
     """The body of `go()`, so route-writing rules are read where they live."""
     match = re.search(r"function go\(view\) \{(.*?)\n\}", page, re.S)
@@ -379,12 +390,26 @@ def test_every_routed_view_can_be_restored_from_its_url() -> None:
     # mutation green -- add `writeRoute("cell")` beside `go("cell")`, the shape
     # already used for `run`, and the unrestorable URL is back while every
     # assertion above still passes.
-    written = set(re.findall(r'writeRoute\("([^"]+)"', page))
+    code = _js_without_comments(page)
+    written = set(re.findall(r"""writeRoute\(\s*['"]([^'"]+)['"]""", code))
     unrestorable = sorted(written - views - {"run"})
     assert not unrestorable, (
         f"writeRoute called for view(s) that cannot be restored: {unrestorable}. "
-        "`run` is the one exception -- it passes its own id."
+        "`run` is the one exception, and the assertion below is what earns it."
     )
+
+    # `run` is whitelisted above because it passes its own id -- so READ that,
+    # rather than trusting the name. `writeRoute` pushes the id conditionally,
+    # so dropping the second argument at the openRun call site writes a bare
+    # `.../run` that applyRoute cannot restore, and the whitelist would have
+    # excused it.
+    run_calls = re.findall(r"""writeRoute\(\s*['"]run['"]([^)]*)\)""", code)
+    assert run_calls, 'no writeRoute("run", ...) call found'
+    for args in run_calls:
+        assert args.strip().startswith(","), (
+            'writeRoute("run") must pass the run id: applyRoute needs it to '
+            f"restore a run, and without it the route falls through to Results. Got: {args!r}"
+        )
 
     assert "history-event" not in views, (
         "history-event is excluded from writeRoute, so listing it as routable "

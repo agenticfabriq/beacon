@@ -1253,13 +1253,24 @@ const loadSettings = guard(async () => {
  * writes its own route with the run id, while `cell` and `history-event` are
  * identified by a matrix row and an event id that the route does not carry.
  *
- * The trade for those two: writeRoute is the only thing in this page that
- * pushes a history entry, so a view that writes no route gets no Back entry
- * either. Browser Back from a cell or an event leaves the app rather than
- * returning to the list. In-page navigation is the crumb at the top of each
- * of those views. The alternative was keeping a URL that looks shareable,
- * reloads to the wrong page, and makes Back work only by accident of that
- * fallthrough -- which is what `cell` did. */
+ * The trade for those two, stated carefully because the first attempt at this
+ * comment got it wrong: writeRoute assigning window.location.hash is the only
+ * history push in the page, so a view that writes no route adds no Back entry.
+ * Back from a cell or an event therefore does NOT return to the list -- the
+ * hashchange listener runs applyRoute on the PREVIOUS routed URL and restores
+ * whatever view that was, which is wherever the user happened to be before.
+ * And if the excluded view was entered from the first route written after
+ * load, Back sets the hash to "", applyRoute returns false, the listener
+ * ignores the false, and the view stays on screen with the hash stripped --
+ * Back appears to do nothing. So the cost is a jump to an unrelated view or a
+ * silent no-op, not an app exit.
+ *
+ * The crumb at the top of each of those views is the in-page path back. The
+ * alternative was keeping a URL that looks shareable, reloads to the wrong
+ * page, and makes Back work only by accident of that same fallthrough -- which
+ * is what `cell` did. Making these genuinely routable (a config digest in the
+ * cell route, an event id in the other) is the fix that costs nothing, and is
+ * not done here. */
 const ROUTED_VIEWS = new Set(["matrix", "runs", "questions", "history", "benchmarks", "settings"]);
 let lastRoute = "";
 function writeRoute(view, runId) {
