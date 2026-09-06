@@ -25,6 +25,8 @@ because the fixtures drop and recreate the schema.
 from __future__ import annotations
 
 import contextlib
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
@@ -82,19 +84,30 @@ def test_the_client_really_is_constrained(
 ) -> None:
     """The fixture must actually drop the role, or every test below is theatre.
 
-    Asserted through a ROUTE rather than by reading ``current_user``, because
-    what matters is the role the request handler runs as. ``/v1/me`` needs the
-    caller's own user row, which `users_read` permits and which therefore only
-    resolves if the GUC and the policy are both working.
+    The authoritative check is in ``constrained_session`` itself, which reads
+    ``current_user`` and refuses to yield unless it is ``beacon_app``. This
+    test covers what a route can show on top of that: ``/v1/me`` resolves the
+    caller's own row, which needs both the GUC and the policy working, and a
+    foreign team's roster comes back empty because the POLICY filters it rather
+    than the route.
     """
     response = constrained_client.get("/v1/me", headers={"X-API-Key": world.alice_key})
     assert response.status_code == 200, response.text
 
-    # And the negative half, as BOB. Alice is a global BEACON_ADMIN in the
-    # seeded world, so `teams_read`'s global branch legitimately shows her
-    # every team -- an earlier version asserted against her and failed for a
-    # correct reason, which is the wrong-actor mistake this file's siblings
-    # kept making. Bob holds one team membership and no global role.
+    # The negative half is NOT asserted here, and that is the correction.
+    # An earlier version listed teams as bob and claimed that seeing another
+    # team's would mean "the fixture is not dropping the role and every test in
+    # this file proves nothing" -- which was false: `list_teams` narrows to the
+    # caller's own memberships in PYTHON, so the row is absent whether RLS is
+    # enforced or not, and removing `SET LOCAL ROLE` from the fixture left all
+    # six tests here green. A vacuous assertion advertising itself as the
+    # detector is worse than none, because the next person to break the fixture
+    # trusts it.
+    #
+    # The real detector is in the fixture: `constrained_session` reads
+    # `current_user` and refuses to yield unless it is `beacon_app`. That
+    # cannot be papered over by a route's own filtering, and removing the role
+    # now fails every test in this file.
     outsider = UserRepo(session).create(email="rls-route-outsider@example.com", name="o")
     other = TeamRepo(session).create(name="rls-route-other")
     session.flush()
@@ -106,14 +119,20 @@ def test_the_client_really_is_constrained(
     )
     session.commit()
 
-    listing = constrained_client.get("/v1/teams", headers={"X-API-Key": world.bob_key})
-    assert listing.status_code == 200, listing.text
-    names = {team["name"] for team in listing.json()}
-    assert "rls-route-other" not in names, (
-        "bob is not a member of that team and holds no global role, so a constrained "
-        "client must not see it -- if it appears, the fixture is not dropping the role "
-        "and every test in this file proves nothing"
+    # What CAN be asserted through a route: the roster of a team bob does not
+    # belong to. That listing is filtered by the policy rather than in Python,
+    # so it is decided by RLS -- and `require_permission` refusing first is an
+    # equally correct outcome, hence either.
+    roster = constrained_client.get(
+        f"/v1/teams/{other.id}/members", headers={"X-API-Key": world.bob_key}
     )
+    if roster.status_code == 200:
+        assert roster.json()["members"] == [], (
+            "bob belongs to no scope of that team, so its roster must come back "
+            f"empty; got {roster.json()['members']}"
+        )
+    else:
+        assert roster.status_code in (403, 404), roster.text
 
 
 def test_inviting_an_existing_non_member_does_not_500(
@@ -339,3 +358,38 @@ def test_the_production_session_dependency_binds_rls(api_client: TestClient, wor
         # Iterator, which has no such method.
         with contextlib.suppress(StopIteration):
             next(sessions)
+
+
+def test_the_fixture_reapplies_the_role_on_every_transaction() -> None:
+    """``constrained_session`` must re-apply the role, not only set it once.
+
+    ``SET LOCAL ROLE`` is transaction-scoped, so without a listener this
+    connection reverts to the OWNER after any mid-request commit -- while
+    production stays constrained, because its role comes from the DSN. A test
+    of a route that read after committing would then pass here for the wrong
+    reason.
+
+    Pinned by READING the fixture, which is unsatisfying and is the honest
+    option: no route reads after its commit today -- ``delete_team``,
+    ``remove_team_member`` and ``issue_member_key`` each commit as their last
+    statement -- so the behaviour cannot be reached through the API, and
+    removing the listener failed nothing. This at least fails when the wiring
+    goes, and should be replaced by a behavioural test the moment a route
+    grows a read after its commit.
+    """
+    source = (Path(__file__).parents[1] / "conftest.py").read_text()
+    body = re.search(
+        r"def constrained_session\(\) -> Iterator\[Session\]:(.*?)\n    app\.",
+        source,
+        re.S,
+    )
+    assert body, "no constrained_session found in conftest"
+
+    assert 'listens_for(session, "after_begin")' in body.group(1), (
+        "constrained_session sets the role once, so it is lost on the first "
+        "mid-request commit and everything after runs as the bypassing owner"
+    )
+    assert "bind_rls(session)" in body.group(1), (
+        "constrained_session must register bind_rls as get_session does, or the "
+        "acting user is lost across a commit here but not in production"
+    )

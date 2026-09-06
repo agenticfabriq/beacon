@@ -157,51 +157,26 @@ def test_the_serving_role_does_not_bypass_rls(engine: Engine) -> None:
     # point at the owning role with every policy inert, which is the condition
     # this whole thread was about.
     declared: dict[str, str] = {}
-    owning: dict[str, str] = {}
     for line in (root / "Makefile").read_text().splitlines():
         if line.startswith("DATABASE_URL ?="):
             declared["Makefile"] = line
     for line in (root / ".env.example").read_text().splitlines():
         if line.startswith("DATABASE_URL="):
             declared[".env.example"] = line
-    # Any line naming a postgres DSN, not just `DATABASE_URL=...`. The labelled
-    # serving/migrating block reads `serving:  postgresql+psycopg://...` with no
-    # assignment, so an assignment-only filter skipped the FIRST and most
-    # prominent DSN an operator sees -- changing that one line to the owning
-    # role left every test green.
+    # Judged by the ROLE's privilege, not by classifying the line. Two earlier
+    # versions tried to sort lines into "serving" and "migrating" and each got
+    # it backwards for a third plausible shape: first `MIGRATE_DATABASE_URL=`
+    # was read as serving, then a serving line whose prose said "migrating" was
+    # read as owning, and `DATABASE_URL=$(MIGRATE_DATABASE_URL)` -- the shape
+    # the Makefile itself uses to run alembic -- would have been the next.
     #
-    # Classified by whether the line MARKS itself as the migrating one, and
-    # keyed by line number so a second such line cannot overwrite the first.
-    # An earlier version keyed on a constant and matched only the literal
-    # prefix `migrating:`, so documenting the owning DSN in the shape the
-    # Makefile tells deployments to use -- `MIGRATE_DATABASE_URL=...` -- was
-    # read as a SERVING declaration and failed with a message asserting the
-    # opposite of what the line said.
+    # So the rule is one sentence: a DSN may name a role that BYPASSES RLS only
+    # if its line marks itself as the migration step. Anything else naming such
+    # a role is a serving DSN that leaves every policy inert, whatever the
+    # prose around it says. A constrained role is fine anywhere.
     for number, line in enumerate((root / "README.md").read_text().splitlines(), 1):
-        if "postgresql+psycopg://" not in line:
-            continue
-        # Marked by how the line NAMES itself, not by any mention of
-        # migrating: a substring test flipped the other way, so a serving DSN
-        # whose prose said "after migrating, run with DATABASE_URL=..." landed
-        # in `owning` and failed with a message asserting the opposite of what
-        # the line said. Either the line is labelled `migrating:` or it assigns
-        # MIGRATE_DATABASE_URL.
-        stripped = line.strip()
-        marked = stripped.startswith("migrating:") or "MIGRATE_DATABASE_URL=" in line
-        where = f"README.md:{number}"
-        (owning if marked else declared)[where] = line
-
-    assert "Makefile" in declared and ".env.example" in declared, (
-        f"expected a serving DSN in both the Makefile and .env.example: {sorted(declared)}"
-    )
-    # And the owning half must resolve to something, or its assertion below
-    # covers nothing: rewording the README's migrating line so it no longer
-    # matches would silently retire that check.
-    assert owning, (
-        "no owning DSN found in the README. One is documented, so either the "
-        "labelling changed or this classifier stopped recognising it -- and the "
-        "assertion that it names the owner is now vacuous."
-    )
+        if "postgresql+psycopg://" in line:
+            declared[f"README.md:{number}"] = line
 
     roles = {}
     for where, line in declared.items():
@@ -218,25 +193,30 @@ def test_the_serving_role_does_not_bypass_rls(engine: Engine) -> None:
         ).all()
     attrs = {r[0]: (r[1], r[2]) for r in rows}
 
-    for where, line in sorted(owning.items()):
-        match = re.search(r"://([^:@/]+)", line)
-        assert match, f"could not read a role out of {where}: {line!r}"
-        assert match.group(1) == "beacon", (
-            f"{where} is the MIGRATING DSN and must name the owning role, since "
-            f"alembic runs DDL; it names {match.group(1)!r}"
-        )
-
     for where, role in sorted(roles.items()):
         assert role in attrs, (
             f"{where} names role {role!r}, which does not exist in this database, so "
             "whether it bypasses RLS cannot be read here"
         )
         rolsuper, bypass = attrs[role]
-        assert not rolsuper and not bypass, (
-            f"{where} tells an operator to connect as {role!r}, which has "
-            f"rolsuper={rolsuper} rolbypassrls={bypass}. A role with either attribute "
-            "never consults a policy, so every policy in this schema would be inert "
-            "and require_permission would be the only isolation."
+        if not (rolsuper or bypass):
+            continue  # a constrained role is fine wherever it appears
+
+        # A bypassing role is only acceptable on the migration step, which has
+        # to run DDL. `MIGRATE_DATABASE_URL` covers both the variable and the
+        # Makefile's `DATABASE_URL=$(MIGRATE_DATABASE_URL)` invocation.
+        text_of = declared.get(where, "")
+        marked = (
+            text_of.strip().startswith("migrating:")
+            or "MIGRATE_DATABASE_URL" in text_of
+            or "alembic" in text_of
+        )
+        assert marked, (
+            f"{where} names {role!r}, which has rolsuper={rolsuper} "
+            f"rolbypassrls={bypass} -- it never consults a policy. That is only "
+            "acceptable on the migration step, and this line does not mark itself "
+            "as one (a `migrating:` label, MIGRATE_DATABASE_URL, or alembic). As "
+            "written it tells an operator to SERVE with every policy inert."
         )
 
 

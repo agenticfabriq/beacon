@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
 from alembic import command
@@ -133,21 +133,21 @@ def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) ->
     serving role.
 
     ``SET LOCAL ROLE`` is scoped to the TRANSACTION, not the session -- an
-    earlier version of this docstring said session, which is wrong and matters.
-    A route that commits partway through therefore reverts to the OWNER for
-    everything after, where production would stay constrained because its role
-    comes from the DSN. So this fixture is WEAKER than production after a
-    mid-request commit, not stronger: a test of a route that reads after
-    committing would pass here for the wrong reason.
+    earlier version of this docstring said session, which is wrong and
+    mattered. A route that commits partway through reverted this connection to
+    the OWNER for everything after, where production stays constrained because
+    its role comes from the DSN. So the fixture was WEAKER than production at
+    exactly the point a mid-request commit happens, and a test of a route that
+    read after committing would have passed here for the wrong reason.
+
+    Both halves are re-applied on every transaction now: the role by a listener
+    here, the acting user by ``bind_rls`` -- which this override registers
+    because it replaces ``get_session`` wholesale, so anything production wires
+    up has to be wired up here too.
 
     ``delete_team``, ``remove_team_member`` and ``issue_member_key`` all commit
-    partway; none reads afterwards today.
-
-    The acting user IS restored, because this override registers ``bind_rls``
-    just as ``get_session`` does. An earlier version of this docstring claimed
-    that while the override did not register it, so the user was lost here too
-    -- someone writing the first test of a route that reads after committing
-    would have blamed the role alone.
+    partway; each commits as its last statement today, so nothing read past the
+    revert while it existed.
     """
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("BEACON_DATABASE_URL", db_url)
@@ -164,6 +164,7 @@ def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) ->
     from beacon_storage.rls import bind_rls
     from beacon_ui.api.app import create_app
     from beacon_ui.api.deps import get_session
+    from sqlalchemy import event
 
     app = create_app()
 
@@ -178,9 +179,21 @@ def constrained_client(db_url: str, engine: Engine, monkeypatch: MonkeyPatch) ->
             # green while production lost the acting user after every
             # mid-request commit.
             bind_rls(session)
-            # Then the role, before anything the route does and before
-            # get_current_user sets the user: a role change after the first
-            # query would leave the earliest reads unconstrained.
+
+            # The ROLE on every transaction, not just the first. `SET LOCAL
+            # ROLE` is transaction-scoped, so a route that commits partway --
+            # delete_team, remove_team_member and issue_member_key all do --
+            # reverted this connection to the OWNER for everything after,
+            # where production stays constrained because its role comes from
+            # the DSN. Re-applying on `after_begin` makes the fixture behave
+            # the way production does instead of being weaker than it in the
+            # one place that matters.
+            @event.listens_for(session, "after_begin")
+            def _constrain(_session: Session, _transaction: object, connection: Any) -> None:
+                connection.execute(text("SET LOCAL ROLE beacon_app"))
+
+            # And once now, because the listener fires on the NEXT begin and
+            # the first statement below is what proves it took.
             session.execute(text("SET LOCAL ROLE beacon_app"))
             # And PROVE it took. Every route-level assertion in
             # test_routes_under_rls.py is worthless if this silently did not
