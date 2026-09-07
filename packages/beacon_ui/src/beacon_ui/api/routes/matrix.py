@@ -87,15 +87,15 @@ def _row_key(
     ``String(200)`` fed from the run-create payload, and 0x1f is a legal text
     byte. Measured: a label carrying one collided two rows the GROUP BY keeps
     apart, so the cell URL opened the other configuration -- the exact failure
-    this key exists to prevent. Named narrowly on purpose: those two are the
-    free-text ones. ``config_digest`` is hex, and ``engine`` and
-    ``retrieval_k`` are JSONB extractions rather than columns at all, so a
-    wider claim here would not hold for the set it covered.
+    this key exists to prevent. Two fields are named because they are the ones
+    measured; the argument does not turn on the set being complete, and it is
+    not (``config`` is typed ``dict[str, Any]``, so ``engine`` can carry the
+    byte too).
 
     A length prefix makes the encoding injective whatever the bytes are,
-    because the length says where each field ends
-    rather than a byte that might not be reserved. Opaque, because it is a
-    handle rather than data -- nothing should parse it.
+    because the length says where each field ends rather than a byte that might
+    not be reserved. Opaque, because it is a handle rather than data -- nothing
+    should parse it.
 
     Truncated to 32 hex characters, which is 128 bits, and NOT to the 16 it
     once was. The old argument was about accident: 64 bits is far past
@@ -107,8 +107,8 @@ def _row_key(
     and ``retrieval_k`` are read straight back out of it. Only ``solution_id``
     is not chosen in the payload.
 
-    Be exact about what that reaches, because this note has now been wrong
-    about it twice in opposite directions. At a 64-bit key width, a birthday
+    Be exact about what that reaches, because this note has now overstated it
+    twice. At a 64-bit key width, a birthday
     search costs about 2**32 evaluations and finds SOME colliding pair among
     inputs the searcher chose -- so both halves are rows they created
     themselves, and the reachable outcome is a link naming one of their own
