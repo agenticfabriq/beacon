@@ -958,11 +958,11 @@ def test_a_co_member_who_outranks_the_admin_cannot_have_a_key_issued(
 ) -> None:
     """The RANK half of the rule, which the scope test alone cannot reach.
 
-    The refusals above turn on SCOPE (the target holds something outside the
-    issuer's teams) or on the target holding no membership at all. This target
-    holds nothing outside -- a ``beacon_admin`` scoped to the very team the
-    admin administers -- so both of those pass and only the rank comparison
-    refuses it.
+    Each refusal above turns on something other than rank: the target holds a
+    scope the issuer does not administer, or the issuer administers nothing at
+    all, or the target holds no membership to check. This target defeats all
+    three -- a ``beacon_admin`` scoped to the very team the admin administers --
+    so only the rank comparison refuses it.
 
     Measured: with ``role_rank(mine.role) >= role_rank(t.role)`` deleted from
     ``may_issue_key_for``, every other assertion here stayed green. So the

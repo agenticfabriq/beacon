@@ -569,7 +569,7 @@ def test_the_roster_cannot_grant_a_role_above_team_admin(
 
 @pytest.mark.parametrize("which", ["api_client", "constrained_client"])
 def test_minting_your_own_key_reads_its_timestamp_back(
-    which: str, request: pytest.FixtureRequest, world: _World
+    which: str, request: pytest.FixtureRequest, world: _World, session: Session
 ) -> None:
     """The self-serve mint, under the serving role, including the read after commit.
 
@@ -593,14 +593,24 @@ def test_minting_your_own_key_reads_its_timestamp_back(
 
     So the claim is the narrow one: the self-serve mint works under the serving
     role, and the timestamp survives the loss of `INSERT ... RETURNING`.
+
+    The STATUS is the whole guard, and it is worth saying why rather than
+    adding an assertion that reads like one. `ApiKeyCreatedOut.created_at` is a
+    required `datetime`, so a refresh that found no row raises on response
+    validation and the route answers 500. Checking the field is non-empty
+    afterwards can never fail: a 201 cannot carry an empty one.
     """
     client: TestClient = request.getfixturevalue(which)
+    _refuse_global_admin(
+        session,
+        world.carol_id,
+        "this asserts the OWNERSHIP branch of api_keys_insert, and a global role would "
+        "satisfy the policy through its global-admin branch instead",
+    )
     response = client.post(
         "/v1/me/api-keys",
         headers={"X-API-Key": world.carol_key},
         json={"label": "self-serve"},
     )
     assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["created_at"], "the timestamp came back empty, so the refresh read nothing"
-    assert body["api_key"].startswith("bcn_")
+    assert response.json()["api_key"].startswith("bcn_")
