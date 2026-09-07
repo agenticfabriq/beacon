@@ -958,10 +958,10 @@ def test_a_co_member_who_outranks_the_admin_cannot_have_a_key_issued(
 ) -> None:
     """The RANK half of the rule, which the scope test alone cannot reach.
 
-    Every other case in this file is decided by SCOPE: the target holds
-    something outside the teams the issuer administers. This target holds
-    nothing outside -- a ``beacon_admin`` scoped to the very team the admin
-    administers -- so the scope test passes and only the rank comparison
+    The refusals above turn on SCOPE (the target holds something outside the
+    issuer's teams) or on the target holding no membership at all. This target
+    holds nothing outside -- a ``beacon_admin`` scoped to the very team the
+    admin administers -- so both of those pass and only the rank comparison
     refuses it.
 
     Measured: with ``role_rank(mine.role) >= role_rank(t.role)`` deleted from
@@ -1004,4 +1004,47 @@ def test_a_co_member_who_outranks_the_admin_cannot_have_a_key_issued(
                 h=uuid.uuid4().hex,
             )
             in REFUSALS
+        )
+
+
+def test_an_equal_rank_co_admin_may_still_have_a_key_issued(engine: Engine, world: World) -> None:
+    """The rank comparison is ``>=``, and the boundary is load-bearing.
+
+    Two admins of one team are peers: a key for either carries exactly what
+    the other already holds, so there is nothing to escalate and refusing it
+    would break the roster for the ordinary case of a second admin.
+
+    Tested because the comparison is one character from wrong in a direction
+    no other test can see. Measured: tightening ``>=`` to ``>`` left all 46
+    tests green while turning this flow into a 403 whose message -- "holds
+    access outside the scopes you administer" -- would have been false.
+    """
+    with make_session_factory(engine)() as s:
+        peer = UserRepo(s).create(email="peer@example.com", name="peer")
+        s.flush()
+        MembershipRepo(s).grant(
+            user_id=peer.id,
+            scope_kind=ScopeKind.TEAM,
+            scope_id=world.team_a,
+            role=Role.TEAM_ADMIN,
+        )
+        s.commit()
+        peer_id = peer.id
+
+    assert _may_issue(engine, world.team_admin, peer_id) is True, (
+        "two admins of one team are peers; a key for one carries nothing the other "
+        "does not already hold"
+    )
+    with make_session_factory(engine)() as s:
+        _as(s, world.team_admin)
+        assert (
+            _refused(
+                s,
+                "INSERT INTO api_keys (id,user_id,key_hash,label,created_at,updated_at) "
+                "VALUES (:i,:u,:h,'l',now(),now())",
+                i=uuid.uuid4(),
+                u=peer_id,
+                h=uuid.uuid4().hex,
+            )
+            == "wrote 1"
         )

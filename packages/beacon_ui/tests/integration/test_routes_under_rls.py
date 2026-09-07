@@ -565,3 +565,42 @@ def test_the_roster_cannot_grant_a_role_above_team_admin(
     assert set(get_args(TeamRole)) == {"team_admin", "team_member"}, (
         "the roster's role ceiling moved; decide whether a team admin may grant the new one"
     )
+
+
+@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+def test_minting_your_own_key_reads_its_timestamp_back(
+    which: str, request: pytest.FixtureRequest, world: _World
+) -> None:
+    """The self-serve mint, under the serving role, including the read after commit.
+
+    `create_api_key` returns `created_at`, and `ApiKeyCreatedOut` requires it.
+    Since `ApiKey` no longer fetches server defaults through `INSERT ...
+    RETURNING`, that value arrives from a lazy load AFTER `session.commit()` --
+    so it is a SELECT in a NEW transaction, against `api_keys_read`, on a
+    connection whose `app.current_user_id` was reset when the previous
+    transaction ended.
+
+    Every other test of this route uses the owner role, where no policy is
+    consulted, so that refresh has never run against a policy at all.
+
+    What this does NOT detect, stated because the first version of this
+    docstring claimed it did: a `bind_rls` failure. Measured -- with the
+    re-apply disabled so the refresh runs as an anonymous caller, this test
+    stays green, because `api_keys_read` begins `current_user_id() IS NULL OR`
+    and an anonymous read therefore sees everything. That branch is deliberate
+    and 0025 argues for it, but it means a lost acting user FAILS OPEN on
+    reads, and no assertion about a successful read can notice.
+
+    So the claim is the narrow one: the self-serve mint works under the serving
+    role, and the timestamp survives the loss of `INSERT ... RETURNING`.
+    """
+    client: TestClient = request.getfixturevalue(which)
+    response = client.post(
+        "/v1/me/api-keys",
+        headers={"X-API-Key": world.carol_key},
+        json={"label": "self-serve"},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["created_at"], "the timestamp came back empty, so the refresh read nothing"
+    assert body["api_key"].startswith("bcn_")
