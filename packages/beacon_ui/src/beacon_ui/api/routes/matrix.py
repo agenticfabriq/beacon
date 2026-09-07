@@ -95,9 +95,14 @@ def _row_key(
     Truncated to 32 hex characters, which is 128 bits, and NOT to the 16 it
     once was. The old argument was about accident: 64 bits is far past
     collision range for a table of tens of rows, which is true and answers the
-    wrong question. Two of the six fields -- ``config_label`` and the config
-    that ``config_digest`` covers -- come from the run-create payload, so
-    somebody who can post runs chooses their own inputs.
+    wrong question. FIVE of the six fields come from the run-create payload,
+    not two as this note first said: ``model_id``, ``config_label`` and
+    ``config_digest`` are each derived from the posted ``config``
+    (``model_id_of``, ``config_label_of``, ``config_digest``), and ``engine``
+    and ``retrieval_k`` are read straight back out of it. Only ``solution_id``
+    is not chosen in the payload. So somebody who can post runs controls almost
+    the whole preimage, which makes the search below easier rather than
+    harder.
 
     Be exact about what that buys them, because the first version of this note
     was not. A birthday search at about 2**32 finds SOME colliding pair among

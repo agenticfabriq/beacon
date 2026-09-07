@@ -856,12 +856,12 @@ def test_selecting_the_only_event_attributes_everything_to_it(
 
 
 def test_the_row_handle_is_wide_enough_to_survive_a_search() -> None:
-    """128 bits, hardening a handle two of whose six fields are caller-chosen.
+    """128 bits, hardening a handle five of whose six fields are caller-chosen.
 
     The original 64 was argued from ACCIDENT -- far past collision range for a
-    table of tens of rows, which is true. But ``config_label`` and the config
-    behind ``config_digest`` come from the run-create payload, so somebody who
-    can post runs chooses their own inputs, and a 64-bit digest puts an
+    table of tens of rows, which is true. But five of the six fields are
+    derived from or read out of the posted ``config``, so somebody who can post
+    runs controls almost the whole preimage, and a 64-bit digest puts an
     any-pair birthday search at roughly 2**32 offline evaluations.
 
     What that reaches is bounded, and ``_row_key`` states it at length: both
