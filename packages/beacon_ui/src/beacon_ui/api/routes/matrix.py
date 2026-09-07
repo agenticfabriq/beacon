@@ -89,10 +89,19 @@ def _row_key(
     apart, so the cell URL opened the other configuration -- the exact failure
     this key exists to prevent. A length prefix makes the encoding injective
     whatever the bytes are, because the length says where each field ends
-    rather than a byte that might not be reserved. Opaque and
-    short, because it is a handle rather than data -- nothing should parse it,
-    and 16 hex characters of sha256 is far past collision range for a table of
-    tens of rows.
+    rather than a byte that might not be reserved. Opaque, because it is a
+    handle rather than data -- nothing should parse it.
+
+    Truncated to 32 hex characters, which is 128 bits, and NOT to the 16 it
+    once was. The old argument was about accident: 64 bits is far past
+    collision range for a table of tens of rows, which is true and answers the
+    wrong question. Two of the six fields -- ``config_label`` and the config
+    that ``config_digest`` covers -- come from the run-create payload, so
+    somebody who can post runs chooses inputs, and a 64-bit digest puts an
+    any-pair collision at about 2**32 offline evaluations. The client resolves
+    a handle by FIRST MATCH, so a found pair means one URL opens the other
+    row's numbers. 128 bits moves that bound to 2**64 and costs 16 characters
+    of URL.
     """
     # `\x00` for absent, the value itself otherwise -- NOT `x or ""`, which
     # maps NULL and '' to one key while the GROUP BY keeps them apart.
@@ -108,7 +117,7 @@ def _row_key(
         )
     ]
     encoded = "".join(f"{len(part)}:{part}" for part in parts)
-    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+    return hashlib.sha256(encoded.encode()).hexdigest()[:32]
 
 
 def _rate(part: int, whole: int) -> float | None:
@@ -228,6 +237,15 @@ def _outcome_reversal(suite_id: UUID, event: RegradeEvent) -> sa.Subquery:
         sa.select(
             result_id.label("result_id"),
             changes.c.value["before"].astext.label("before_outcome"),
+            # WHICH event's change won the DISTINCT ON. Because the ordering is
+            # ascending and the selected event is the earliest row this filter
+            # admits, this equals the selected event's id exactly when the
+            # SELECTED event touched the result -- and names a later event when
+            # only a later one did. Without it the caller can tell that
+            # something moved since the selected point but not whether the
+            # selected event had anything to do with it, which is the
+            # distinction `affected` claims to draw.
+            RegradeEvent.id.label("event_id"),
         )
         .select_from(RegradeEvent)
         .join(changes, sa.true())
@@ -296,6 +314,10 @@ def results_matrix(
     # one column overwritten in place, so it has to be reconstructed backwards
     # from what the events recorded. Same instant, two routes to it.
     reversal = None if event is None else _outcome_reversal(suite_id, event)
+    # Bound here, beside the reversal it belongs to, so the aggregate can name
+    # the selected event without the type checker having to prove that
+    # `reversal is not None` implies `event is not None`.
+    selected_event_id = None if event is None else event.id
     if event is not None:
         got_facts_read = _latest_reading("got_facts", before=event.created_at)
         exact_read = _latest_reading("exact_match", before=event.created_at)
@@ -464,14 +486,32 @@ def results_matrix(
                         got_facts_now.c.bool_value.isnot(None),
                     )
                     .label("n_got_facts_scored_now"),
-                    # Whether the selected event touched ANY result of this
-                    # row. Read from the reversal join rather than inferred
+                    # TWO counts, because they answer two different questions
+                    # and one number was being used for both.
+                    #
+                    # `n_changed_since` is every result this row rewound at
+                    # all, so it says whether there is a delta to show. The
+                    # reversal admits the selected event AND every later one,
+                    # which is correct for reconstructing the past -- the
+                    # rewound number has to account for everything that
+                    # happened since.
+                    #
+                    # `n_touched_by_event` is the narrower claim, the one the
+                    # `affected` flag and its tooltip actually make: that THIS
+                    # event moved something here. Selecting an older event on a
+                    # suite with a later one used to report every row a later
+                    # regrade touched as this event's doing.
+                    #
+                    # Both read from the reversal join rather than inferring
                     # from the rates being equal: a row can have two changes
-                    # that cancel, and "the number happens to match" is not
-                    # the same statement as "this event did not touch it".
+                    # that cancel, and "the number happens to match" is not the
+                    # same statement as "this event did not touch it".
                     sa.func.count(sa.func.distinct(Result.id))
                     .filter(reversal.c.result_id.isnot(None))
-                    .label("n_reverted"),
+                    .label("n_changed_since"),
+                    sa.func.count(sa.func.distinct(Result.id))
+                    .filter(reversal.c.event_id == sa.literal(selected_event_id))
+                    .label("n_touched_by_event"),
                 ]
             ),
         )
@@ -598,7 +638,8 @@ def results_matrix(
                         n_graded=int(record.n_graded_now),
                     )
                 ),
-                affected=None if reversal is None else bool(int(record.n_reverted)),
+                affected=None if reversal is None else bool(int(record.n_touched_by_event)),
+                changed_since=(None if reversal is None else bool(int(record.n_changed_since))),
                 median_tokens=float(record.median_tokens)
                 if record.median_tokens is not None
                 else None,

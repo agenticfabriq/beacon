@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import pytest
 
@@ -134,10 +134,22 @@ PROBE = (
 // RESOLVE to a function, not merely read like one in the source.
 const panel = SUITE_PANELS.find(([id]) => id === "matrix-rows");
 const declared = panel && panel[1];
+// The three states of the delta cell, exercised rather than read. `affected`
+// and `changed_since` disagree exactly when a LATER regrade moved a row the
+// selected event left alone, and that row still has a real delta -- so the
+// cell has to show it AND say whose it is.
+const __delta = (affected, changed_since) => {
+  const row = { affected, changed_since, ex_rate: 0.75, current: { ex_rate: 1.0 } };
+  return { text: deltaText(row), cls: deltaClass(row), title: deltaTitle(row) };
+};
+
 console.log(JSON.stringify({
   missing,
   matrix_panel_is_reader: typeof declared === "function",
   matrix_panel_resolves: typeof declared === "function" ? declared() : declared,
+  delta_this_event: __delta(true, true),
+  delta_later_only: __delta(false, true),
+  delta_untouched: __delta(false, false),
 }));
 """
 )
@@ -245,3 +257,55 @@ def test_the_matrix_panel_width_resolves_to_the_reader() -> None:
         f"matrixCols() resolves to {report['matrix_panel_resolves']} against "
         f"{expected} visible columns in the matrix header"
     )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_delta_cell_says_whose_change_it_is() -> None:
+    """A later regrade's delta is shown, and is not claimed by the selected event.
+
+    The arithmetic was fixed in the route; this is the half the reader sees.
+    Three distinct states, and the middle one is the one that used to be
+    indistinguishable from the first:
+
+    * the selected event moved this row
+    * something moved it, but not the selected event
+    * nothing has moved it since the selected point
+
+    Executed rather than pattern-matched, because the defect was a claim about
+    WHICH event, and a test that greps for the word "affected" cannot tell the
+    three apart.
+    """
+    report = _run_page()
+
+    # The report is `dict[str, object]` because it carries several shapes; each
+    # delta entry is `{text, cls, title}`.
+    def _cell(key: str) -> dict[str, str]:
+        return cast("dict[str, str]", report[key])
+
+    mine = _cell("delta_this_event")
+    later = _cell("delta_later_only")
+    untouched = _cell("delta_untouched")
+
+    # A real delta in both moved cases -- same number, since the rewound and
+    # current rates fed in are the same.
+    assert "-25.0" in mine["text"], mine
+    assert "-25.0" in later["text"], later
+    assert untouched["text"] == "not affected", untouched
+
+    # But only the later-only case is marked as somebody else's work.
+    assert "later regrade" in later["text"], (
+        "a delta this event did not cause must be marked, or the reader attributes "
+        f"it to the event they picked: {later}"
+    )
+    assert "later regrade" not in mine["text"], mine
+
+    # And the tooltips must make three different claims. The old one asserted
+    # "the selected event did not touch any result in this configuration" for
+    # every unaffected row, including rows a later regrade had moved.
+    assert len({mine["title"], later["title"], untouched["title"]}) == 3
+    assert "did not touch" in later["title"] and "LATER" in later["title"], later
+    assert "no recorded regrade" in untouched["title"], untouched
+
+    # The untouched row is dimmed; the moved ones carry a direction.
+    assert untouched["cls"] == "dim", untouched
+    assert mine["cls"] == "wr" and later["cls"] == "wr", (mine, later)

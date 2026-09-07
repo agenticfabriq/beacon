@@ -761,3 +761,117 @@ def test_the_row_key_cannot_be_forged_by_a_field_that_looks_like_a_boundary() ->
     assert _row_key("sol", "a\x1fb", "c", "d", "e", "1") != _row_key(
         "sol", "a", "b\x1fc", "d", "e", "1"
     ), "the separator collision is back"
+
+
+# --------------------------------------------------------------------------
+# attribution: a delta that a LATER regrade caused is not this event's doing
+# --------------------------------------------------------------------------
+
+
+def test_a_later_regrade_is_not_attributed_to_the_selected_event(
+    api_client: TestClient, world: _World, fx: _Fixture
+) -> None:
+    """Selecting the older of two events must not claim the younger one's work.
+
+    The reversal deliberately admits the selected event AND every later one --
+    it has to, or the rewound number would not account for everything that
+    happened since. But `affected` and its tooltip make the narrower claim,
+    that THIS event moved something in this row, and one count was answering
+    both questions. So a configuration only the second regrade touched was
+    reported as the first one's doing, on the one screen whose entire purpose
+    is saying where a number came from.
+
+    Two rows, one event each, and the OLDER event selected:
+
+    * row `a` -- moved by the selected event
+    * row `b` -- moved only by a later event
+
+    Both have a real delta. Only `a` is this event's.
+    """
+    from datetime import UTC, datetime
+
+    first_at = datetime(2026, 3, 1, tzinfo=UTC)
+    second_at = datetime(2026, 4, 1, tzinfo=UTC)
+
+    run_a = fx.run("a", [VerdictOutcome.PASS] * 4)
+    results_a = list(fx.results)
+    run_b = fx.run("b", [VerdictOutcome.PASS] * 4)
+    results_b = list(fx.results)
+
+    # Readings on both sides of each cutoff, so the EX columns have something
+    # to rewind to rather than reading None.
+    for results in (results_a, results_b):
+        for result in results:
+            fx.verdict(result.id, "exact_match", True, at=datetime(2026, 1, 1, tzinfo=UTC))
+
+    first = fx.event(changes=[_change(results_a[0].id, run_a.id, "FAIL", "PASS")], at=first_at)
+    fx.event(changes=[_change(results_b[0].id, run_b.id, "FAIL", "PASS")], at=second_at)
+    fx.session.commit()
+
+    body = _matrix(api_client, world, fx.suite.id, as_of_event=str(first.id))
+    rows = {row["model_id"]: row for row in body["rows"]}
+
+    assert rows["a"]["affected"] is True
+    assert rows["a"]["changed_since"] is True
+
+    assert rows["b"]["affected"] is False, (
+        "the selected event recorded no change to row b -- claiming otherwise attributes "
+        "a later regrade's work to the event the reader picked"
+    )
+    assert rows["b"]["changed_since"] is True, (
+        "row b DID move since the selected point, so it has a real delta and must not "
+        "be labelled 'not affected' either"
+    )
+
+    # And the rewound numbers are right for both: one of four results held FAIL
+    # before its own event, so each row reads 3/4 then against 4/4 now.
+    for model in ("a", "b"):
+        assert rows[model]["ex_rate"] == pytest.approx(0.75), model
+        assert rows[model]["current"]["ex_rate"] == pytest.approx(1.0), model
+
+
+def test_selecting_the_only_event_attributes_everything_to_it(
+    api_client: TestClient, world: _World, fx: _Fixture
+) -> None:
+    """The common case, which is also why the bug stayed invisible.
+
+    With one recorded event the reversal admits only that event, so the broad
+    and narrow counts agree and the old single flag was right. Production had
+    exactly one event per suite when this was found.
+    """
+    from datetime import UTC, datetime
+
+    run = fx.run("a", [VerdictOutcome.PASS] * 4)
+    for result in fx.results:
+        fx.verdict(result.id, "exact_match", True, at=datetime(2026, 1, 1, tzinfo=UTC))
+    only = fx.event(
+        changes=[_change(fx.results[0].id, run.id, "FAIL", "PASS")],
+        at=datetime(2026, 3, 1, tzinfo=UTC),
+    )
+    fx.session.commit()
+
+    (row,) = _matrix(api_client, world, fx.suite.id, as_of_event=str(only.id))["rows"]
+    assert row["affected"] is True
+    assert row["changed_since"] is True
+
+
+def test_the_row_handle_is_wide_enough_to_survive_a_search() -> None:
+    """128 bits, because two of the six fields are attacker-chosen.
+
+    The original 64 was argued from ACCIDENT -- far past collision range for a
+    table of tens of rows, which is true. But ``config_label`` and the config
+    behind ``config_digest`` come from the run-create payload, so somebody who
+    can post runs chooses inputs, and a 64-bit digest puts an any-pair
+    collision at roughly 2**32 offline evaluations. The client resolves a
+    handle by first match, so a found pair means one shared URL opens a
+    different configuration's numbers than the one it names.
+
+    Pinned as a NUMBER rather than a comment, because the truncation is one
+    character to change and nothing else would notice.
+    """
+    key = _row_key(uuid7(), "m", "baseline", "digest", "e", "8")
+    assert len(key) == 32, (
+        f"the row handle is {len(key)} hex characters, {len(key) * 4} bits; a "
+        "birthday search costs about 2**" + str(len(key) * 2) + " evaluations"
+    )
+    assert int(key, 16) >= 0, "and it must still be hex"

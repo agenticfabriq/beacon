@@ -90,13 +90,23 @@ class MatrixRowOut(BaseModel):
     n_got_facts_scope_unknown: int = 0
     defer_rate: float | None = None
     wrong_rate: float | None = None
-    # Present only under an as-of. `current` is this row's live values, and
-    # `affected` says whether the selected event touched any of its results --
-    # read from the event's own records, not inferred from the rates matching,
-    # because two changes can cancel and "the number is the same" is a
+    # Present only under an as-of. `current` is this row's live values.
+    #
+    # Two flags, because there are two questions and one of them used to
+    # answer both. `affected` is the narrow one: did the SELECTED event touch
+    # any of this row's results. `changed_since` is the broad one: did that
+    # event or any LATER one, which is what decides whether a delta exists at
+    # all, since the rewound number accounts for everything after the selected
+    # point. They differ exactly when a later regrade moved a row the selected
+    # event left alone -- and `affected` alone reported that as this event's
+    # doing.
+    #
+    # Both are read from the events' own records, never inferred from the rates
+    # matching: two changes can cancel, and "the number is the same" is a
     # different claim from "this event did not touch it".
     current: MatrixCurrentOut | None = None
     affected: bool | None = None
+    changed_since: bool | None = None
 
     median_tokens: float | None = None
     median_runtime_ms: float | None = None

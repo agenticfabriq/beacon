@@ -638,27 +638,44 @@ const moved = (row, field) => {
   return `<span class="mv" title="differs from the current value (${pct(now)}) — this column has no Δ of its own">•</span>`;
 };
 /* "not affected" is TEXT, not an empty cell or a zero. A blank reads as
- * missing data and a 0.0 reads as measured-and-unchanged; this row was not
- * touched by the selected event, which is a third thing. Read from the
- * event's records, never inferred from the rates matching -- two changes can
- * cancel. */
+ * missing data and a 0.0 reads as measured-and-unchanged; nothing recorded has
+ * touched this row since the selected point, which is a third thing. Read from
+ * the events' records, never inferred from the rates matching -- two changes
+ * can cancel.
+ *
+ * Three states, not two, and the third is the one this used to get wrong. The
+ * delta spans the selected point to now, so it carries the selected event AND
+ * every later one; `affected` says only whether the SELECTED event moved
+ * anything here. A row a later regrade moved and this one did not still has a
+ * real delta, and attributing it to the event the reader picked is a false
+ * statement about where a number came from -- the single thing this whole view
+ * exists to answer. So it is shown, and marked as somebody else's work. */
 const deltaText = (row) => {
-  if (!row.affected) return "not affected";
+  if (!row.changed_since) return "not affected";
   const then = row.ex_rate, now = row.current.ex_rate;
   if (then === null || now === null) return "n/a";
   const d = (then - now) * 100;
-  return (d > 0 ? "+" : "") + d.toFixed(1);
+  const shown = (d > 0 ? "+" : "") + d.toFixed(1);
+  return row.affected ? shown : `${shown}<span class="mv" title="later regrade">*</span>`;
 };
 const deltaClass = (row) => {
-  if (!row.affected) return "dim";
+  if (!row.changed_since) return "dim";
   const then = row.ex_rate, now = row.current.ex_rate;
   if (then === null || now === null) return "dim";
   const d = then - now;
   return d < 0 ? "wr" : d > 0 ? "ex" : "dim";
 };
-const deltaTitle = (row) => row.affected
-  ? "EX as of the selected point minus EX now. Negative means the event raised this row."
-  : "the selected event did not touch any result in this configuration";
+const deltaTitle = (row) => {
+  if (!row.changed_since) {
+    return "no recorded regrade has touched this configuration since the selected point";
+  }
+  if (!row.affected) {
+    return "the selected event did not touch this configuration -- this change is a LATER"
+      + " regrade's, and is shown because the rewound number still reflects it";
+  }
+  return "EX as of the selected point minus EX now. Negative means the event raised this"
+    + " row. Includes any later regrades.";
+};
 
 const shortRun = (value) => String(value ?? "").slice(0, 11);
 /* Timestamps arrive as ISO strings. Trimmed, not localised: the same string
