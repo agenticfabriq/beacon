@@ -83,10 +83,10 @@ def _row_key(
 
     Fields are LENGTH-PREFIXED, not merely separated. An earlier version joined
     on US (0x1f) and claimed no value could contain it -- which is not a
-    property of the schema: ``model_id`` and ``config_label`` are plain
-    ``String(200)`` fed from the run-create payload, and 0x1f is a legal text
-    byte. Measured: a label carrying one collided two rows the GROUP BY keeps
-    apart, so the cell URL opened the other configuration -- the exact failure
+    property of the schema: the fields fed from the posted ``config``, counted
+    below, are plain text columns and 0x1f is a legal text byte. Measured: a
+    label carrying one collided two rows the GROUP BY keeps apart, so the cell
+    URL opened the other configuration -- the exact failure
     this key exists to prevent. A length prefix makes the encoding injective
     whatever the bytes are, because the length says where each field ends
     rather than a byte that might not be reserved. Opaque, because it is a
@@ -100,9 +100,13 @@ def _row_key(
     ``config_digest`` are each derived from the posted ``config``
     (``model_id_of``, ``config_label_of``, ``config_digest``), and ``engine``
     and ``retrieval_k`` are read straight back out of it. Only ``solution_id``
-    is not chosen in the payload. So somebody who can post runs controls almost
-    the whole preimage, which makes the search below easier rather than
-    harder.
+    is not chosen in the payload.
+
+    That breadth does NOT lower the search cost -- one variable-length field
+    already makes the preimage space unbounded, and the birthday bound is set
+    by the digest WIDTH alone. What it buys is a collision whose two halves can
+    both look ordinary, varying ``retrieval_k`` or the config behind the digest
+    rather than needing a visibly strange label.
 
     Be exact about what that buys them, because the first version of this note
     was not. A birthday search at about 2**32 finds SOME colliding pair among
