@@ -83,12 +83,17 @@ def _row_key(
 
     Fields are LENGTH-PREFIXED, not merely separated. An earlier version joined
     on US (0x1f) and claimed no value could contain it -- which is not a
-    property of the schema: the fields fed from the posted ``config``, counted
-    below, are plain text columns and 0x1f is a legal text byte. Measured: a
-    label carrying one collided two rows the GROUP BY keeps apart, so the cell
-    URL opened the other configuration -- the exact failure
-    this key exists to prevent. A length prefix makes the encoding injective
-    whatever the bytes are, because the length says where each field ends
+    property of the schema: ``model_id`` and ``config_label`` are plain
+    ``String(200)`` fed from the run-create payload, and 0x1f is a legal text
+    byte. Measured: a label carrying one collided two rows the GROUP BY keeps
+    apart, so the cell URL opened the other configuration -- the exact failure
+    this key exists to prevent. Named narrowly on purpose: those two are the
+    free-text ones. ``config_digest`` is hex, and ``engine`` and
+    ``retrieval_k`` are JSONB extractions rather than columns at all, so a
+    wider claim here would not hold for the set it covered.
+
+    A length prefix makes the encoding injective whatever the bytes are,
+    because the length says where each field ends
     rather than a byte that might not be reserved. Opaque, because it is a
     handle rather than data -- nothing should parse it.
 
@@ -102,20 +107,21 @@ def _row_key(
     and ``retrieval_k`` are read straight back out of it. Only ``solution_id``
     is not chosen in the payload.
 
-    That breadth does NOT lower the search cost -- one variable-length field
-    already makes the preimage space unbounded, and the birthday bound is set
-    by the digest WIDTH alone. What it buys is a collision whose two halves can
-    both look ordinary, varying ``retrieval_k`` or the config behind the digest
-    rather than needing a visibly strange label.
+    Be exact about what that reaches, because this note has now been wrong
+    about it twice in opposite directions. At a 64-bit key width, a birthday
+    search costs about 2**32 evaluations and finds SOME colliding pair among
+    inputs the searcher chose -- so both halves are rows they created
+    themselves, and the reachable outcome is a link naming one of their own
+    configurations that opens another. Colliding with a row somebody ELSE owns
+    is a second preimage, which 64 bits already put at 2**64. This width is
+    therefore hardening against a self-collision, not the closing of an open
+    door.
 
-    Be exact about what that buys them, because the first version of this note
-    was not. A birthday search at about 2**32 finds SOME colliding pair among
-    inputs the searcher chose, and both halves of that pair are then rows they
-    created themselves -- so the reachable outcome is a link that names one of
-    their own configurations and opens another, which misrepresents their own
-    numbers to whoever trusts the link. Colliding with a row somebody ELSE
-    owns is a second preimage, which 64 bits already put at 2**64. So this is
-    hardening against a self-collision, not the closing of an open door.
+    Nothing is claimed here about what the breadth of caller control buys on
+    top of that. Two attempts at it were wrong -- the search cost follows from
+    the key width alone, and the "the halves can look ordinary" version did not
+    survive the 2**32 count -- and the argument for the width does not need
+    either of them.
 
     Widened anyway, on cost rather than on severity: the client resolves a
     handle by FIRST MATCH, the fix is one character, and the handles were
