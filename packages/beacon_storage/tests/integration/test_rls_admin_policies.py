@@ -22,11 +22,13 @@ interesting failure is not a leak between teams but a privilege gained.
 
 from __future__ import annotations
 
+import itertools
 import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import pytest
 import sqlalchemy as sa
+from beacon_iam.permissions import role_permissions
 from beacon_storage.db import make_session_factory
 from beacon_storage.models.tenancy import Role, ScopeKind
 from beacon_storage.repository.memberships import MembershipRepo
@@ -840,3 +842,112 @@ def test_a_session_with_no_acting_user_is_left_alone(engine: Engine, world: Worl
         assert visible and visible > 0, (
             f"the auth path must be able to resolve a user; it can see {visible}"
         )
+
+
+# --------------------------------------------------------------------------
+# 0027: a key may not carry privilege its issuer does not hold
+# --------------------------------------------------------------------------
+
+
+def test_the_sql_role_rank_matches_the_python_permission_lattice(engine: Engine) -> None:
+    """``role_rank`` is only sound because these roles are a TOTAL order.
+
+    ``may_issue_key_for`` compares ranks, and a rank is a faithful stand-in for
+    "grants at least as much as" only while every pair of roles is comparable
+    by permission set. Add a role that overlaps two others without containing
+    either -- a billing role with its own permission, say -- and the rank
+    silently starts asserting a containment that is not there.
+
+    So this asserts the property the function depends on, in both directions,
+    rather than the rank table it produces. It fails when someone adds a role,
+    which is the moment somebody has to look.
+    """
+    ranks = {r: _scalar(engine, "SELECT role_rank(:r)", r=r.value) for r in Role}
+    assert None not in ranks.values(), (
+        f"role_rank does not know every Role: {ranks}. An unknown role returns NULL, "
+        "which makes the comparison NULL and refuses -- safe, but it means no key can "
+        "be issued for anyone holding that role."
+    )
+    for a, b in itertools.permutations(Role, 2):
+        dominates = role_permissions(a) >= role_permissions(b)
+        comparable = dominates or role_permissions(b) >= role_permissions(a)
+        assert comparable, (
+            f"{a.value} and {b.value} are not comparable by permission set, so the roles "
+            "are no longer a total order and role_rank cannot represent them. "
+            "may_issue_key_for needs a set comparison, not a rank."
+        )
+        assert (ranks[a] >= ranks[b]) == dominates, (
+            f"role_rank says {a.value} >= {b.value} is {ranks[a] >= ranks[b]}, "
+            f"but the permission sets say {dominates}"
+        )
+    # An unknown role must not read as the weakest one.
+    assert _scalar(engine, "SELECT role_rank('billing')") is None
+
+
+def _scalar(engine: Engine, sql: str, **params: object) -> Any:
+    with make_session_factory(engine)() as s:
+        return s.execute(text(sql), params).scalar()
+
+
+def _may_issue(engine: Engine, issuer: UUID, target: UUID) -> bool:
+    with make_session_factory(engine)() as s:
+        _as(s, issuer)
+        return bool(
+            s.execute(text("SELECT may_issue_key_for(:i, :t)"), {"i": issuer, "t": target}).scalar()
+        )
+
+
+def test_may_issue_key_for_answers_privilege_containment(engine: Engine, world: World) -> None:
+    """The whole rule, as a table. Each row was a probe against the app first."""
+    # Contained: the member holds team-a and nothing else, and the team admin
+    # administers team-a at a higher rank.
+    assert _may_issue(engine, world.team_admin, world.member) is True
+
+    # THE ESCALATION. The global admin's membership sits at a scope the team
+    # admin does not administer, so a key for them would carry every tenant.
+    assert _may_issue(engine, world.team_admin, world.global_admin) is False
+
+    # Co-membership is not containment: the outsider's team-b membership is
+    # outside the team admin's authority even though adding them to team-a
+    # would make them share a scope.
+    assert _may_issue(engine, world.team_admin, world.outsider) is False
+
+    # A global admin already holds everything a key could carry.
+    assert _may_issue(engine, world.global_admin, world.team_admin) is True
+
+    # A plain member administers nothing, so they may issue for nobody -- their
+    # OWN key goes through the policy's ownership branch, not this function.
+    assert _may_issue(engine, world.member, world.member) is False
+
+    # Nobody, holding nothing. Vacuously "no membership outside my scopes", so
+    # a bare NOT EXISTS would permit it.
+    assert _may_issue(engine, world.team_admin, uuid.uuid4()) is False
+
+
+def test_the_insert_policy_refuses_a_key_for_a_user_with_outside_access(
+    engine: Engine, world: World
+) -> None:
+    """The policy half, tested without the route, so neither can cover for the other.
+
+    Timestamps are given explicitly and there is no RETURNING, deliberately:
+    the ORM's `INSERT ... RETURNING` is read back through the SELECT policy, so
+    a bare `INSERT` is what isolates the WITH CHECK from that.
+    """
+    with make_session_factory(engine)() as s:
+        _as(s, world.team_admin)
+        insert = (
+            "INSERT INTO api_keys (id,user_id,key_hash,label,created_at,updated_at) "
+            "VALUES (:i,:u,:h,'l',now(),now())"
+        )
+        assert (
+            _refused(s, insert, i=uuid.uuid4(), u=world.global_admin, h=uuid.uuid4().hex)
+            in REFUSALS
+        ), "a team admin minted a key for a GLOBAL ADMIN"
+        assert (
+            _refused(s, insert, i=uuid.uuid4(), u=world.outsider, h=uuid.uuid4().hex) in REFUSALS
+        ), "a team admin minted a key for a member of a team it does not administer"
+        # And the permitted case is genuinely permitted, or the refusals above
+        # would prove nothing about the rule -- only that the policy says no.
+        assert (
+            _refused(s, insert, i=uuid.uuid4(), u=world.member, h=uuid.uuid4().hex) == "wrote 1"
+        ), "the ordinary case must still work"

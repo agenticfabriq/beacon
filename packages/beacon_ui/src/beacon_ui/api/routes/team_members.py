@@ -202,7 +202,7 @@ def issue_member_key(
     team_id: UUID,
     user_id: UUID,
     body: MemberKeyIn,
-    _actor: Annotated[
+    actor: Annotated[
         User,
         Depends(require_permission(Permission.TEAM_MANAGE, scope_kind="team")),
     ],
@@ -214,11 +214,37 @@ def issue_member_key(
     issues a key from the roster and hands it over out of band. The key
     authenticates the member themselves -- same thing they would mint from
     their own Settings once signed in.
+
+    Which is exactly why administering the TEAM is not enough to authorise it.
+    The key carries the member's whole identity, not their role in this team,
+    and ``effective_permissions`` counts a global membership for every team --
+    so minting for someone who holds one hands over every tenant. Measured
+    against the deployed app: a team admin with no global role added a global
+    ``beacon_admin`` to their team by email, issued a key for them, and
+    authenticated as them.
+
+    So the rule is privilege containment, not co-membership: refuse unless
+    every scope the member belongs to is one this actor administers at or
+    above the member's own rank. ``may_issue_key_for`` is the single
+    definition of that, shared with ``api_keys_insert`` -- and owner-privileged
+    for a reason given there.
     """
-    memberships = MembershipRepo(session).list_for_user(user_id)
+    repo = MembershipRepo(session)
+    memberships = repo.list_for_user(user_id)
     is_member = any(m.scope_kind == ScopeKind.TEAM and m.scope_id == team_id for m in memberships)
     if not is_member:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user is not a member of this team")
+
+    if not repo.may_issue_key_for(issuer_id=actor.id, target_id=user_id):
+        # 403 and not 404: the member is visibly on the roster the caller just
+        # read, so pretending they do not exist would be a lie the UI can
+        # contradict on the same screen. The message says what to do instead,
+        # because the honest answer is "not by you", not "not at all".
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "this member holds access outside the scopes you administer, so a key issued "
+            "here would carry more privilege than you hold; they must mint their own",
+        )
 
     key = generate_api_key(prefix=ApiConfig().api_key_prefix)
     ApiKeyRepo(session).create(user_id=user_id, key_hash=hash_api_key(key), label=body.label)

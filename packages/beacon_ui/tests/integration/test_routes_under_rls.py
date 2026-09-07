@@ -72,6 +72,7 @@ def _refuse_global_admin(session: Session, user_id: UUID, why: str) -> None:
 class _World(Protocol):
     alice_id: UUID
     alice_key: str
+    bob_id: UUID
     bob_key: str
     carol_id: UUID
     carol_key: str
@@ -392,4 +393,163 @@ def test_the_fixture_reapplies_the_role_on_every_transaction() -> None:
     assert "bind_rls(session)" in body.group(1), (
         "constrained_session must register bind_rls as get_session does, or the "
         "acting user is lost across a commit here but not in production"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issuing a key must not confer privilege the issuer does not hold.
+#
+# The chain these cover was measured end to end against the deployed app
+# before the fix: a team admin holding NO global role added a global
+# `beacon_admin` to their own team by email, minted a key for them, and
+# authenticated as them -- and `effective_permissions` counts a global
+# membership for every team, so that key administered every tenant.
+#
+# Each is run under BOTH clients on purpose. `api_client` is production's shape
+# today (the owner role, every policy inert), so it is the route check that has
+# to refuse; `constrained_client` is the post-switch shape, where the policy
+# has to refuse as well. A fix in only one place passes only one of them.
+# ---------------------------------------------------------------------------
+
+
+def _mint(client: TestClient, world: _World, *, team_id: UUID, target_id: UUID) -> int:
+    return client.post(
+        f"/v1/teams/{team_id}/members/{target_id}/api-keys",
+        headers={"X-API-Key": world.carol_key},
+        json={"label": "issued"},
+    ).status_code
+
+
+@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+def test_a_team_admin_cannot_mint_a_key_for_a_global_admin(
+    which: str, request: pytest.FixtureRequest, world: _World, session: Session
+) -> None:
+    """The escalation, refused. Carol administers globex and nothing else."""
+    client: TestClient = request.getfixturevalue(which)
+    _refuse_global_admin(
+        session,
+        world.carol_id,
+        "carol is the ATTACKER here; a global role would let her do this legitimately "
+        "and the test would pass without the fix",
+    )
+    victim_email = session.execute(
+        sa.text("SELECT email FROM users WHERE id = :i"), {"i": world.alice_id}
+    ).scalar_one()
+    # Alice is the victim precisely BECAUSE she holds a global beacon_admin
+    # membership. If the fixture ever stops granting her one this test would
+    # pass while proving nothing.
+    held = session.execute(
+        sa.text(
+            "SELECT count(*) FROM memberships "
+            "WHERE user_id = :i AND scope_kind = 'global' AND role = 'beacon_admin'"
+        ),
+        {"i": world.alice_id},
+    ).scalar_one()
+    assert held == 1, "the victim must hold the global role this escalation steals"
+
+    added = request.getfixturevalue(which).post(
+        f"/v1/teams/{world.globex_team_id}/members",
+        headers={"X-API-Key": world.carol_key},
+        json={"user_email": victim_email, "role": "team_member"},
+    )
+    assert added.status_code == 201, "adding a member is allowed; it is the KEY that is not"
+
+    assert _mint(client, world, team_id=world.globex_team_id, target_id=world.alice_id) == 403
+
+
+@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+def test_sharing_one_team_is_not_enough_to_mint(
+    which: str, request: pytest.FixtureRequest, world: _World, session: Session
+) -> None:
+    """Bob keeps his acme membership, which carol does not administer.
+
+    This is the distinction the old policy missed: it permitted an insert when
+    the target shared ANY scope the actor administered, and adding someone to
+    your team makes that true by construction while leaving everything they
+    hold elsewhere intact.
+    """
+    client: TestClient = request.getfixturevalue(which)
+    _refuse_global_admin(session, world.carol_id, "carol must administer globex only")
+    bob_email = session.execute(
+        sa.text("SELECT email FROM users WHERE id = :i"), {"i": world.bob_id}
+    ).scalar_one()
+    added = client.post(
+        f"/v1/teams/{world.globex_team_id}/members",
+        headers={"X-API-Key": world.carol_key},
+        json={"user_email": bob_email, "role": "team_member"},
+    )
+    assert added.status_code == 201
+
+    assert _mint(client, world, team_id=world.globex_team_id, target_id=world.bob_id) == 403
+
+
+@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+def test_the_ordinary_case_still_works(
+    which: str, request: pytest.FixtureRequest, world: _World, session: Session
+) -> None:
+    """An invitee whose ONLY membership is the team carol administers.
+
+    The feature has to keep working, and under the constrained role this is
+    also the test that the insert policy's admin branch is reachable at all --
+    it was not, because the ORM's `INSERT ... RETURNING` met a SELECT policy
+    restricted to the key's owner.
+    """
+    client: TestClient = request.getfixturevalue(which)
+    added = client.post(
+        f"/v1/teams/{world.globex_team_id}/members",
+        headers={"X-API-Key": world.carol_key},
+        json={"user_email": "newcomer@example.com", "role": "team_member"},
+    )
+    assert added.status_code == 201, added.text
+    target_id = added.json()["user_id"]
+
+    issued = client.post(
+        f"/v1/teams/{world.globex_team_id}/members/{target_id}/api-keys",
+        headers={"X-API-Key": world.carol_key},
+        json={"label": "first credential"},
+    )
+    assert issued.status_code == 201, issued.text
+    minted = issued.json()["api_key"]
+
+    # And the key authenticates as the newcomer, carrying only their own
+    # membership -- which is the point of the feature.
+    me = client.get("/v1/me", headers={"X-API-Key": minted})
+    assert me.status_code == 200, me.text
+    assert me.json()["user"]["email"] == "newcomer@example.com"
+    assert [m["scope_kind"] for m in me.json()["memberships"]] == ["team"]
+
+
+@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+def test_the_roster_cannot_grant_a_role_above_team_admin(
+    which: str, request: pytest.FixtureRequest, world: _World, session: Session
+) -> None:
+    """`beacon_admin` is not expressible on this route, and that is the guard.
+
+    Worth stating where the guard actually LIVES, because it is not in the
+    handler: `TeamMemberIn.role` is `Literal["team_admin", "team_member"]`, so
+    the ceiling is enforced by the request schema and a rank check in the
+    handler would be unreachable code. A route check was written here first and
+    removed for exactly that reason.
+
+    So this test is pointed at the ceiling itself. If someone widens that
+    Literal -- to add `viewer`, or `beacon_admin` -- this fails, and whoever
+    does it has to decide deliberately whether a team admin may grant it. That
+    matters because the roster is the one place a team admin names somebody
+    else's role, and `beacon_admin` at team scope carries every permission.
+    """
+    client: TestClient = request.getfixturevalue(which)
+    _refuse_global_admin(session, world.carol_id, "a global admin may grant anything")
+    refused = client.post(
+        f"/v1/teams/{world.globex_team_id}/members",
+        headers={"X-API-Key": world.carol_key},
+        json={"user_email": "inflated@example.com", "role": "beacon_admin"},
+    )
+    assert refused.status_code == 422, refused.text
+
+    from typing import get_args
+
+    from beacon_ui.api.schemas.team_member import TeamRole
+
+    assert set(get_args(TeamRole)) == {"team_admin", "team_member"}, (
+        "the roster's role ceiling moved; decide whether a team admin may grant the new one"
     )

@@ -33,6 +33,14 @@ class ScopeKind(StrEnum):
 
 class User(Base, IdMixin, TimestampsMixin):
     __tablename__ = "users"
+    # Same reason as ``ApiKey``: RETURNING on an insert is read back through the
+    # SELECT policy, and ``users_read`` cannot see a user nobody is yet a
+    # co-member of. Measured as the serving role, inserting an invitee -- the
+    # plain INSERT was ACCEPTED and the same INSERT with RETURNING was REFUSED,
+    # so inviting a NEW person failed while inviting an existing one worked.
+    # That asymmetry is why the existing suite missed it: its invite test uses
+    # an account that already exists.
+    __mapper_args__ = {"eager_defaults": False}
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -74,6 +82,24 @@ class ApiKey(Base, IdMixin, TimestampsMixin):
     """Personal API keys. Carries the user's membership set at request time."""
 
     __tablename__ = "api_keys"
+    # No RETURNING on insert, and this is a SECURITY property rather than a
+    # performance one.
+    #
+    # `TimestampsMixin` gives both timestamps a server default, so by default
+    # SQLAlchemy flushes `INSERT ... RETURNING created_at, updated_at` to read
+    # them back. Postgres applies SELECT policies to a RETURNING row -- so with
+    # `api_keys_read` restricted to the key's OWNER, which is deliberate and
+    # what `test_api_key_hashes_stay_private_to_their_owner` protects, the
+    # RETURNING made `issue_member_key` fail for every admin under the
+    # constrained role. Measured: the same insert was ACCEPTED plain and
+    # REFUSED with RETURNING.
+    #
+    # The alternative was widening read to admins, which trades away a real
+    # invariant to work around an ORM detail. This keeps both: the insert needs
+    # no read, and a caller who wants the timestamps gets them the ordinary way
+    # -- `expire_on_commit` already re-reads them after commit, so the
+    # self-serve route is unaffected.
+    __mapper_args__ = {"eager_defaults": False}
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False

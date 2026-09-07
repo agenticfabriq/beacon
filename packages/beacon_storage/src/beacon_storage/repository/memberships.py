@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from beacon_storage.models.tenancy import Membership, Role, ScopeKind
 
@@ -60,4 +60,25 @@ class MembershipRepo:
                     Membership.scope_id == scope_id,
                 )
             )
+        )
+
+    def may_issue_key_for(self, *, issuer_id: UUID, target_id: UUID) -> bool:
+        """Whether ``issuer_id`` may mint a credential authenticating as ``target_id``.
+
+        Delegates to the SQL function of the same name rather than comparing
+        memberships here, for one reason: this repository's own reads are
+        bounded by ``memberships_read``, so a membership the target holds in a
+        scope the issuer is not in would be INVISIBLE to a Python-side check.
+        It would then find nothing outside the issuer's scopes and permit --
+        a guard whose pass value means "I could not look". The function is
+        SECURITY DEFINER and sees the whole table.
+
+        It is also the predicate in ``api_keys_insert``, so the route's answer
+        and the database's cannot drift apart.
+        """
+        return bool(
+            self.session.execute(
+                text("SELECT may_issue_key_for(:issuer, :target)"),
+                {"issuer": str(issuer_id), "target": str(target_id)},
+            ).scalar_one()
         )
