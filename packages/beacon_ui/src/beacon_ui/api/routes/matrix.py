@@ -109,9 +109,10 @@ def _row_key(
     hardening against a self-collision, not the closing of an open door.
 
     Widened anyway, on cost rather than on severity: the client resolves a
-    handle by FIRST MATCH, the fix is one character, and the handles were a day
-    old when it was made. A width change invalidates every handle already
-    emitted, so the cheap moment to pick a width is the only one there is.
+    handle by FIRST MATCH, the fix is one character, and the handles were
+    eleven hours old when it was made -- narrow and wide both landed on
+    2026-09-06. A width change invalidates every handle already emitted, so the
+    cheap moment to pick a width is the only one there is.
     """
     # `\x00` for absent, the value itself otherwise -- NOT `x or ""`, which
     # maps NULL and '' to one key while the GROUP BY keeps them apart.

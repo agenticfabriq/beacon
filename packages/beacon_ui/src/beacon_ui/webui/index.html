@@ -1505,8 +1505,8 @@ async function applyRoute() {
     // "Usually", because there is a second cause and it is self-inflicted:
     // changing the WIDTH of `_row_key` invalidates every handle already
     // emitted, and those rows are still present. It was widened once, from 64
-    // bits to 128, a day after the handles first shipped. Anyone changing it
-    // again is silently breaking every link in circulation at that point, and
+    // bits to 128, eleven hours after the handles first shipped. Anyone
+    // changing it again is silently breaking every link in circulation, and
     // this fallback is what makes the breakage look like a deleted row.
     if (!row) { go("matrix"); return true; }
     openCell(row);

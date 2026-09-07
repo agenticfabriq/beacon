@@ -861,10 +861,16 @@ def test_the_row_handle_is_wide_enough_to_survive_a_search() -> None:
     The original 64 was argued from ACCIDENT -- far past collision range for a
     table of tens of rows, which is true. But ``config_label`` and the config
     behind ``config_digest`` come from the run-create payload, so somebody who
-    can post runs chooses inputs, and a 64-bit digest puts an any-pair
-    collision at roughly 2**32 offline evaluations. The client resolves a
-    handle by first match, so a found pair means one shared URL opens a
-    different configuration's numbers than the one it names.
+    can post runs chooses their own inputs, and a 64-bit digest puts an
+    any-pair birthday search at roughly 2**32 offline evaluations.
+
+    What that reaches is bounded, and ``_row_key`` states it at length: both
+    halves of a found pair are rows the searcher created, so the outcome is a
+    link naming one of their own configurations that opens another. Colliding
+    with somebody ELSE's row is a second preimage, which 64 bits already put at
+    2**64. This width is hardening against a self-collision, not the closing of
+    an open door -- said here too, because a reader who finds only this test
+    would otherwise take it for the latter.
 
     Pinned as a NUMBER rather than a comment, because the truncation is one
     character to change and nothing else would notice.
