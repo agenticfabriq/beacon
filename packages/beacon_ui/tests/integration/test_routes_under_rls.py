@@ -594,18 +594,19 @@ def test_minting_your_own_key_reads_its_timestamp_back(
     So the claim is the narrow one: the self-serve mint works under the serving
     role, and the timestamp survives the loss of `INSERT ... RETURNING`.
 
-    The STATUS is the whole guard, and it is worth saying why rather than
-    adding an assertion that reads like one. `ApiKeyCreatedOut.created_at` is a
-    required `datetime`, so a refresh that found no row raises on response
-    validation and the route answers 500. Checking the field is non-empty
-    afterwards can never fail: a 201 cannot carry an empty one.
+    The STATUS is the whole guard. `record.created_at` is evaluated as an
+    argument inside the handler, so a load that finds no row raises there and
+    the route answers 500. An assertion that the returned field is non-empty
+    adds nothing after that -- it cannot fail once the response exists -- and
+    an earlier version of this test carried one with a message claiming it was
+    the detector.
     """
     client: TestClient = request.getfixturevalue(which)
     _refuse_global_admin(
         session,
         world.carol_id,
-        "this asserts the OWNERSHIP branch of api_keys_insert, and a global role would "
-        "satisfy the policy through its global-admin branch instead",
+        "may_issue_key_for permits a global admin outright, so a caller holding one "
+        "satisfies api_keys_insert whatever the rest of it says",
     )
     response = client.post(
         "/v1/me/api-keys",
