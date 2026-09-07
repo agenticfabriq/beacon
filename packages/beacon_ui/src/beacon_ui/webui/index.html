@@ -656,7 +656,10 @@ const deltaText = (row) => {
   if (then === null || now === null) return "n/a";
   const d = (then - now) * 100;
   const shown = (d > 0 ? "+" : "") + d.toFixed(1);
-  return row.affected ? shown : `${shown}<span class="mv" title="later regrade">*</span>`;
+  // No `title` on the marker: it would SHADOW the cell's own tooltip on
+  // hover, and the cell's is the one carrying the explanation. The glyph is
+  // the signal; `deltaTitle` is the sentence.
+  return row.affected ? shown : `${shown}<span class="mv">*</span>`;
 };
 const deltaClass = (row) => {
   if (!row.changed_since) return "dim";
@@ -1493,11 +1496,18 @@ async function applyRoute() {
     await loadMatrix();
     const wanted = decodeURIComponent(runPart);
     const row = S.matrixRows.find((entry) => entry.row_key === wanted);
-    // A key that matches nothing means the row is gone -- its runs
+    // A key that matches nothing usually means the row is gone -- its runs
     // invalidated, or a config that no longer reports. Falling back to Results
     // is right, and it is NOT the silent fallthrough this segment removed:
     // that one happened for every cell link, whereas this happens only when
-    // the row genuinely no longer exists.
+    // the row cannot be found.
+    //
+    // "Usually", because there is a second cause and it is self-inflicted:
+    // changing the WIDTH of `_row_key` invalidates every handle already
+    // emitted, and those rows are still present. It was widened once, from 64
+    // bits to 128, a day after the handles first shipped. Anyone changing it
+    // again is silently breaking every link in circulation at that point, and
+    // this fallback is what makes the breakage look like a deleted row.
     if (!row) { go("matrix"); return true; }
     openCell(row);
     return true;

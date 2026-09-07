@@ -874,4 +874,6 @@ def test_the_row_handle_is_wide_enough_to_survive_a_search() -> None:
         f"the row handle is {len(key)} hex characters, {len(key) * 4} bits; a "
         "birthday search costs about 2**" + str(len(key) * 2) + " evaluations"
     )
-    assert int(key, 16) >= 0, "and it must still be hex"
+    # The hex check IS `int(..., 16)` raising; there is nothing to compare it
+    # against, so it is not dressed up as a comparison.
+    int(key, 16)

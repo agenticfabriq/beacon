@@ -292,12 +292,18 @@ def test_the_delta_cell_says_whose_change_it_is() -> None:
     assert "-25.0" in later["text"], later
     assert untouched["text"] == "not affected", untouched
 
-    # But only the later-only case is marked as somebody else's work.
-    assert "later regrade" in later["text"], (
+    # But only the later-only case carries the marker, and the marker must NOT
+    # carry a tooltip of its own -- a nested `title` shadows the cell's on
+    # hover, so the reader who hovers the glyph that prompted the question
+    # would get the marker's text instead of the sentence explaining it.
+    assert '<span class="mv">*</span>' in later["text"], (
         "a delta this event did not cause must be marked, or the reader attributes "
         f"it to the event they picked: {later}"
     )
-    assert "later regrade" not in mine["text"], mine
+    assert "<span" not in mine["text"], mine
+    assert "title=" not in later["text"], (
+        f"the marker carries its own tooltip, which shadows the cell's: {later}"
+    )
 
     # And the tooltips must make three different claims. The old one asserted
     # "the selected event did not touch any result in this configuration" for

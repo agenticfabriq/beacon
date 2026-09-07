@@ -97,11 +97,21 @@ def _row_key(
     collision range for a table of tens of rows, which is true and answers the
     wrong question. Two of the six fields -- ``config_label`` and the config
     that ``config_digest`` covers -- come from the run-create payload, so
-    somebody who can post runs chooses inputs, and a 64-bit digest puts an
-    any-pair collision at about 2**32 offline evaluations. The client resolves
-    a handle by FIRST MATCH, so a found pair means one URL opens the other
-    row's numbers. 128 bits moves that bound to 2**64 and costs 16 characters
-    of URL.
+    somebody who can post runs chooses their own inputs.
+
+    Be exact about what that buys them, because the first version of this note
+    was not. A birthday search at about 2**32 finds SOME colliding pair among
+    inputs the searcher chose, and both halves of that pair are then rows they
+    created themselves -- so the reachable outcome is a link that names one of
+    their own configurations and opens another, which misrepresents their own
+    numbers to whoever trusts the link. Colliding with a row somebody ELSE
+    owns is a second preimage, which 64 bits already put at 2**64. So this is
+    hardening against a self-collision, not the closing of an open door.
+
+    Widened anyway, on cost rather than on severity: the client resolves a
+    handle by FIRST MATCH, the fix is one character, and the handles were a day
+    old when it was made. A width change invalidates every handle already
+    emitted, so the cheap moment to pick a width is the only one there is.
     """
     # `\x00` for absent, the value itself otherwise -- NOT `x or ""`, which
     # maps NULL and '' to one key while the GROUP BY keeps them apart.
