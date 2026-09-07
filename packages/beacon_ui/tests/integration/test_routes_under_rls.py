@@ -405,10 +405,22 @@ def test_the_fixture_reapplies_the_role_on_every_transaction() -> None:
 # authenticated as them -- and `effective_permissions` counts a global
 # membership for every team, so that key administered every tenant.
 #
-# Each is run under BOTH clients on purpose. `api_client` is production's shape
-# today (the owner role, every policy inert), so it is the route check that has
-# to refuse; `constrained_client` is the post-switch shape, where the policy
-# has to refuse as well. A fix in only one place passes only one of them.
+# Each is run under BOTH clients, and it is worth being exact about what that
+# does and does not prove, because the first version of this comment claimed a
+# detector these tests do not have.
+#
+# It does NOT hold the policy against the route. `issue_member_key` refuses
+# with 403 before it reaches `ApiKeyRepo.create`, so under `constrained_client`
+# the negative cases never evaluate `api_keys_insert`'s WITH CHECK at all --
+# measured: reverting the policy to 0026's permissive branch while keeping the
+# route check leaves every test in this file green. The policy half is covered
+# by `test_the_insert_policy_refuses_a_key_for_a_user_with_outside_access` in
+# the storage suite, which inserts directly and cannot be shielded by a route.
+#
+# What it does prove: the route's refusal holds under either serving role, and
+# `test_the_ordinary_case_still_works` passes under the CONSTRAINED one -- which
+# is the assertion that caught the `INSERT ... RETURNING` trap, since the
+# permitted path was refused under RLS while working perfectly as the owner.
 # ---------------------------------------------------------------------------
 
 

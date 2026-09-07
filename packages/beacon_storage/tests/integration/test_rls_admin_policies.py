@@ -951,3 +951,57 @@ def test_the_insert_policy_refuses_a_key_for_a_user_with_outside_access(
         assert (
             _refused(s, insert, i=uuid.uuid4(), u=world.member, h=uuid.uuid4().hex) == "wrote 1"
         ), "the ordinary case must still work"
+
+
+def test_a_co_member_who_outranks_the_admin_cannot_have_a_key_issued(
+    engine: Engine, world: World
+) -> None:
+    """The RANK half of the rule, which the scope test alone cannot reach.
+
+    Every other case in this file is decided by SCOPE: the target holds
+    something outside the teams the issuer administers. This target holds
+    nothing outside -- a ``beacon_admin`` scoped to the very team the admin
+    administers -- so the scope test passes and only the rank comparison
+    refuses it.
+
+    Measured: with ``role_rank(mine.role) >= role_rank(t.role)`` deleted from
+    ``may_issue_key_for``, every other assertion here stayed green. So the
+    predicate had a clause no test could see, guarding a real escalation --
+    ``_ROLE_PERMISSIONS[BEACON_ADMIN]`` is ``frozenset(Permission)``, and 0026
+    notes that a team-scope beacon_admin collects every one of them, so a key
+    for this member carries strictly more than its issuer holds.
+    """
+    with make_session_factory(engine)() as s:
+        elevated = UserRepo(s).create(email="elevated@example.com", name="elevated")
+        s.flush()
+        MembershipRepo(s).grant(
+            user_id=elevated.id,
+            scope_kind=ScopeKind.TEAM,
+            scope_id=world.team_a,
+            role=Role.BEACON_ADMIN,
+        )
+        s.commit()
+        elevated_id = elevated.id
+
+    # Same scope, higher rank. The team admin administers team-a and this is
+    # the target's ONLY membership, so nothing but the rank stands in the way.
+    assert _may_issue(engine, world.team_admin, elevated_id) is False, (
+        "a team admin issued a key for a beacon_admin of its own team, which carries "
+        "every permission -- the rank comparison is not being consulted"
+    )
+    # The other direction holds: the elevated member may issue for the admin.
+    assert _may_issue(engine, elevated_id, world.team_admin) is True
+
+    with make_session_factory(engine)() as s:
+        _as(s, world.team_admin)
+        assert (
+            _refused(
+                s,
+                "INSERT INTO api_keys (id,user_id,key_hash,label,created_at,updated_at) "
+                "VALUES (:i,:u,:h,'l',now(),now())",
+                i=uuid.uuid4(),
+                u=elevated_id,
+                h=uuid.uuid4().hex,
+            )
+            in REFUSALS
+        )

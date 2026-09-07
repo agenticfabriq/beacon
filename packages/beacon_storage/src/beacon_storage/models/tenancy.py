@@ -96,9 +96,15 @@ class ApiKey(Base, IdMixin, TimestampsMixin):
     #
     # The alternative was widening read to admins, which trades away a real
     # invariant to work around an ORM detail. This keeps both: the insert needs
-    # no read, and a caller who wants the timestamps gets them the ordinary way
-    # -- `expire_on_commit` already re-reads them after commit, so the
-    # self-serve route is unaffected.
+    # no read, and a caller that wants the timestamps still gets them, because
+    # `eager_defaults=False` leaves those two columns UNLOADED after the flush
+    # rather than filled in -- so `create_api_key` reading `record.created_at`
+    # lazy-loads them on first access. That is a SELECT the key's own owner is
+    # allowed. (Not because the session expires on commit: `make_session_factory`
+    # sets `expire_on_commit=False`. The reload happens because the attribute
+    # was never populated, which is a different mechanism reaching the same
+    # place, and worth stating correctly -- a maintainer who believed the
+    # expiry story could remove this line and conclude nothing would change.)
     __mapper_args__ = {"eager_defaults": False}
 
     user_id: Mapped[UUID] = mapped_column(
