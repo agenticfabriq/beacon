@@ -110,9 +110,11 @@ def _row_key(
 
     Widened anyway, on cost rather than on severity: the client resolves a
     handle by FIRST MATCH, the fix is one character, and the handles were
-    eleven hours old when it was made -- narrow and wide both landed on
-    2026-09-06. A width change invalidates every handle already emitted, so the
-    cheap moment to pick a width is the only one there is.
+    eleven hours old when it was made -- 1795eb6 to b1ecf0b, an interval rather
+    than a date, because the two straddle midnight UTC and naming a day would
+    read as wrong to anyone checking in a different zone. A width change
+    invalidates every handle already emitted, so the cheap moment to pick a
+    width is the only one there is.
     """
     # `\x00` for absent, the value itself otherwise -- NOT `x or ""`, which
     # maps NULL and '' to one key while the GROUP BY keeps them apart.

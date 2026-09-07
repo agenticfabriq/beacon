@@ -856,7 +856,7 @@ def test_selecting_the_only_event_attributes_everything_to_it(
 
 
 def test_the_row_handle_is_wide_enough_to_survive_a_search() -> None:
-    """128 bits, because two of the six fields are attacker-chosen.
+    """128 bits, hardening a handle two of whose six fields are caller-chosen.
 
     The original 64 was argued from ACCIDENT -- far past collision range for a
     table of tens of rows, which is true. But ``config_label`` and the config
