@@ -3,7 +3,7 @@
   <img src="docs/lockup-light.svg" alt="Beacon" height="46">
 </picture>
 
-*By [Agentic Fabriq](https://www.ycombinator.com/companies/agentic-fabriq) (YC W26) — made with love, from MIT.*
+*By [Agentic Fabriq](https://www.agenticfabriq.com) (YC W26) — made with love, from MIT.*
 
 **Beacon tracks how well database-grounded data agents answer questions, and why
 one configuration answers better than another.**
@@ -284,6 +284,15 @@ answers are compared, that file is where the change has to be argued.
   single-tenant: RLS policies short-circuit until a user context is set, and
   API-key local mode is first-class.
 - API keys go in the `X-API-Key` header. `Authorization: Bearer` is for OIDC.
+
+## Related
+
+[**mnemiq**](https://github.com/agenticfabriq/mnemiq) — Agentic Fabriq's
+database-grounded data agent, and one of the systems tracked here. It is a
+system under test like any other: it registers runs and pushes outputs through
+the same API, and beacon grades those outputs by the same rules it applies to
+everything else. Its self-reported outcomes ride along as provenance and are
+never beacon's claim.
 
 ## License
 
