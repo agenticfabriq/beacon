@@ -5,19 +5,32 @@
 
 *By [Agentic Fabriq](https://www.ycombinator.com/companies/agentic-fabriq) (YC W26) — made with love, from MIT.*
 
-Beacon tracks how well database-grounded data agents answer questions, and why
-one configuration answers better than another.
+**Beacon tracks how well database-grounded data agents answer questions, and why
+one configuration answers better than another.**
 
 It is a **tracker, not an executor**. You register a run, execute it on your own
 hardware with your own runner, and push the outputs back — for SQL suites, the
-rows your engine returned. Beacon grades them against gold answers it holds
-(materialized once at import), keeps the record, and lets you compare runs —
-including down to a single question, with your SQL and its result beside the
-gold's.
+rows your engine returned. Beacon grades those rows against gold it already
+holds, keeps the record, and lets you compare runs down to a single question,
+with your SQL and its result beside the gold's.
 
-The system under test never grades its own work. What you push is `output`; the
+The system under test never grades its own work. What you push is `output`. The
 verdict is computed here, by comparison — beacon executes nothing to grade, so
 no benchmark database is needed at runtime.
+
+## What you get
+
+The results matrix. One row per system · version · model · config. `EX` is each
+benchmark's own headline rule, and together with deferred and wrong it partitions
+the run. `exact` and `got-facts` are alternative readings of the same items, so
+they overlap that partition rather than adding to it:
+
+![The results matrix](docs/screenshots/results-matrix.png)
+
+The run drill-down. Every question graded under both readings, your SQL and its
+rows beside gold's, and the mismatch named — not just flagged:
+
+![The run drill-down](docs/screenshots/run-drilldown.png)
 
 ## The flow
 
@@ -40,43 +53,32 @@ no benchmark database is needed at runtime.
                      GET  /v1/suites/{suite_id}/attribution  what each layer did
 ```
 
-Two levels, no more: a **team** is the access boundary, a **suite** is the
-benchmark. Runs hang off the benchmark, and each benchmark can pin one run as
-the reference everything else is read against.
+The structure stays flat on purpose. A **team** is the access boundary. A
+**suite** is the benchmark. Runs hang off the benchmark, and each benchmark can
+pin one run as the reference everything else is read against.
 
-The results matrix — one row per system · version · model · config. `EX` is each
-benchmark's own headline rule, and with deferred and wrong it partitions the run;
-`exact` and `got-facts` are alternative readings of the same items, so they
-overlap it rather than adding to it:
-
-![The results matrix](docs/screenshots/results-matrix.png)
-
-And the run drill-down — every question graded twice, with your SQL and its
-rows beside gold's, and the mismatch named:
-
-![The run drill-down](docs/screenshots/run-drilldown.png)
-
-Four things that shape the whole design:
+## What the design commits to
 
 - **A deferral is not a failure.** A system that declines to answer scores
-  `DEFER`, not `FAIL`. Otherwise a cautious system and an inaccurate one are the
-  same number, and over-deferral — usually the biggest gap between a baseline and
-  a ceiling — becomes invisible.
+  `DEFER`, not `FAIL`. Otherwise a cautious system and an inaccurate one collapse
+  to the same number, and over-deferral — usually the widest gap between a
+  baseline and a ceiling — becomes invisible.
 - **An error is not a zero.** An attempt that never ran leaves the denominator
-  instead of counting against the model. A rate over no gradeable tasks is
-  `None`, not `0.0`.
-- **Two metrics, one run.** Exact match and a tolerant reading are reported side
-  by side rather than settled by tuning one comparison.
+  instead of counting against the model. A rate over nothing gradeable is `None`,
+  not zero.
+- **Two readings, one run.** Exact match and a tolerant reading are reported side
+  by side rather than settled by tuning one comparison until it looks right.
 - **A bad run is invalidated, never deleted.** The row and its results stay, with
-  who retired it and why. A tracker whose operator can erase inconvenient results
-  cannot be cited.
-- **SQL is evidence, never scored.** Two different queries returning the right
-  rows are both right answers. The SQL string is kept for the drill-down; the
-  runner's `portable_to_gold_engine` flag feeds the optional BIRD-comparable
-  `EX*` column; `beacon audit spot-check` can re-execute a sample on demand.
+  who retired it and why. A tracker whose operator can quietly erase inconvenient
+  results cannot be cited.
+- **SQL is evidence, never scored.** Different queries returning the right rows
+  are both right answers. The SQL string is kept for the drill-down; the runner's
+  `portable_to_gold_engine` flag feeds the optional BIRD-comparable `EX*` column;
+  `beacon audit spot-check` can re-execute a sample on demand.
 - **Beacon owns its grading semantics.** Tolerance, canonicalization and the
-  got-facts projection rule are beacon's own; a runner's self-reported numbers
-  may sit at a different level, and the disagreement table names why.
+  got-facts projection rule are beacon's own. A runner's self-reported numbers may
+  sit at a different level, and the disagreement table names why rather than
+  hiding the gap.
 
 ## Requirements
 
@@ -95,13 +97,13 @@ make db-up
 make migrate
 ```
 
-The default local database URL is:
+The default local database URL:
 
 ```text
 postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon
 ```
 
-If `5432` is taken, pick another port and keep it consistent:
+If that port is taken, pick another and keep it consistent:
 
 ```bash
 POSTGRES_PORT=55432 make db-up
@@ -115,6 +117,8 @@ DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
   uv run beacon demo seed
 ```
 
+`make demo` runs `db-up` and `migrate` in one step.
+
 ## Launching the UI
 
 One process. The UI is a single page served by the API itself:
@@ -124,24 +128,17 @@ DATABASE_URL=postgresql+psycopg://beacon:beacon_dev@localhost:5432/beacon \
   uv run uvicorn beacon_ui.api.app:app --reload --port 8000
 ```
 
-Open <http://localhost:8000/ui> and sign in with an API key (one is printed by
-`beacon demo seed`). The sign-in screen takes a key and nothing else: password
-login exists on the API as `POST /v1/auth/password/login`, but no form posts to
-it, and a user created through OIDC — which is how the demo seeds alice and
-carol — has no `password_hash` for it to check. For a pre-authenticated demo or
-kiosk, append `?api_key=bcn_...` — the key moves to local storage and leaves
-the URL.
+Open <http://localhost:8000/ui> and sign in with an API key — `beacon demo seed`
+prints one. The sign-in screen takes a key and nothing else. Password login
+exists on the API as `POST /v1/auth/password/login`, but no form posts to it, and
+a user created through OIDC (how the demo seeds its users) has no
+`password_hash` for it to check. For a pre-authenticated demo or kiosk, append
+`?api_key=bcn_...` — the key moves to local storage and leaves the URL.
 
-Beacon executes nothing to grade: a SQL push carries the rows the runner's
-engine returned, and gold answers are materialized once at import
-(`scripts/materialize_gold.py`). No benchmark database is needed at runtime.
-
-Same origin on purpose: the page's every request goes to the API that served
+Same origin on purpose: every request the page makes goes to the API that served
 it, and the UI declares its endpoints in one manifest that a test holds against
-the OpenAPI schema — the UI cannot silently reference an endpoint that does not
+the OpenAPI schema. The UI cannot silently reference an endpoint that does not
 exist.
-
-`make demo` runs `db-up` and `migrate` in one step.
 
 ## Command line
 
@@ -162,14 +159,19 @@ talks to the API using the context from `beacon login`.
 | `beacon gold import` | Import approved gold from the semantic layer |
 | `beacon demo seed` | Demo fixtures and API keys |
 
-Beacon does not author gold. Public corpora are ingested; customer gold is
-curated, reviewed and given a per-question tolerance in the semantic layer, and
-arrives here as an approved export. After import, run
-`scripts/materialize_gold.py` once to execute each item's gold SQL against the
-reference engine and store the answer rows — the one-time step that lets
-grading run forever after without any database. `beacon gold import` prints what it refused
-as well as what it took — a package that imports nothing because everything is
-still in review should say so, not look like a no-op.
+## Gold
+
+Beacon does not author gold. Public corpora are ingested. Customer gold is
+curated, reviewed and given a per-question tolerance in the semantic layer, then
+arrives here as an approved export.
+
+After import, run `scripts/materialize_gold.py` once to execute each item's gold
+SQL against the reference engine and store the answer rows. That one-time step is
+what lets grading run forever after without any benchmark database.
+
+`beacon gold import` prints what it refused as well as what it took — a package
+that imports nothing because everything is still in review should say so, not
+look like a no-op.
 
 ### Loading results from a file
 
@@ -182,23 +184,22 @@ uv run python scripts/load_eval_reports.py \
   --manifest reports.json --reports-dir path/to/reports
 ```
 
-Beacon re-grades everything from the rows the report carries (`engine_rows` +
+Beacon re-grades everything from the rows the report carries (`engine_rows` plus
 the true count), so each load doubles as a conformance check between two
-independent graders — the disagreement table it prints is the reason to run it.
+independent graders. The disagreement table it prints is the reason to run it.
 The manifest supplies model, config and engine per file, because nothing in a
 report says which model or engine produced it; the runner's portability flag
 rides along and feeds `EX*`.
 
 It refuses a report whose cases belong to another corpus. Case ids are not
-corpus-qualified: two benchmarks can both number their cases `bird-0`, `bird-1`,
+corpus-qualified — two benchmarks can both number their cases `bird-0`, `bird-1`,
 and loading one against the other's gold produces a completely plausible-looking
 run over unrelated questions.
 
 ## Configuration
 
-Everything reads environment variables (prefix `BEACON_`), and the API also
-loads a gitignored `.env` at the repo root — `cp .env.example .env` and fill
-it in.
+Everything reads environment variables (prefix `BEACON_`), and the API also loads
+a gitignored `.env` at the repo root — `cp .env.example .env` and fill it in.
 
 | Variable | What it configures |
 |---|---|
@@ -208,11 +209,11 @@ it in.
 | `BEACON_API_KEY_PREFIX` | Prefix minted keys carry |
 | `BEACON_JUDGE_BASE_URL` / `_API_KEY` / `_MODEL` | The LLM judge endpoint (OpenAI chat-completions dialect) |
 
-The LLM judge serves narrative and rubric graders only — never the SQL path —
-and activates only when all three `BEACON_JUDGE_*` variables are set. The
-endpoint and key are deployment configuration: they live in `.env` and never
-in code or committed files. Judge configuration is grader-side and never
-enters a run's config identity.
+The LLM judge serves narrative and rubric graders only — never the SQL path — and
+activates only when every `BEACON_JUDGE_*` variable is set. The endpoint and key
+are deployment configuration: they live in `.env`, never in code or committed
+files. Judge configuration is grader-side and never enters a run's config
+identity.
 
 ## Background workers
 
@@ -246,12 +247,11 @@ Stop Postgres with `make db-down`.
 
 `tests/conformance/grading-conformance-v2.json` is a contract shared with the
 semantic layer: cases both graders must agree on. It is byte-identical in both
-repos with its SHA-256 pinned in both suites -- but each pin only ties that
-repo's copy to that repo's constant, so editing one copy and its pin while
-forgetting the other repo leaves BOTH suites green on two different contracts.
-See `tests/conformance/README.md` for what is and is not enforced. If you
-change how answers are compared, that file is where the change has to be
-argued.
+repos with its SHA-256 pinned in both suites — but each pin only ties that repo's
+copy to that repo's constant, so editing one copy and its pin while forgetting
+the other repo leaves both suites green on two different contracts. See
+`tests/conformance/README.md` for what is and is not enforced. If you change how
+answers are compared, that file is where the change has to be argued.
 
 ## Repository layout
 
