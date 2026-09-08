@@ -8,6 +8,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .env
+# Backstop for hand-made copies -- .env.bak, .env.local, .env.prod. The bare
+# `.env` rule matches that name and nothing else, and an edited .env usually
+# leaves a backup beside it carrying the same live keys.
+.env.*
+!.env.example
 *.egg-info/
 dist/
 .coverage
@@ -36,3 +41,7 @@ beacon.dump/
 *.dump.*
 *.backup
 *.sql.gz
+
+# Claude Code local settings. Grants SSM command execution against the
+# production beacon instance -- an access grant, not a preference. Never commit.
+.claude/settings.local.json
