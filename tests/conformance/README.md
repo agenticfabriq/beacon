@@ -84,20 +84,53 @@ To change the contract:
 
 Record why in each repo's findings register.
 
-Cases are of three kinds, matching the contract's own `purpose` field.
+Kinds, with examples rather than a partition — 24 cases, and no attempt here
+to assign every one. The line that used to stand here said "three kinds,
+matching the contract's own `purpose` field", and it survived the first attempt
+at this section, sitting directly above four bold headings.
 
-**Real disagreements.** `num-representation-noise` is the 45 correct answers
-beacon was calling wrong; `text-different` is the 84 value mismatches that were
-never a tolerance question; `table-numeric-cell-within-tolerance` is verity
-applying a curated tolerance to a scalar and ignoring it for the same number in
-a table.
+**Real disagreements**, where the two graders differed on the same answer.
+`num-representation-noise` is the 45 correct answers beacon was calling wrong;
+`text-different` is the 84 value mismatches that were never a tolerance
+question; `table-numeric-cell-within-tolerance` is verity applying a curated
+tolerance to a scalar and ignoring it for the same number in a table.
 
-**Bounds one of them had wrong**, which is what the v2 widening calibrated:
-`num-within-widened-rel` and `num-beyond-widened-rel` sit either side of it.
+**Bounds one of them had wrong.** `num-whole-off-by-one` caught the defect in
+beacon's relative bound the day it was added; `num-within-widened-rel` and
+`num-beyond-widened-rel` sit either side of the v2 widening.
 
-**Agreement baselines that must not regress.** `num-exact` ("identical values
-match under any tolerance"), `text-identical`, `table-identical`,
-`num-whole-equal`, and `table-null-matches-null` ("both graders agree the
-answer is empty"). These came from no episode at all, which is why the older
-wording here — "every case came from a real disagreement" — was wrong in both
-this file and the `purpose` field it was copied between.
+**Agreement baselines that must not regress** — `match: true`, and no episode
+behind them. `num-exact` ("identical values match under any tolerance"),
+`text-identical`, `table-identical`, `num-whole-equal` and
+`table-null-matches-null` ("both graders agree the answer is empty").
+
+`text-different` is NOT one of these, though an earlier pass moved it here. It
+is `match: false`, and its `why` carries an episode -- "84 of beacon's value
+mismatches were this" -- so it fails both halves of the qualifier above. It
+stays under real disagreements, where it was.
+
+**Type distinctions that must never coerce** — `match: false` baselines
+asserting things stay DIFFERENT: `table-null-is-not-zero`,
+`table-null-is-not-empty-text`, `table-bool-is-not-one` and
+`table-number-is-not-its-spelling`. Not "neither episodes nor agreements", as
+this section first claimed: `table-bool-is-not-one` failed on its first run,
+because Python says `True == 1` and beacon's equality fallback would have
+scored a boolean answer against a count (f7af576). That is an episode, and the
+same kind of one used two paragraphs up to file `num-whole-off-by-one`.
+
+That fourth kind is why the `purpose` field no longer says "three kinds": it
+named the type-discipline cases in the sentence right after claiming three,
+contradicting itself inside one string. The kind before it is why the field
+says "include" rather than counting — the older wording, "every case came from
+a real disagreement", was false for many of them, and replacing one count with
+another is how that survives.
+
+No number is given here on purpose, and the purpose was earned. This paragraph
+has carried two counts and both were wrong: "a third of the file", then "nine
+of the twenty-four", which was only the size of the two groups named above
+while at least eight further cases -- `num-different-answer`, `num-near-zero`,
+`table-extra-column`, `table-row-count`, the row-order cases,
+`table-whole-off-by-one` -- record neither a grader disagreement nor an
+episode. Three attempts, three wrong counts, in the paragraph arguing that
+loose counts are the failure mode. The section above says it plainly: examples,
+not a partition, and no attempt to assign every case.
