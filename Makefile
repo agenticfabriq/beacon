@@ -44,6 +44,14 @@ setup:
 db-up:
 	docker compose up -d postgres
 	@until docker compose exec -T postgres pg_isready -U beacon; do sleep 1; done
+	@# `beacon_test` as well as `beacon`. compose creates only POSTGRES_DB, and
+	@# `make test` points at beacon_test -- so a fresh clone used to reach the
+	@# first `make test` and get `database "beacon_test" does not exist`, with
+	@# nothing in the repo that would have created it. CI never saw this: its
+	@# service container is handed POSTGRES_DB: beacon_test directly.
+	@docker compose exec -T postgres psql -U beacon -d beacon -tAc \
+	  "SELECT 1 FROM pg_database WHERE datname='beacon_test'" | grep -q 1 \
+	  || docker compose exec -T postgres createdb -U beacon beacon_test
 
 db-down:
 	docker compose down

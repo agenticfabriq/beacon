@@ -1,0 +1,23 @@
+# Review is requested automatically from these owners. This is a routing
+# signal, not a gate: `main` is not branch-protected, so nothing here blocks a
+# merge on its own.
+
+*                               @hiddendim @paulinazhx
+
+# The shared grading contract, and the pin that guards it. An identical copy
+# lives in a private repository and both are pinned by hash. Editing the JSON
+# alone fails here -- the pin catches it. What passes, and what these owners
+# are for, is editing the file AND its pin together: the pin only ever checks
+# the copy beside it, so the two graders end up disagreeing with both suites
+# green. See CONTRIBUTING.md.
+/tests/conformance/             @hiddendim @paulinazhx
+/tests/test_grading_conformance.py  @hiddendim @paulinazhx
+
+# Tenancy policies and the migrations that carry them. The integration suites
+# DO exercise these -- several drop to the constrained `beacon_app` role so the
+# policies are consulted, and one asserts the bypassing role really does hold
+# rolsuper/rolbypassrls. What they cannot see is the deployed instance, which
+# still connects as the owning superuser, so a policy change is inert there
+# until the serving DSN is switched.
+/packages/beacon_storage/src/beacon_storage/migrations/  @hiddendim
+/packages/beacon_iam/                                    @hiddendim
