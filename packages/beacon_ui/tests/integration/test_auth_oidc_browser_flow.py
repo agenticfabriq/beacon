@@ -7,12 +7,15 @@ from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import sqlalchemy as sa
 from beacon_iam.auth.oidc import OidcClaims
+from beacon_ui.api.config import ApiConfig
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
 
@@ -55,6 +58,7 @@ def test_callback_exchanges_code_and_issues_api_key(
     mock_verify: Mock,
     mock_exchange: Mock,
     api_client: TestClient,
+    session: Session,
 ) -> None:
     mock_exchange.return_value = "stub-id-token"
     mock_verify.return_value = OidcClaims(
@@ -72,7 +76,49 @@ def test_callback_exchanges_code_and_issues_api_key(
     )
 
     assert response.status_code in (302, 307)
-    assert "beacon_api_key_once" in response.cookies
+
+    # No credential comes back on the two channels this response has: its
+    # cookies and its `Location` header. Not "any channel" -- a redirect has no
+    # body, but another response header would go unchecked.
+    #
+    # The gap this route still has is that it hands the UI no key, and the
+    # obvious way to close it is a parameter on this redirect. `index.html`
+    # reads `?api_key=` at boot and stores whatever it finds, so that lands a
+    # credential in browser history, the Referer header and every proxy log
+    # between.
+    #
+    # Both spellings of the check are kept, because each misses what the other
+    # catches. The NAME catches a credential of any shape handed back as
+    # `api_key` -- a session token or an opaque handle would not carry the key
+    # prefix. The VALUE catches an API key handed back under any other name,
+    # `?apiKey=` being the one a third-party dashboard would plausibly read.
+    # The prefix comes from `ApiConfig` rather than a literal so it stays true
+    # when the prefix changes; production's is `bcn_`, not the `bcn_dev`
+    # default.
+    prefix = ApiConfig().api_key_prefix
+    location = response.headers["location"]
+    assert "beacon_api_key_once" not in response.cookies
+    assert "api_key" not in location, "the redirect hands a credential back in its URL"
+    assert prefix not in location, (
+        "the redirect carries an API key in its URL, where it lands in browser "
+        "history, the Referer header and every proxy log between"
+    )
+    for name, value in response.cookies.items():
+        assert prefix not in value, f"cookie {name} carries an API key"
+
+    # And the route DID mint one -- half of this test's name, asserted by
+    # nothing until now: dropping the `ApiKeyRepo.create` call from
+    # `_issue_key` left every assertion above green. The row is what gets
+    # checked, not the key, because only the hash is stored and the plaintext
+    # is unrecoverable by design.
+    minted = session.execute(
+        sa.text(
+            "SELECT count(*) FROM api_keys k JOIN users u ON u.id = k.user_id "
+            "WHERE u.email = :email AND k.label = :label"
+        ),
+        {"email": "user1@example.com", "label": "browser-login"},
+    ).scalar_one()
+    assert minted == 1, "the callback authenticated the user but stored no key for them"
 
 
 def test_callback_rejects_mismatched_state(api_client: TestClient) -> None:

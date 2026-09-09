@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import NamedTuple, cast
 
@@ -186,6 +187,17 @@ def _matrix_header_cells() -> list[_HeaderCell]:
                 display="none" if hidden else "",
             )
         )
+    # Not an empty list. The `<thead>` and `<tr>` steps above raise when they
+    # miss, but this one returns `[]` -- and `[]` is not a loud failure here,
+    # it is a silent pass: `_expected_visible_columns()` sums to 0, the stub is
+    # fed no header cells, and `matrixCols`'s own `reduce(..., 0)` also returns
+    # 0, so the assertion downstream compares 0 to 0 and measures nothing. A
+    # header row reformatted to `<TH ...>` would do it, and a browser would not
+    # care.
+    assert cells, (
+        "no <th> cells parsed out of the matrix header row; the width check "
+        "downstream would compare 0 against 0 and pass without measuring"
+    )
     return cells
 
 
@@ -194,11 +206,43 @@ def _expected_visible_columns() -> int:
     return sum(int(cell.colspan or 1) for cell in _matrix_header_cells() if cell.display != "none")
 
 
+class _ScriptBlocks(HTMLParser):
+    """Collect the text of every ``<script>`` element.
+
+    A parser rather than a pattern, because matching tags with a regular
+    expression is a game you lose one case at a time. The version before this
+    was `<script[^>]*>(.*?)</script>`, and it missed `<SCRIPT>`; adding
+    ``re.I`` fixed that and the analyser immediately pointed at the next gap,
+    `</script >` with a space. Casing, attributes and stray whitespace are all
+    things `HTMLParser` already handles -- it lowercases tag names and switches
+    to CDATA mode inside a script -- so this stops moving the defect around.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocks: list[str] = []
+        self._inside = False
+
+    def handle_starttag(self, tag: str, attrs: object) -> None:  # noqa: ARG002
+        if tag == "script":
+            self._inside = True
+            self.blocks.append("")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._inside = False
+
+    def handle_data(self, data: str) -> None:
+        if self._inside:
+            self.blocks[-1] += data
+
+
 def _script() -> str:
-    html = WEBUI.read_text()
-    blocks: list[str] = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
-    assert blocks, "the page must carry a script block"
-    return max(blocks, key=len)
+    parser = _ScriptBlocks()
+    parser.feed(WEBUI.read_text())
+    parser.close()
+    assert parser.blocks, "the page must carry a script block"
+    return max(parser.blocks, key=len)
 
 
 def _run_page() -> dict[str, object]:

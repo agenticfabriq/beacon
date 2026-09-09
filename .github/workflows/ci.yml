@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+# Read-only by default. Nothing here writes to the repository -- these jobs
+# check out, install and run the Makefile -- so the token they get should not
+# be able to. Declared at the workflow level so a job added later inherits it
+# rather than silently starting from the permissive default.
+permissions:
+  contents: read
+
 # The lint and typecheck jobs run the Makefile targets rather than repeating
 # their commands. Repeating them is how CI came to check less than `make
 # typecheck` did: the Makefile added scripts/ (deliberately -- the ablation
