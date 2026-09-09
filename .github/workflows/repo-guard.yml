@@ -2,6 +2,12 @@ name: repo-guard
 on:
   push:
   pull_request:
+
+# Read-only: the guard scans the checkout and reports, and must never be able
+# to write to the repository it is policing.
+permissions:
+  contents: read
+
 jobs:
   guard:
     runs-on: ubuntu-latest

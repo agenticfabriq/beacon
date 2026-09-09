@@ -196,7 +196,12 @@ def _expected_visible_columns() -> int:
 
 def _script() -> str:
     html = WEBUI.read_text()
-    blocks: list[str] = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
+    # `re.I` as well as `re.S`: the pattern matched `<script>` and not
+    # `<SCRIPT>`. It reads a file in this repo so nothing hostile reaches
+    # it, and a miss would fail loudly on the assert below rather than
+    # pass -- but a tag filter that depends on our own casing is one
+    # reformat away from silently selecting a different block.
+    blocks: list[str] = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S | re.I)
     assert blocks, "the page must carry a script block"
     return max(blocks, key=len)
 

@@ -196,16 +196,28 @@ def oidc_callback(
         response.delete_cookie("beacon_oidc_cli_state")
         return response
 
+    # No `beacon_api_key_once` cookie. It used to be set here: the freshly
+    # minted key, `httponly=False` so a script could read it, for 120 seconds.
+    # NOTHING READ IT -- not the page (which takes its key from `?api_key=` or
+    # `localStorage`, see `index.html`), not a script, not the CLI. So it put a
+    # live credential on a surface any script on this origin could reach, and
+    # bought nothing for it.
+    #
+    # "Nothing" is a claim about the deployment as well as the repo, because
+    # this redirect goes to `dashboard_url` when one is configured and a
+    # dashboard shipped from elsewhere could have been the reader. Checked on
+    # the instance, and checked under BOTH names: `dashboard_url` reads
+    # `AliasChoices("BEACON_API_DASHBOARD_URL", "BEACON_DASHBOARD_URL")` and
+    # the API-prefixed one wins, so testing only the shorter name would have
+    # proved nothing. Both are unset in `/opt/beacon/.env` and in the
+    # container's environment, so the target is `/ui` -- the page above.
+    #
+    # Removing it does not change what works, and it does not complete the
+    # browser flow either: this redirect still hands the UI no key, which is a
+    # gap in that flow rather than a reason to keep a credential where only an
+    # attacker would find it.
     response = RedirectResponse(url=config.dashboard_url or "/ui", status_code=302)
     response.delete_cookie("beacon_oidc_state")
-    response.set_cookie(
-        "beacon_api_key_once",
-        issued.api_key,
-        max_age=120,
-        httponly=False,
-        samesite="lax",
-        secure=config.cookies_secure,
-    )
     return response
 
 
