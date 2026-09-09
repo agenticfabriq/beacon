@@ -425,11 +425,17 @@ def test_the_fixture_reapplies_the_role_on_every_transaction() -> None:
 
 
 def _mint(client: TestClient, world: _World, *, team_id: UUID, target_id: UUID) -> int:
-    return client.post(
+    # `int(...)` because `TestClient.post` resolves as untyped here, so
+    # `.status_code` is `Any` and mypy refuses to return it from an `-> int`
+    # function. The inline `client.post(...).status_code` comparisons elsewhere
+    # in this file never cross a typed function boundary, which is why this is
+    # the only place it comes up.
+    response = client.post(
         f"/v1/teams/{team_id}/members/{target_id}/api-keys",
         headers={"X-API-Key": world.carol_key},
         json={"label": "issued"},
-    ).status_code
+    )
+    return int(response.status_code)
 
 
 @pytest.mark.parametrize("which", ["api_client", "constrained_client"])
