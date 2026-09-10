@@ -64,18 +64,45 @@ def test_a_member_can_be_removed(api_client: TestClient, world: _World) -> None:
     assert str(world.bob_id) not in {row["user_id"] for row in _roster(api_client, world)}
 
 
-def test_removing_a_member_revokes_their_access(api_client: TestClient, world: _World) -> None:
-    """A roster entry that outlives the permission would be decoration."""
-    api_client.delete(
+# A non-member gets a different status depending on the connection role, and
+# both are correct for their role. `require_permission` resolves the scope with
+# `TeamRepo.get` first and raises 404 when it comes back None; as the owning
+# role nothing filters that read, so the caller reaches the permission check and
+# gets 403, while under `beacon_app` the team row is invisible to someone with
+# no membership in it and the 404 fires first.
+#
+# 404 is the answer we want: 403 confirms the team is real to someone with no
+# business knowing, so walking a list of ids would reveal which exist. It costs
+# a legitimate user nothing -- a member who merely lacks the permission can
+# still SEE the team, so they reach the check and still get 403. Measured both
+# ways; only a true outsider falls to 404.
+#
+# Parametrized rather than loosened to "either", so each role's answer is
+# pinned and a change to either is a failure. `owner_client` and not
+# `api_client`, because `api_client` follows BEACON_TEST_CONSTRAINED and the
+# two parameters would collapse into one under the flag.
+@pytest.mark.parametrize(
+    ("which", "expected"), [("owner_client", 403), ("constrained_client", 404)]
+)
+def test_removing_a_member_revokes_their_access(
+    which: str, expected: int, request: pytest.FixtureRequest, world: _World
+) -> None:
+    """A roster entry that outlives the permission would be decoration.
+
+    Removing bob leaves him with no membership in acme, so he is a true
+    outsider by the time he reads -- which is why this one moves with the role.
+    """
+    client: TestClient = request.getfixturevalue(which)
+    client.delete(
         f"/v1/teams/{world.acme_team_id}/members/{world.bob_id}",
         headers={"X-API-Key": world.alice_key},
     )
 
-    response = api_client.get(
+    response = client.get(
         f"/v1/teams/{world.acme_team_id}/solutions", headers={"X-API-Key": world.bob_key}
     )
 
-    assert response.status_code == 403
+    assert response.status_code == expected, response.text
 
 
 def test_the_last_admin_cannot_be_removed(api_client: TestClient, world: _World) -> None:
