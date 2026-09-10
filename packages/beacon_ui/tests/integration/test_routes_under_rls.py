@@ -409,6 +409,13 @@ def test_the_fixture_reapplies_the_role_on_every_transaction() -> None:
 # does and does not prove, because the first version of this comment claimed a
 # detector these tests do not have.
 #
+# `owner_client`, deliberately, and NOT `api_client`. `api_client` follows
+# `BEACON_TEST_CONSTRAINED`, so under that flag it becomes the constrained
+# client -- both parameters would then run the same thing, and these ten items
+# would stay green while the contrast they exist for went untested. Nothing
+# here could detect that. `owner_client` is pinned to the owning role whatever
+# the flag says.
+#
 # It does NOT hold the policy against the route. `issue_member_key` refuses
 # with 403 before it reaches `ApiKeyRepo.create`, so under `constrained_client`
 # the negative cases never evaluate `api_keys_insert`'s WITH CHECK at all --
@@ -438,7 +445,7 @@ def _mint(client: TestClient, world: _World, *, team_id: UUID, target_id: UUID) 
     return int(response.status_code)
 
 
-@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+@pytest.mark.parametrize("which", ["owner_client", "constrained_client"])
 def test_a_team_admin_cannot_mint_a_key_for_a_global_admin(
     which: str, request: pytest.FixtureRequest, world: _World, session: Session
 ) -> None:
@@ -475,7 +482,7 @@ def test_a_team_admin_cannot_mint_a_key_for_a_global_admin(
     assert _mint(client, world, team_id=world.globex_team_id, target_id=world.alice_id) == 403
 
 
-@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+@pytest.mark.parametrize("which", ["owner_client", "constrained_client"])
 def test_sharing_one_team_is_not_enough_to_mint(
     which: str, request: pytest.FixtureRequest, world: _World, session: Session
 ) -> None:
@@ -501,7 +508,7 @@ def test_sharing_one_team_is_not_enough_to_mint(
     assert _mint(client, world, team_id=world.globex_team_id, target_id=world.bob_id) == 403
 
 
-@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+@pytest.mark.parametrize("which", ["owner_client", "constrained_client"])
 def test_the_ordinary_case_still_works(
     which: str, request: pytest.FixtureRequest, world: _World, session: Session
 ) -> None:
@@ -537,7 +544,7 @@ def test_the_ordinary_case_still_works(
     assert [m["scope_kind"] for m in me.json()["memberships"]] == ["team"]
 
 
-@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+@pytest.mark.parametrize("which", ["owner_client", "constrained_client"])
 def test_the_roster_cannot_grant_a_role_above_team_admin(
     which: str, request: pytest.FixtureRequest, world: _World, session: Session
 ) -> None:
@@ -573,7 +580,7 @@ def test_the_roster_cannot_grant_a_role_above_team_admin(
     )
 
 
-@pytest.mark.parametrize("which", ["api_client", "constrained_client"])
+@pytest.mark.parametrize("which", ["owner_client", "constrained_client"])
 def test_minting_your_own_key_reads_its_timestamp_back(
     which: str, request: pytest.FixtureRequest, world: _World, session: Session
 ) -> None:

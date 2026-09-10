@@ -69,14 +69,37 @@ def test_create_curated_suite(api_client: TestClient, world: _World) -> None:
     assert response.status_code in (200, 201, 400), response.text
 
 
-def test_outsider_cannot_create_suite(api_client: TestClient, world: _World) -> None:
-    response = api_client.post(
+# A non-member gets a different status depending on the connection role, and
+# both are correct for their role. `require_permission` resolves the scope with
+# `TeamRepo.get` first and raises 404 when it comes back None; as the owning
+# role nothing filters that read, so the caller reaches the permission check and
+# gets 403, while under `beacon_app` the team row is invisible to someone with
+# no membership in it and the 404 fires first.
+#
+# 404 is the answer we want: 403 confirms the team is real to someone with no
+# business knowing, so walking a list of ids would reveal which exist. It costs
+# a legitimate user nothing -- a member who merely lacks the permission can
+# still SEE the team, so they reach the check and still get 403. Measured both
+# ways; only a true outsider falls to 404.
+#
+# Parametrized rather than loosened to "either", so each role's answer is
+# pinned and a change to either is a failure. `owner_client` and not
+# `api_client`, because `api_client` follows BEACON_TEST_CONSTRAINED and the
+# two parameters would collapse into one under the flag.
+@pytest.mark.parametrize(
+    ("which", "expected"), [("owner_client", 403), ("constrained_client", 404)]
+)
+def test_outsider_cannot_create_suite(
+    which: str, expected: int, request: pytest.FixtureRequest, world: _World
+) -> None:
+    client: TestClient = request.getfixturevalue(which)
+    response = client.post(
         f"/v1/teams/{world.acme_team_id}/suites",
         headers={"X-API-Key": world.carol_key},
         json={"name": "x", "kind": "manual", "item_ids": []},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == expected, response.text
 
 
 def test_list_suites(api_client: TestClient, world: _World) -> None:

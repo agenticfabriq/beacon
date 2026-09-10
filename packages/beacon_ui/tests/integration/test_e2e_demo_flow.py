@@ -190,4 +190,14 @@ def test_e2e_demo_flow(
     )
     assert denied.exit_code != 0
     assert isinstance(denied.exception, CliHttpError)
-    assert denied.exception.status == 403
+    # Either refusal, and deliberately not pinned to one. Carol is a true
+    # outsider to acme, so the status depends on the connection role: 403 as
+    # the owning role, 404 under `beacon_app`, where the team row is invisible
+    # to her and `require_permission` never reaches the permission check.
+    #
+    # This test's subject is the demo FLOW, not the semantics of that status,
+    # and loosening it here does not lose coverage: both answers are pinned
+    # exactly, per role, in `test_outsider_cannot_create_suite` and
+    # `test_removing_a_member_revokes_their_access`. What matters here is that
+    # the CLI refused rather than returned somebody else's team.
+    assert denied.exception.status in (403, 404), denied.exception.status
