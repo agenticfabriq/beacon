@@ -98,6 +98,31 @@ engines, where the same quantity arrives with different float noise, so the
 bounds above apply everywhere. This is a deliberate, recorded divergence from
 BIRD's letter; measured cost, 1 case in 2,899.
 
+## Canonicalisation vs BIRD's exactness
+
+BIRD's `calculate_ex` compares `set(pred) == set(gold)` over raw driver tuples
+and normalises nothing. Beacon canonicalises every cell before either metric
+compares it — `canonicalize_cell`: temporal values to ISO strings, Decimals to
+floats, **surrounding whitespace stripped**, NULL left as NULL, and bools left
+as bools (True is not 1). Rows that
+crossed an engine or a JSON boundary no longer share one driver's spellings, so
+without this the comparison grades transport rather than meaning.
+
+This is a deliberate, recorded divergence from BIRD's letter in the TOLERANT
+direction: `'ACME '` and `'ACME'` are one value here and two under
+`calculate_ex`. CHAR-padded columns are the ordinary way it arrives.
+
+It bears stating separately because the **exact** section above is easy to read
+as excluding it — "values equal with tolerance only for float noise" describes
+the comparison tolerance, and canonicalisation happens before the comparator
+sees the cells, on both paths. The got-facts section lists whitespace among what
+it tolerates; exact tolerates it too, by the same shared pre-step.
+
+**Measured cost: not measured**, unlike the two divergences above. It would be
+measured the same way they were — regrade the corpus with `canonicalize_cell`
+returning `str(value)` unstripped and count the verdicts that move. Recorded as
+unmeasured rather than estimated, since a number here would be invented.
+
 ## String case
 
 `"West"` and `"west"` are different values, deliberately: case distinguishes
