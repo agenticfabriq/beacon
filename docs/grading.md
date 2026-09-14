@@ -103,7 +103,8 @@ BIRD's letter; measured cost, 1 case in 2,899.
 BIRD's `calculate_ex` compares `set(pred) == set(gold)` over raw driver tuples
 and normalises nothing. Beacon canonicalises every cell before either metric
 compares it — `canonicalize_cell`: temporal values to ISO strings, Decimals to
-floats, **surrounding whitespace stripped**, NULL left as NULL. Rows that
+floats, **surrounding whitespace stripped**, NULL left as NULL, and bools left
+as bools (True is not 1). Rows that
 crossed an engine or a JSON boundary no longer share one driver's spellings, so
 without this the comparison grades transport rather than meaning.
 
