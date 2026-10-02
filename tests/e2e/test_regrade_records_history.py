@@ -285,9 +285,48 @@ def test_an_undecided_ERROR_is_restated_when_the_headline_moves_to_a_decided_met
 
 
 def test_a_still_undecided_grade_stays_ERROR(session: Session, db_url: str) -> None:
-    """Restatable is not restated: a regrade at the same version re-derives ERROR."""
+    """Restatable is not restated: a newer version that still cannot decide re-derives ERROR."""
     _regrade_undecided_to_error(session, db_url)
+    with (
+        patch("beacon_graders.comparison.MAX_CHOICES", 3),
+        patch.object(ResultSetMatchGrader, "version", "v-next"),
+    ):
+        assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"
+    graded = session.scalar(sa.select(Verdict).where(Verdict.grader_version == "v-next"))
+    assert graded is not None, "the newer version must have graded, not skipped"
+
+
+def test_a_grader_that_raised_keeps_its_ERROR(session: Session, db_url: str) -> None:
+    """compose() gives ERROR when a grader raises, with no runner error and a criterion="error"
+    verdict. An undecided verdict a later regrade writes beside it must not make that ERROR look
+    like an undecided grade's."""
+    _seed(
+        session,
+        stored_outcome=VerdictOutcome.ERROR,
+        verdict_passes=False,
+        with_current_verdict=False,
+        headline="got_facts",
+        **_UNDECIDABLE,
+    )
+    result = session.scalar(sa.select(Result))
+    assert result is not None
+    VerdictRepo(session).create(
+        team_id=result.team_id,
+        result_id=result.id,
+        grader="result_set_match",
+        grader_version="v0",
+        metric="",
+        criterion="error",
+        bool_value=None,
+        value=0.0,
+        justification="grader raised: RuntimeError()",
+        raw_output={"exception_type": "RuntimeError"},
+    )
+    session.commit()
     with patch("beacon_graders.comparison.MAX_CHOICES", 3):
+        assert _run_regrade(db_url) == 0
+    with patch.object(ResultSetMatchGrader, "version", "v-next"):
         assert _run_regrade(db_url) == 0
     assert _outcome(session) == "ERROR"
 

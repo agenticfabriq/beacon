@@ -65,24 +65,27 @@ def outcome_is_the_graders_to_restate(
 def grading_left_it_undecided(session: Any, result: Result, metrics: tuple[str, ...]) -> bool:
     """Whether this result's ERROR came from a verdict that could not be decided.
 
-    The runner's own failures carry their error text on the result; an ERROR
-    with none, beside a correctness verdict on one of the grader's metrics
-    whose bool is null, is an undecided grade -- compose() and this script both
-    give ERROR for exactly that. Asked before the regrade writes any verdict,
-    so it describes how the ERROR arose, not the grade about to replace it.
+    The runner's own failures carry their error text on the result, and a
+    grader that RAISED leaves a `criterion="error"` verdict -- both stay final.
+    What remains, an ERROR beside a correctness verdict on one of the grader's
+    metrics whose bool is null, is an undecided grade. Asked before the regrade
+    writes any verdict, so it describes how the ERROR arose, not the grade about
+    to replace it.
     """
     if str(result.outcome) != "ERROR" or result.error is not None:
         return False
+
+    def count(*where: Any) -> int:
+        query = sa.select(sa.func.count()).select_from(Verdict)
+        return int(session.scalar(query.where(Verdict.result_id == result.id, *where)) or 0)
+
+    if count(Verdict.criterion == "error"):
+        return False
     return bool(
-        session.scalar(
-            sa.select(sa.func.count())
-            .select_from(Verdict)
-            .where(
-                Verdict.result_id == result.id,
-                Verdict.criterion == "correctness",
-                Verdict.metric.in_(metrics),
-                Verdict.bool_value.is_(None),
-            )
+        count(
+            Verdict.criterion == "correctness",
+            Verdict.metric.in_(metrics),
+            Verdict.bool_value.is_(None),
         )
     )
 
