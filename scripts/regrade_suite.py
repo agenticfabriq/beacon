@@ -20,6 +20,7 @@ import sys
 from typing import Any
 
 import sqlalchemy as sa
+from beacon_graders.composer import outcome_from_headline
 from beacon_graders.graders.result_set_match import ResultSetMatchGrader, explicit_columns
 from beacon_runner.types import EvalItem as RunnerItem
 from beacon_runner.types import ExecutionResult, ExecutionStep
@@ -154,7 +155,7 @@ def main() -> int:
             verdict_repo = VerdictRepo(session)
             history = OutcomeHistoryRepo(session)
             graded = skipped = flipped = orderless = current = 0
-            rederived = 0
+            rederived = undecided = 0
             # One entry per outcome that MOVES, with the value it moved
             # from. That before-value is what turns recovery from a
             # re-derivation into arithmetic.
@@ -275,10 +276,13 @@ def main() -> int:
                         skipped += 1
                         continue
                     verdicts = grader.grade(shim_item, shim_result)
-                    by_metric = {}
+                    # None stays None: a grader that could not decide (got-facts
+                    # past its search budget) is not a False, and bool() here
+                    # made it one -- and so a FAIL below.
+                    by_metric: dict[str, bool | None] = {}
                     for verdict in verdicts:
                         metric = verdict.metric or grader.metric or ""
-                        by_metric[metric] = bool(verdict.bool_value)
+                        by_metric[metric] = verdict.bool_value
                         verdict_repo.create(
                             team_id=result.team_id,
                             result_id=result.id,
@@ -300,9 +304,12 @@ def main() -> int:
                     if outcome_is_the_graders_to_restate(
                         dict(item_row.item_input or {}), str(result.outcome)
                     ):
-                        derived = (
-                            VerdictOutcome.PASS if by_metric.get(headline) else VerdictOutcome.FAIL
-                        )
+                        # ERROR for an undecided headline, as compose() gives it. It
+                        # is final: this script never re-derives an ERROR, so a later
+                        # grader version that can decide will not reach it -- the
+                        # same as for a grader that raised.
+                        derived = VerdictOutcome(outcome_from_headline(by_metric, headline))
+                        undecided += int(derived is VerdictOutcome.ERROR)
                         # Same reason as the already-current branch above: every
                         # re-derivation is attributed, not only the flips, or a
                         # derivation filter reads a partial denominator.
@@ -343,7 +350,8 @@ def main() -> int:
             print(
                 f"outcomes  {flipped} flipped under the headline derivation "
                 f"({rederived} of them from a verdict already at this version, "
-                f"where only the derivation was stale)"
+                f"where only the derivation was stale); {undecided} ERROR where the "
+                f"headline verdict could not be decided"
             )
             # The record goes in the SAME transaction as the outcomes it
             # describes, so an event exists exactly when the change did. On a

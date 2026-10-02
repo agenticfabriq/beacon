@@ -17,6 +17,7 @@ from beacon_graders.comparison import (
     diagnose,
     got_facts,
 )
+from beacon_graders.projection_search import ProjectionSearchUndecided
 from beacon_graders.tolerance import Tolerance
 from beacon_graders.types import GraderKind, Verdict
 
@@ -34,7 +35,11 @@ _STATEMENT_TIMEOUT_DIALECTS = frozenset({"postgresql"})
 
 class ExecutionGroundedSqlGrader:
     name = "execution_grounded_sql"
-    version = "v1"
+    # v2: got-facts searches every projection that can hold gold's rows instead
+    # of the first 100, and is undecided (bool_value None), not False, where
+    # the search cannot decide within its budget -- or meets cells it cannot
+    # compare, which used to raise out of grade() and lose both verdicts.
+    version = "v2"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome. grade() also emits a second,
     # tolerant verdict under "got_facts"; the composer stamps this metric only
@@ -122,7 +127,11 @@ class ExecutionGroundedSqlGrader:
             # Curated gold outranks the ORDER BY heuristic.
             order_sensitive = not tolerance.row_order_insensitive
         passed = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
-        facts = passed or got_facts(candidate, gold, tolerance)
+        undecided: str | None = None
+        try:
+            facts = passed or got_facts(candidate, gold, tolerance)
+        except ProjectionSearchUndecided as exc:
+            facts, undecided = False, str(exc)
         mismatch: Mismatch | None = (
             None if passed else diagnose(candidate, gold, order_sensitive, tolerance)
         )
@@ -161,14 +170,18 @@ class ExecutionGroundedSqlGrader:
                 grader_version=self.version,
                 metric="got_facts",
                 criterion="correctness",
-                bool_value=facts,
-                value=1.0 if facts else 0.0,
+                bool_value=None if undecided else facts,
+                value=None if undecided else 1.0 if facts else 0.0,
                 justification=(
-                    "Gold's data is present in the candidate (shape-tolerant)."
+                    f"Undecided: {undecided}. Not a miss: the search stopped before it could "
+                    "say whether some column projection holds gold's data."
+                    if undecided
+                    else "Gold's data is present in the candidate (shape-tolerant)."
                     if facts
                     else "Gold's data is not present in the candidate, in any column projection."
                 ),
-                raw_output={"exact_match": passed},
+                raw_output={"exact_match": passed}
+                | ({"undecided": undecided} if undecided else {}),
             ),
         ]
 

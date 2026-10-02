@@ -758,3 +758,85 @@ def test_the_scope_describes_the_QUESTION_not_the_answer(
     assert facts.bool_value is expected_bool
     assert facts.raw_output is not None
     assert facts.raw_output["scope"] == "subset"
+
+
+def _wide(columns: int, at: tuple[int, ...], gold_rows: list[list[Any]]) -> list[list[Any]]:
+    """Candidate rows `columns` wide with gold's cells at `at` and distinct noise elsewhere."""
+    rows = []
+    for r, g in enumerate(gold_rows):
+        row: list[Any] = [f"noise{c}-{r}" for c in range(columns)]
+        for j, c in enumerate(at):
+            row[c] = g[j]
+        rows.append(row)
+    return rows
+
+
+def test_a_wide_answer_holding_the_facts_is_got_facts() -> None:
+    """The search used to stop after 100 projections and answer False. Gold's three columns sit
+    at 60, 70 and 79 of 80: C(80, 3) = 82,160 projections, the match far past the 100th."""
+    gold_rows = [[f"k{i}", i + 0.5, i * 3] for i in range(5)]
+    gold = _gold(gold_rows, columns=["k", "v", "n"])
+    exact, facts = _grade(gold, _push(_wide(80, (60, 70, 79), gold_rows)))
+
+    assert exact.bool_value is False
+    assert facts.bool_value is True
+    assert "undecided" not in facts.raw_output
+
+
+def _undecidable(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Every column holds both flags, so every pair survives pruning and none holds gold's rows;
+    with the budget at 3 projections the search cannot get through them."""
+    import beacon_graders.comparison as comparison
+
+    monkeypatch.setattr(comparison, "MAX_CHOICES", 3)
+    gold = _gold([[True, False], [False, True]], columns=["a", "b"])
+    return gold, _push([[True] * 8, [False] * 8])
+
+
+def test_a_search_that_cannot_decide_is_undecided_not_a_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gold, push = _undecidable(monkeypatch)
+    exact, facts = _grade(gold, push)
+
+    assert exact.bool_value is False  # the strict reading never searches, so never gives up
+    assert facts.bool_value is None
+    assert facts.value is None
+    assert facts.justification.startswith("Undecided: more than 3 projections")
+    assert "projections survive pruning" in facts.raw_output["undecided"]
+    assert facts.raw_output["scope"] == "full"
+    # The control: at the shipped budget the same answer is decided -- and is a miss.
+    monkeypatch.undo()
+    _, decided = _grade(gold, push)
+    assert decided.bool_value is False
+    assert "undecided" not in decided.raw_output
+
+
+def test_an_accepted_result_holding_the_facts_settles_an_undecided_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gold is a SET of accepted results: one that matches decides, whatever another could not."""
+    gold, push = _undecidable(monkeypatch)
+    either = _accepted(_table(gold["columns"], gold["rows"]), _table(["a"], [[True], [False]]))
+    _, facts = _grade(either, push)
+
+    assert facts.bool_value is True
+    assert facts.raw_output["matched_accepted_index"] == 1
+    assert "undecided" not in facts.raw_output
+
+
+def test_an_undecided_headline_composes_error_not_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A suite whose headline is got-facts must not score an undecided search as a wrong answer.
+    The composer skips a verdict with no bool; with nothing else to decide, that is ERROR, the
+    instrument's own label -- never FAIL, which would blame the model."""
+    from beacon_graders.composer import VerdictComposer, outcome_from_headline
+    from beacon_graders.types import VerdictOutcome
+
+    gold, push = _undecidable(monkeypatch)
+    composer = VerdictComposer(graders=[ResultSetMatchGrader()], primary_metric="got_facts")
+    verdicts, outcome = composer.compose(_item(gold), _result(push))
+
+    assert outcome is VerdictOutcome.ERROR
+    # The scripts that grade outside compose() derive the same outcome from the same verdicts.
+    by_metric = {v.metric or "": v.bool_value for v in verdicts}
+    assert outcome_from_headline(by_metric, "got_facts") is outcome

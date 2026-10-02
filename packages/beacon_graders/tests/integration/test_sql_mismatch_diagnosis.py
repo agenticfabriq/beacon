@@ -176,25 +176,26 @@ def test_an_exact_match_passes_got_facts_trivially(grader: ExecutionGroundedSqlG
     assert facts.bool_value is True
 
 
-def test_the_projection_search_is_bounded() -> None:
-    """A pathological SELECT * must not stall the grader; past the cap the
-    tolerant reading gives up and says no."""
-    from beacon_graders.comparison import ResultSet
+def test_the_projection_search_is_bounded_and_does_not_guess() -> None:
+    """A pathological SELECT * must not stall the grader, and must not be marked wrong for being
+    wide. The search used to stop after 100 projections and say no -- which failed this answer,
+    whose gold pair is the LAST of C(16,2)=120. Pruning reaches it at once. Where pruning cannot
+    narrow anything (every column could hold either gold column), the search stops at its budget
+    and is undecided rather than a guessed no."""
+    from beacon_graders.comparison import ResultSet, got_facts
+    from beacon_graders.projection_search import MAX_CHOICES, ProjectionSearchUndecided
     from beacon_graders.tolerance import Tolerance
 
-    grader = ExecutionGroundedSqlGrader(engine_factory=lambda _item: None)  # type: ignore[arg-type, return-value]
-    wide = ResultSet(
-        columns=[f"c{i}" for i in range(16)],
-        # the gold pair exists only as the LAST of C(16,2)=120 projections,
-        # which is past the cap of 100
-        rows=[(*range(100, 114), 7777, 8888)],
-    )
+    wide = ResultSet(columns=[f"c{i}" for i in range(16)], rows=[(*range(100, 114), 7777, 8888)])
     gold = ResultSet(columns=["x", "y"], rows=[(7777, 8888)])
+    assert got_facts(wide, gold, Tolerance()) is True
 
-    from beacon_graders.comparison import got_facts
-
-    _ = grader
-    assert got_facts(wide, gold, Tolerance()) is False
+    # C(150, 2) = 11,175 pairs of columns, every one a possible fit and none a match.
+    flags = ResultSet(columns=[f"c{i}" for i in range(150)], rows=[(True,) * 150, (False,) * 150])
+    pair = ResultSet(columns=["a", "b"], rows=[(True, False), (False, True)])
+    assert MAX_CHOICES < 150 * 149 // 2
+    with pytest.raises(ProjectionSearchUndecided):
+        got_facts(flags, pair, Tolerance())
 
 
 def test_the_strict_verdict_still_decides_the_outcome() -> None:

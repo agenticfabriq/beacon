@@ -310,3 +310,51 @@ def test_the_regrade_event_is_written_INSIDE_the_rolled_back_scope() -> None:
     assert all(id(node) in contained for node in adds), (
         "session.add(event) must be inside the scope that commits it"
     )
+
+
+@pytest.mark.parametrize("script", ["regrade_suite.py", "import_spider2_run.py"])
+def test_an_undecided_headline_is_never_derived_as_FAIL(script: str) -> None:
+    """Both scripts grade outside compose() and derive the outcome themselves, and both did it
+    as `PASS if by_metric.get(headline) else FAIL` over `bool(v.bool_value)` -- which turns a
+    got-facts the grader could not decide (bool None, past its search budget) into a FAIL,
+    while compose() gives the same result ERROR and the matrix leaves the verdict out of the
+    got-facts rate. They now derive through the composer's own `outcome_from_headline`.
+
+    Structural for the same reason as the test above: the behaviour needs a database.
+    """
+    import ast
+
+    source = (Path(__file__).resolve().parents[1] / "scripts" / script).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "outcome_from_headline" in calls
+    coerced = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "bool"
+        and node.args
+        and isinstance(node.args[0], ast.Attribute)
+        and node.args[0].attr == "bool_value"
+    ]
+    assert not coerced, f"{script} coerces a verdict's bool_value, turning None into False"
+
+
+def test_the_derivation_says_ERROR_for_an_undecided_headline_as_compose_does() -> None:
+    from beacon_graders.composer import outcome_from_headline
+    from beacon_graders.types import VerdictOutcome
+
+    assert outcome_from_headline({"got_facts": None}, "got_facts") is VerdictOutcome.ERROR
+    assert outcome_from_headline({"got_facts": True}, "got_facts") is VerdictOutcome.PASS
+    assert outcome_from_headline({"got_facts": False}, "got_facts") is VerdictOutcome.FAIL
+    # A headline the grader did not emit stays FAIL, as before undecided verdicts existed.
+    assert outcome_from_headline({"exact_match": True}, "got_facts") is VerdictOutcome.FAIL
+    # The other metric being undecided does not touch the headline.
+    assert outcome_from_headline({"exact_match": True, "got_facts": None}, "exact_match") is (
+        VerdictOutcome.PASS
+    )
