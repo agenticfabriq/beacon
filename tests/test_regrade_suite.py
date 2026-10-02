@@ -28,6 +28,18 @@ def test_the_runners_own_statement_stands(outcome: str) -> None:
     assert outcome_is_the_graders_to_restate(ANSWERABLE, outcome) is False
 
 
+def test_an_ERROR_from_an_undecided_grade_is_the_graders_to_restate() -> None:
+    """Only ERROR changes hands, and only when the caller has shown it was the grader's."""
+    assert outcome_is_the_graders_to_restate(ANSWERABLE, "ERROR", error_is_an_undecided_grade=True)
+    for outcome in ("DEFER", "TIMEOUT", "None"):
+        assert not outcome_is_the_graders_to_restate(
+            ANSWERABLE, outcome, error_is_an_undecided_grade=True
+        )
+    assert not outcome_is_the_graders_to_restate(
+        UNANSWERABLE, "ERROR", error_is_an_undecided_grade=True
+    )
+
+
 @pytest.mark.parametrize("outcome", ["PASS", "FAIL"])
 def test_a_declared_unanswerable_item_is_never_re_derived(outcome: str) -> None:
     """The refusal contract owns this outcome; a result-set match does not.

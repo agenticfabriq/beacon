@@ -33,13 +33,22 @@ from beacon_storage.repository.outcome_history import OutcomeHistoryRepo
 from beacon_storage.repository.verdicts import VerdictRepo
 
 
-def outcome_is_the_graders_to_restate(item_input: dict[str, Any], outcome: str) -> bool:
+def outcome_is_the_graders_to_restate(
+    item_input: dict[str, Any], outcome: str, *, error_is_an_undecided_grade: bool = False
+) -> bool:
     """Whether a regrade may re-derive this result's outcome from the headline.
 
     Two results are off limits. One whose outcome is not PASS/FAIL -- DEFER,
     ERROR and TIMEOUT are the runner's statement about whether a query was
-    produced at all. And one whose item DECLARES itself unanswerable, where the
-    refusal contract decides the outcome and the grader has no say at all
+    produced at all -- with one exception: an ERROR that is the GRADER's, given
+    because a headline verdict could not be decided (got-facts past its search
+    budget) on a result that ran cleanly. A later grader version that can
+    decide, or a headline switched to a metric that was decided, must reach it,
+    or the first undecided grade would be final. The caller establishes that
+    provenance from the stored rows (`grading_left_it_undecided`).
+
+    And one whose item DECLARES itself unanswerable, where the refusal
+    contract decides the outcome and the grader has no say at all
     (composer.py): refusing IS the right answer there, answering is the wrong
     one whatever came back. Re-deriving that from a result-set comparison would
     credit an over-answer whose SQL happened to match gold, and fail a refusal
@@ -48,7 +57,34 @@ def outcome_is_the_graders_to_restate(item_input: dict[str, Any], outcome: str) 
     """
     if item_input.get("answerable") is False:
         return False
+    if outcome == "ERROR":
+        return error_is_an_undecided_grade
     return outcome in {"PASS", "FAIL"}
+
+
+def grading_left_it_undecided(session: Any, result: Result, metrics: tuple[str, ...]) -> bool:
+    """Whether this result's ERROR came from a verdict that could not be decided.
+
+    The runner's own failures carry their error text on the result; an ERROR
+    with none, beside a correctness verdict on one of the grader's metrics
+    whose bool is null, is an undecided grade -- compose() and this script both
+    give ERROR for exactly that. Asked before the regrade writes any verdict,
+    so it describes how the ERROR arose, not the grade about to replace it.
+    """
+    if str(result.outcome) != "ERROR" or result.error is not None:
+        return False
+    return bool(
+        session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Verdict)
+            .where(
+                Verdict.result_id == result.id,
+                Verdict.criterion == "correctness",
+                Verdict.metric.in_(metrics),
+                Verdict.bool_value.is_(None),
+            )
+        )
+    )
 
 
 def rows_have_unrecoverable_column_order(output: dict[str, Any]) -> bool:
@@ -170,6 +206,7 @@ def main() -> int:
                     if rows_have_unrecoverable_column_order(dict(result.output or {})):
                         orderless += 1
                         continue
+                    undecided_before = grading_left_it_undecided(session, result, grader.emits)
                     # One verdict per (result, metric, grader, version) -- the
                     # schema enforces it, and a re-run must be a no-op, not a
                     # crash into the unique index.
@@ -203,7 +240,9 @@ def main() -> int:
                         # DERIVATION is not skipped -- it reads the verdict
                         # already stored for the headline metric.
                         if not outcome_is_the_graders_to_restate(
-                            dict(item_row.item_input or {}), str(result.outcome)
+                            dict(item_row.item_input or {}),
+                            str(result.outcome),
+                            error_is_an_undecided_grade=undecided_before,
                         ):
                             continue
                         stored = session.scalar(
@@ -214,9 +253,15 @@ def main() -> int:
                                 Verdict.metric == headline,
                             )
                         )
-                        if stored is None or stored.bool_value is None:
+                        if stored is None:
                             continue
-                        derived = VerdictOutcome.PASS if stored.bool_value else VerdictOutcome.FAIL
+                        # The same rule as the freshly graded branch: an undecided
+                        # headline derives ERROR, which it used to skip -- leaving
+                        # whatever outcome an earlier rule had written.
+                        derived = VerdictOutcome(
+                            outcome_from_headline({headline: stored.bool_value}, headline)
+                        )
+                        undecided += int(derived is VerdictOutcome.ERROR)
                         # Recorded for EVERY result this regrade re-derived, not
                         # only the ones that moved. `record` already skips an
                         # unchanged outcome under an unchanged derivation, so
@@ -302,12 +347,13 @@ def main() -> int:
                     # Verdicts above are recorded as evidence either way; only the
                     # outcome is not always the grader's to restate.
                     if outcome_is_the_graders_to_restate(
-                        dict(item_row.item_input or {}), str(result.outcome)
+                        dict(item_row.item_input or {}),
+                        str(result.outcome),
+                        error_is_an_undecided_grade=undecided_before,
                     ):
-                        # ERROR for an undecided headline, as compose() gives it. It
-                        # is final: this script never re-derives an ERROR, so a later
-                        # grader version that can decide will not reach it -- the
-                        # same as for a grader that raised.
+                        # ERROR for an undecided headline, as compose() gives it. Not
+                        # final: `grading_left_it_undecided` lets a later regrade
+                        # restate it once a verdict decides.
                         derived = VerdictOutcome(outcome_from_headline(by_metric, headline))
                         undecided += int(derived is VerdictOutcome.ERROR)
                         # Same reason as the already-current branch above: every
