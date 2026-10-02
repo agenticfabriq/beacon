@@ -8,7 +8,7 @@ from beacon_graders.errors import BeaconGraderError
 from beacon_graders.types import GraderKind, Verdict, VerdictOutcome
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from beacon_runner.types import EvalItem, ExecutionResult
 
@@ -38,6 +38,21 @@ def _is_deferred(result: ExecutionResult) -> bool:
     if getattr(result, "deferred", False):
         return True
     return bool(result.output.get("deferred", False))
+
+
+def outcome_from_headline(by_metric: Mapping[str, bool | None], headline: str) -> VerdictOutcome:
+    """The outcome a result's headline verdict states, for the paths that grade outside compose().
+
+    PASS or FAIL from the verdict's bool -- and ERROR when the grader emitted the headline but could
+    not decide it (bool None: got-facts past its search budget). ERROR is what compose() gives the
+    same result, since it skips a verdict with no bool and finds nothing else to decide; FAIL would
+    blame the system measured for the grader's limit. A headline the grader did not emit at all
+    stays FAIL, as it was before undecided verdicts existed.
+    """
+    value = by_metric.get(headline, False)
+    if value is None:
+        return VerdictOutcome.ERROR
+    return VerdictOutcome.PASS if value else VerdictOutcome.FAIL
 
 
 class AmbiguousPrimaryMetricError(BeaconGraderError):

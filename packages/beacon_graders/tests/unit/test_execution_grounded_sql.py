@@ -201,3 +201,36 @@ def test_applicable_only_for_sql_outputs(
     json_result = make_result(output={"answer": "x"}, output_kind="answer")
     assert grader.applicable(item, sql_result) is True
     assert grader.applicable(item, json_result) is False
+
+
+def test_got_facts_is_undecided_when_the_search_cannot_decide(
+    grader: ExecutionGroundedSqlGrader,
+    make_item: Callable[..., EvalItem],
+    make_result: Callable[..., ExecutionResult],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every candidate column holds both values, so every pair survives pruning and none holds
+    gold's rows; at a budget of 3 projections the verdict is undecided, not False."""
+    import beacon_graders.comparison as comparison
+
+    item = make_item(ground_truth={"sql": "SELECT 1, 0 UNION ALL SELECT 0, 1"})
+    result = make_result(
+        output={"sql": "SELECT 1,1,1,1,1,1,1,1 UNION ALL SELECT 0,0,0,0,0,0,0,0"},
+        output_kind="sql",
+    )
+    monkeypatch.setattr(comparison, "MAX_CHOICES", 3)
+    exact, facts = grader.grade(item, result)
+
+    assert exact.bool_value is False
+    assert facts.metric == "got_facts"
+    assert facts.bool_value is None
+    assert facts.value is None
+    assert facts.justification.startswith("Undecided: more than 3 projections")
+    assert facts.raw_output is not None
+    assert facts.raw_output["exact_match"] is False
+    # The control: at the shipped budget the same answer is decided -- and is a miss.
+    monkeypatch.undo()
+    _, decided = grader.grade(item, result)
+    assert decided.bool_value is False
+    assert decided.raw_output is not None
+    assert "undecided" not in decided.raw_output

@@ -40,6 +40,7 @@ from beacon_benchmarks.spider2_lite.ingest_items import (
     ingest_spider2_tasks,
     load_spider2_tasks,
 )
+from beacon_graders.composer import outcome_from_headline
 from beacon_graders.graders.result_set_match import ResultSetMatchGrader, column_order_for
 from beacon_iam.auth.oidc import OidcClaims
 from beacon_iam.service.users import UserService
@@ -294,6 +295,9 @@ def main() -> int:
             headline = "exact_match" if args.strict else HEADLINE_METRIC
             derived_counts: dict[str, int] = {}
             beacon_exact = beacon_facts = beacon_graded = disagreements = 0
+            # Headlines the grader could not decide (ERROR), and got-facts
+            # verdicts it could not decide (left out of the got-facts count).
+            undecided = facts_undecided = 0
             for row in rows:
                 case_id = str(row.get("case_id", ""))
                 item_row = items_by_case.get(case_id)
@@ -360,13 +364,13 @@ def main() -> int:
                 # whether a query was produced, not whether it was right, and
                 # deriving it from "no PASS verdict" would turn every refusal
                 # into a wrong answer.
-                by_metric = {
-                    (v.metric or grader.metric): bool(v.bool_value) for v in graded_verdicts
+                # None stays None: an undecided got-facts is not a False.
+                by_metric: dict[str, bool | None] = {
+                    (v.metric or grader.metric or ""): v.bool_value for v in graded_verdicts
                 }
                 if graded_verdicts:
-                    verdict = (
-                        VerdictOutcome.PASS if by_metric.get(headline) else VerdictOutcome.FAIL
-                    )
+                    verdict = VerdictOutcome(outcome_from_headline(by_metric, headline))
+                    undecided += int(verdict is VerdictOutcome.ERROR)
                 else:
                     verdict = _verdict(outcome, strict=args.strict)
                 derived_counts[verdict.value] = derived_counts.get(verdict.value, 0) + 1
@@ -401,12 +405,13 @@ def main() -> int:
                     )
                 if graded_verdicts:
                     beacon_graded += 1
-                    beacon_exact += int(by_metric.get("exact_match", False))
-                    beacon_facts += int(by_metric.get("got_facts", False))
-                    if by_metric.get("got_facts", False) != (
-                        outcome in {"correct", "correct_facts"}
-                    ):
-                        disagreements += 1
+                    beacon_exact += int(bool(by_metric.get("exact_match", False)))
+                    facts = by_metric.get("got_facts", False)
+                    if facts is None:
+                        facts_undecided += 1
+                    else:
+                        beacon_facts += int(facts)
+                        disagreements += int(facts != (outcome in {"correct", "correct_facts"}))
             RunRepo(session).mark_completed(run.id)
 
             # The guard, asserted rather than eyeballed: derivation must not
@@ -417,11 +422,13 @@ def main() -> int:
                     f"{counts.get('deferred_wrongly', 0)} deferrals in the report, "
                     f"{derived_counts.get('DEFER', 0)} DEFER results out"
                 )
-            if derived_counts.get("ERROR", 0) != counts.get("error", 0):
+            # ERROR out is the report's errors plus the headlines beacon could not
+            # decide; anything else moving the count is a derivation bug.
+            if derived_counts.get("ERROR", 0) != counts.get("error", 0) + undecided:
                 raise SystemExit(
                     f"derivation changed the ERROR count: "
-                    f"{counts.get('error', 0)} errors in the report, "
-                    f"{derived_counts.get('ERROR', 0)} ERROR results out"
+                    f"{counts.get('error', 0)} errors in the report and {undecided} "
+                    f"undecided headlines, {derived_counts.get('ERROR', 0)} ERROR results out"
                 )
 
             total = len(rows)
@@ -451,8 +458,9 @@ def main() -> int:
                 print(
                     f"beacon    {grader.name} {grader.version}: "
                     f"exact {beacon_exact}/{beacon_graded}, "
-                    f"got-facts {beacon_facts}/{beacon_graded}, "
-                    f"disagrees with mnemiq on {disagreements}"
+                    f"got-facts {beacon_facts}/{beacon_graded - facts_undecided}"
+                    + (f" ({facts_undecided} undecided, left out)" if facts_undecided else "")
+                    + f", disagrees with mnemiq on {disagreements}"
                 )
             if meta:
                 print(f"llm calls {meta.get('llm_calls', 0)}   tokens {meta.get('tokens', 0)}")

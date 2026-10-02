@@ -12,7 +12,7 @@ suite untouched.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from beacon_graders.graders.result_set_match import ResultSetMatchGrader
 from beacon_storage.models.eval_items import EvalItemTier
 from beacon_storage.models.outcome_history import Derivation, ResultOutcome
-from beacon_storage.models.runs import HarnessMode, ResultStatus, VerdictOutcome
+from beacon_storage.models.runs import HarnessMode, Result, ResultStatus, Verdict, VerdictOutcome
 from beacon_storage.models.suites import Suite
 from beacon_storage.repository.eval_items import EvalItemRepo
 from beacon_storage.repository.results import ResultRepo
@@ -42,8 +42,12 @@ def _seed(
     session: Session,
     *,
     stored_outcome: VerdictOutcome,
-    verdict_passes: bool,
+    verdict_passes: bool | None,
     with_current_verdict: bool = True,
+    headline: str = "exact_match",
+    gold: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
+    error: str | None = None,
 ) -> None:
     """One result whose stored outcome may or may not match its verdict.
 
@@ -59,7 +63,7 @@ def _seed(
         name=_SUITE,
         description="",
         method="manual",
-        suite_metadata={"headline_metric": "exact_match"},
+        suite_metadata={"headline_metric": headline},
         created_by=user.id,
     )
     session.add(suite)
@@ -71,7 +75,7 @@ def _seed(
         suite=_SUITE,
         team_id=team.id,
         item_input={"question": "q"},
-        gold_answer={"rows": [[1]], "columns": ["a"]},
+        gold_answer=gold or {"rows": [[1]], "columns": ["a"]},
         item_metadata={},
         created_by=user.id,
     )
@@ -101,7 +105,7 @@ def _seed(
         run_id=run.id,
         item_id=str(item.item_id),
         attempt_idx=0,
-        output={"rows": [[1]], "columns": ["a"]},
+        output=output or {"rows": [[1]], "columns": ["a"]},
         # "sql": ResultSetMatchGrader.applicable requires it, so "rows" made
         # the grader inapplicable and the freshly-graded branch never ran.
         output_kind="sql",
@@ -110,7 +114,7 @@ def _seed(
         runtime_ms=1,
         status=ResultStatus.COMPLETED,
         outcome=stored_outcome,
-        error=None,
+        error=error,
     )
     if with_current_verdict:
         VerdictRepo(session).create(
@@ -118,10 +122,10 @@ def _seed(
             result_id=result.id,
             grader=grader.name,
             grader_version=grader.version,
-            metric="exact_match",
+            metric=headline,
             criterion="correctness",
             bool_value=verdict_passes,
-            value=1.0 if verdict_passes else 0.0,
+            value=None if verdict_passes is None else 1.0 if verdict_passes else 0.0,
             justification="seeded",
             raw_output={},
         )
@@ -215,3 +219,152 @@ def test_the_freshly_graded_branch_also_attributes_every_result(
     assert derivation is not None
     assert derivation.metric == "exact_match"
     assert derivation.grader_version == ResultSetMatchGrader().version
+
+
+# Every column holds both flags, so every pair survives the got-facts pruning and none holds
+# gold's rows: at a budget of 3 projections the search cannot decide; at the shipped budget it
+# decides False. Exact match is False either way.
+_UNDECIDABLE = {
+    "gold": {"rows": [[True, False], [False, True]], "columns": ["a", "b"]},
+    "output": {"rows": [[True] * 8, [False] * 8], "columns": [f"c{i}" for i in range(8)]},
+}
+
+
+def _outcome(session: Session) -> str:
+    session.expire_all()
+    return str(session.scalar(sa.select(Result.outcome)))
+
+
+def _regrade_undecided_to_error(session: Session, db_url: str) -> None:
+    """A FAIL graded at a budget too small to decide got-facts: ERROR, not FAIL."""
+    _seed(
+        session,
+        stored_outcome=VerdictOutcome.FAIL,
+        verdict_passes=False,
+        with_current_verdict=False,
+        headline="got_facts",
+        **_UNDECIDABLE,
+    )
+    with patch("beacon_graders.comparison.MAX_CHOICES", 3):
+        assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"
+    facts = session.scalar(sa.select(Verdict).where(Verdict.metric == "got_facts"))
+    assert facts is not None
+    assert facts.bool_value is None
+
+
+def test_an_undecided_headline_regrades_to_ERROR_and_a_later_version_restates_it(
+    session: Session, db_url: str
+) -> None:
+    """PASS/FAIL -> undecided ERROR -> decided again. A regrade never re-derived an ERROR, so
+    the first undecided grade was final: a later grader version that could decide never reached
+    it. The ERROR is the grader's own (no runner error, an undecided verdict beside it), so the
+    next version's decided verdict restates it."""
+    _regrade_undecided_to_error(session, db_url)
+
+    with patch.object(ResultSetMatchGrader, "version", "v-next"):
+        assert _run_regrade(db_url) == 0
+
+    assert _outcome(session) == "FAIL"
+
+
+def test_an_undecided_ERROR_is_restated_when_the_headline_moves_to_a_decided_metric(
+    session: Session, db_url: str
+) -> None:
+    """The same ERROR, reached through the already-current branch: the suite switches its
+    headline to exact_match, which was decided all along, at the same grader version."""
+    _regrade_undecided_to_error(session, db_url)
+    suite = session.scalar(sa.select(Suite).where(Suite.name == _SUITE))
+    assert suite is not None
+    suite.suite_metadata = {"headline_metric": "exact_match"}
+    session.commit()
+
+    assert _run_regrade(db_url) == 0
+
+    assert _outcome(session) == "FAIL"
+
+
+def test_a_still_undecided_grade_stays_ERROR(session: Session, db_url: str) -> None:
+    """Restatable is not restated: a newer version that still cannot decide re-derives ERROR."""
+    _regrade_undecided_to_error(session, db_url)
+    with (
+        patch("beacon_graders.comparison.MAX_CHOICES", 3),
+        patch.object(ResultSetMatchGrader, "version", "v-next"),
+    ):
+        assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"
+    graded = session.scalar(sa.select(Verdict).where(Verdict.grader_version == "v-next"))
+    assert graded is not None, "the newer version must have graded, not skipped"
+
+
+def test_a_grader_that_raised_keeps_its_ERROR(session: Session, db_url: str) -> None:
+    """compose() gives ERROR when a grader raises, with no runner error and a criterion="error"
+    verdict. An undecided verdict a later regrade writes beside it must not make that ERROR look
+    like an undecided grade's."""
+    _seed(
+        session,
+        stored_outcome=VerdictOutcome.ERROR,
+        verdict_passes=False,
+        with_current_verdict=False,
+        headline="got_facts",
+        **_UNDECIDABLE,
+    )
+    result = session.scalar(sa.select(Result))
+    assert result is not None
+    VerdictRepo(session).create(
+        team_id=result.team_id,
+        result_id=result.id,
+        grader="result_set_match",
+        grader_version="v0",
+        metric="",
+        criterion="error",
+        bool_value=None,
+        value=0.0,
+        justification="grader raised: RuntimeError()",
+        raw_output={"exception_type": "RuntimeError"},
+    )
+    session.commit()
+    with patch("beacon_graders.comparison.MAX_CHOICES", 3):
+        assert _run_regrade(db_url) == 0
+    with patch.object(ResultSetMatchGrader, "version", "v-next"):
+        assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"
+
+
+def test_the_runners_ERROR_is_never_restated(session: Session, db_url: str) -> None:
+    """An ERROR the runner reported keeps its error text on the result, and stays ERROR even
+    though the pushed rows would grade: whether a query was produced is not the grader's call."""
+    _seed(
+        session,
+        stored_outcome=VerdictOutcome.ERROR,
+        verdict_passes=False,
+        with_current_verdict=False,
+        headline="got_facts",
+        error="connection refused",
+        **_UNDECIDABLE,
+    )
+    # First an undecided verdict lands beside it, then a version that decides: the verdict alone
+    # must not make the runner's ERROR look like the grader's.
+    with patch("beacon_graders.comparison.MAX_CHOICES", 3):
+        assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"
+    with patch.object(ResultSetMatchGrader, "version", "v-next"):
+        assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"
+
+
+def test_an_undecided_verdict_already_at_this_version_derives_ERROR(
+    session: Session, db_url: str
+) -> None:
+    """The already-current branch read a stored undecided headline as "skip", leaving whatever an
+    earlier rule had written -- here a PASS -- beside a verdict that says it could not decide.
+    It derives the way the freshly graded branch does."""
+    _seed(
+        session,
+        stored_outcome=VerdictOutcome.PASS,
+        verdict_passes=None,
+        headline="got_facts",
+        **_UNDECIDABLE,
+    )
+    assert _run_regrade(db_url) == 0
+    assert _outcome(session) == "ERROR"

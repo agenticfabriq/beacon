@@ -37,6 +37,7 @@ from beacon_graders.comparison import (
     got_facts,
     got_facts_contained,
 )
+from beacon_graders.projection_search import ProjectionSearchUndecided
 from beacon_graders.tolerance import Tolerance
 from beacon_graders.types import GraderKind, Verdict
 
@@ -379,7 +380,14 @@ class ResultSetMatchGrader:
     # verdict written since 361a855 would keep an unrecorded scope for ever and
     # be reported as "already at this version". A raw_output key the aggregate
     # depends on is part of the reading, not decoration.
-    version = "v8"
+    # v9: got-facts searches every projection that can hold gold's rows instead
+    # of the first 100, so a wide answer holding the facts is no longer FAIL;
+    # where the search cannot decide within its budget the verdict is
+    # undecided (bool_value None), which no rate counts as a miss. Cells the
+    # reading cannot compare (an infinity against a fraction) used to raise out
+    # of grade() and lose both verdicts; they now leave got-facts undecided
+    # unless another projection matches.
+    version = "v9"
     kind = GraderKind.EXECUTION
     # The strict reading decides the outcome BY DEFAULT; grade() also emits
     # got_facts.
@@ -450,6 +458,9 @@ class ResultSetMatchGrader:
         facts = False
         matched_index: int | None = None
         facts_index: int | None = None
+        # Why the projection search could not decide, for the first accepted
+        # result it gave up on. It only matters if no accepted result matched.
+        undecided: str | None = None
         mismatches: list[Mismatch | None] = []
         for index, variant in enumerate(variants):
             gold = variant.result_set
@@ -474,18 +485,24 @@ class ResultSetMatchGrader:
                 )
             elif evidence_complete_v:
                 passed_v = compare_rows(candidate.rows, gold.rows, order_sensitive, tolerance)
-                facts_v = passed_v or got_facts(
-                    candidate, _project_gold(gold, variant.condition_cols), tolerance
-                )
+                try:
+                    facts_v = passed_v or got_facts(
+                        candidate, _project_gold(gold, variant.condition_cols), tolerance
+                    )
+                except ProjectionSearchUndecided as exc:
+                    facts_v, undecided = False, undecided or str(exc)
                 if not passed_v:
                     mismatch_v = diagnose(candidate, gold, order_sensitive, tolerance)
             else:
                 # A preview: the true counts agree; every visible row must be
                 # accounted for in gold. Weaker evidence, and labelled as such.
                 passed_v = contains_rows(candidate.rows, gold.rows, tolerance)
-                facts_v = passed_v or got_facts_contained(
-                    candidate, _project_gold(gold, variant.condition_cols), tolerance
-                )
+                try:
+                    facts_v = passed_v or got_facts_contained(
+                        candidate, _project_gold(gold, variant.condition_cols), tolerance
+                    )
+                except ProjectionSearchUndecided as exc:
+                    facts_v, undecided = False, undecided or str(exc)
                 if not passed_v:
                     mismatch_v = Mismatch(
                         "values",
@@ -506,6 +523,10 @@ class ResultSetMatchGrader:
         # what carried the verdict. If ANY accepted result matched the full
         # table, got-facts is true by exact match and no restriction applied.
         facts_via_projection = facts and not passed
+        # One accepted result holding the facts settles got-facts; an undecided
+        # search elsewhere does not unsettle it. Only when none matched does a
+        # search that gave up leave the verdict undecided rather than False.
+        facts_undecided = not facts and undecided is not None
 
         # Evidence in raw reads from the CLOSEST gold: the one that matched
         # exactly, else the one the facts matched (its mismatch names what
@@ -575,10 +596,15 @@ class ResultSetMatchGrader:
                 grader_version=self.version,
                 metric="got_facts",
                 criterion="correctness",
-                bool_value=facts,
-                value=1.0 if facts else 0.0,
-                justification=_facts_justification(
-                    facts, variants, facts_index, via_projection=facts_via_projection
+                bool_value=None if facts_undecided else facts,
+                value=None if facts_undecided else 1.0 if facts else 0.0,
+                justification=(
+                    f"Undecided: {undecided}. Not a miss: the search stopped before it could "
+                    "say whether some column projection holds gold's data."
+                    if facts_undecided
+                    else _facts_justification(
+                        facts, variants, facts_index, via_projection=facts_via_projection
+                    )
                 ),
                 raw_output=_facts_raw(
                     passed,
@@ -586,6 +612,7 @@ class ResultSetMatchGrader:
                     facts_index,
                     matched_index,
                     via_projection=facts_via_projection,
-                ),
+                )
+                | ({"undecided": undecided} if facts_undecided else {}),
             ),
         ]

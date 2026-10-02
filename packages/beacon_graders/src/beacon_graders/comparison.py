@@ -11,11 +11,11 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
-from itertools import combinations
 from typing import Any
 
 from beacon_runner.transport import transport_value
 
+from beacon_graders.projection_search import MAX_CHOICES, ProjectionSearchUndecided, Search
 from beacon_graders.tolerance import Tolerance
 
 # How many rows of each side to keep on the verdict. Enough to show a reader
@@ -24,9 +24,9 @@ from beacon_graders.tolerance import Tolerance
 SAMPLE_ROWS = 5
 
 # Trying every way to project a wide candidate onto the gold's arity is
-# combinatorial; past this many projections the tolerant reading gives up and
-# says so, rather than stalling the grader on a pathological SELECT *.
-MAX_PROJECTIONS = 100
+# combinatorial. It used to stop after 100 projections and score FAIL, which
+# graded wide answers that held the facts wrong; the search is pruned instead
+# (projection_search), and past its budget the verdict is undecided, not FAIL.
 
 
 def is_number(value: Any) -> bool:
@@ -265,15 +265,22 @@ def got_facts(
         return False
 
     gold_sorted = _sort_cells(gold.rows)
-    for index, keep in enumerate(combinations(range(candidate_arity), gold_arity)):
-        if index >= MAX_PROJECTIONS:
-            return False
-        projected = [tuple(row[i] for i in keep) for row in candidate.rows]
-        if compare_rows(projected, gold.rows, False, tolerance, facts_values_match):
-            return True
-        if compare_rows(_sort_cells(projected), gold_sorted, False, tolerance, facts_values_match):
-            return True
-    return False
+    search = _search(candidate, gold, candidate_arity, gold_arity, tolerance)
+    return _first_match(
+        (
+            (
+                search.positional(both_ways=True),
+                lambda p: compare_rows(p, gold.rows, False, tolerance, facts_values_match),
+            ),
+            (
+                search.cell_sorted(both_ways=True),
+                lambda p: compare_rows(
+                    _sort_cells(p), gold_sorted, False, tolerance, facts_values_match
+                ),
+            ),
+        ),
+        candidate,
+    )
 
 
 def got_facts_contained(
@@ -295,14 +302,64 @@ def got_facts_contained(
     if gold_arity == 0:
         return False
     gold_cells_sorted = _sort_cells(gold.rows)
-    for index, keep in enumerate(combinations(range(candidate_arity), gold_arity)):
-        if index >= MAX_PROJECTIONS:
-            return False
-        projected = [tuple(row[i] for i in keep) for row in candidate.rows]
-        if contains_rows(projected, gold.rows, tolerance, facts_values_match):
-            return True
-        if contains_rows(_sort_cells(projected), gold_cells_sorted, tolerance, facts_values_match):
-            return True
+    search = _search(candidate, gold, candidate_arity, gold_arity, tolerance)
+    # A preview: every pushed row must be IN gold, but gold may hold more, so only the candidate's
+    # values must be found in gold -- the conditions run one way.
+    return _first_match(
+        (
+            (
+                search.positional(both_ways=False),
+                lambda p: contains_rows(p, gold.rows, tolerance, facts_values_match),
+            ),
+            (
+                search.cell_sorted(both_ways=False),
+                lambda p: contains_rows(
+                    _sort_cells(p), gold_cells_sorted, tolerance, facts_values_match
+                ),
+            ),
+        ),
+        candidate,
+    )
+
+
+def _search(
+    candidate: ResultSet, gold: ResultSet, width: int, arity: int, tolerance: Tolerance
+) -> Search:
+    return Search(
+        candidate.rows,
+        gold.rows,
+        width,
+        arity,
+        lambda c, g: facts_values_match(c, g, tolerance),
+        tolerance.numeric_abs,
+        tolerance.numeric_rel,
+    )
+
+
+def _first_match(readings: Any, candidate: ResultSet) -> bool:
+    """Whether some surviving projection matches under its reading's own check. Raises
+    ProjectionSearchUndecided past MAX_CHOICES survivors, or when no projection matched and some
+    check met cells it could not compare -- that is not a mismatch, so it is not a verdict."""
+    tried = 0
+    uncomparable = False
+    for choices, check in readings:
+        for keep in choices:
+            tried += 1
+            if tried > MAX_CHOICES:
+                raise ProjectionSearchUndecided(
+                    f"more than {MAX_CHOICES:,} projections survive pruning"
+                )
+            projected = [tuple(row[i] for i in keep) for row in candidate.rows]
+            try:
+                if check(projected):
+                    return True
+            except (ArithmeticError, ValueError):
+                uncomparable = True
+    if uncomparable:
+        raise ProjectionSearchUndecided(
+            "cells the reading cannot compare (an infinity, a NaN, or a magnitude too large to "
+            "round) decide the remaining projections"
+        )
     return False
 
 
