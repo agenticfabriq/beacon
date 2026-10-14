@@ -155,6 +155,8 @@ class MnemiqHttpSqlSUT:
             )
         else:
             output = {"sql": sql, "item_id": item.item_id}
+            if narrowed:  # an over-answer to an unanswerable item keeps what was narrowed
+                output["narrowed"] = narrowed
             error = None
         return ExecutionResult(
             output=output,

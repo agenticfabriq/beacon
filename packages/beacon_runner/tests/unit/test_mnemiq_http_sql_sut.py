@@ -208,5 +208,9 @@ def test_a_narrowed_answer_composes_by_what_the_item_judges(
         query["answerable"] = answerable
     item = EvalItem(item_id="i", suite="s", query=query, ground_truth={}, metadata={})
     result = _sut(stub_server).invoke(item, SolutionConfig(model_id="m"))
+    # The SUT's own decision, pinned directly: an empty composer falls through to ERROR for an
+    # answerable item anyway, so the outcome alone would not see the guard (review gate).
+    assert (result.error or "").startswith("mnemiq_policy_narrowed") is (answerable is not False)
+    assert result.output["narrowed"]
     _, composed = VerdictComposer(graders=[]).compose(item, result)
     assert composed is VerdictOutcome[outcome], composed
