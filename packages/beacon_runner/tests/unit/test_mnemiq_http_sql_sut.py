@@ -169,12 +169,14 @@ def test_a_policy_narrowed_answer_is_not_graded_on_its_shown_sql(stub_server: _S
 
 @pytest.mark.parametrize("narrowed", [[], None])
 def test_an_answer_the_policy_did_not_narrow_is_graded_as_before(
-    stub_server: _StubServer, narrowed: list | None
+    stub_server: _StubServer, narrowed: list[dict[str, object]] | None
 ) -> None:
     """The control: `[]` says the policy narrowed nothing and `null` that it was not evaluated;
     either way the shown SQL is the executed one, so the answer is graded."""
     stub_server.response_body = {
-        "answer": "2 claims.", "deferred": False, "sql": "SELECT count(*) FROM claim",
+        "answer": "2 claims.",
+        "deferred": False,
+        "sql": "SELECT count(*) FROM claim",
         "narrowed": narrowed,
     }
     result = _sut(stub_server).invoke(_item(), SolutionConfig(model_id="m"))

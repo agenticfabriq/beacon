@@ -145,9 +145,11 @@ class MnemiqHttpSqlSUT:
             # sends `narrowed` and showed the executed statement as `sql`, so grading it was right.
             tables = ", ".join(str(n.get("object")) for n in narrowed if isinstance(n, dict))
             output = {"sql": sql, "item_id": item.item_id, "narrowed": narrowed}
-            error = (f"mnemiq_policy_narrowed: a row or column policy narrowed this answer "
-                     f"({tables}); the SQL shown is the statement as asked, so re-executing it "
-                     f"would not reproduce the answer -- grade this identity in process instead")
+            error = (
+                f"mnemiq_policy_narrowed: a row or column policy narrowed this answer "
+                f"({tables}); the SQL shown is the statement as asked, so re-executing it "
+                f"would not reproduce the answer -- grade this identity in process instead"
+            )
         else:
             output = {"sql": sql, "item_id": item.item_id}
             error = None
