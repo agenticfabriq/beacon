@@ -954,12 +954,18 @@ const openCell = guard(async (row) => {
       ? '<div class="empty">This system declares no ablatable layers.</div>'
       : !layers.length
         ? '<div class="empty">No sweep has produced a snapshot for this system and benchmark.</div>'
-        : `<div class="tw"><table><thead><tr><th>Layer</th><th class="num">Δ pass@k</th>
-            <th>95% CI</th><th class="num">p (BH)</th></tr></thead><tbody>` +
-          layers.map((layer) => `<tr><td>${esc(layer.layer_name || layer.layer)}</td>
-            <td class="num">${esc(JSON.stringify(layer.delta_pass_at_k ?? layer.delta ?? ""))}</td>
+        : `<div class="tw"><table><thead><tr><th>Layer</th><th class="num">k</th>
+            <th class="num">Δ pass@3</th><th>95% CI at k</th><th class="num">p (BH) at k</th>
+            </tr></thead><tbody>` +
+          /* The fields AttributionLayerOut sends, and only those (B80: this table read
+             delta_pass_at_k and bh_adjusted_p, which it never sends, so every delta showed ""
+             and "p (BH)" showed the unadjusted p). A null delta is "—", never 0: a K<3 sweep has
+             no pass@3, and a zero there was B79's fabrication. `k` labels the CI and p. */
+          layers.map((layer) => `<tr><td>${esc(layer.layer)}</td>
+            <td class="num">${esc(layer.k ?? "—")}</td>
+            <td class="num">${layer.delta_pass_at_3 == null ? "—" : esc(layer.delta_pass_at_3)}</td>
             <td class="dim">[${esc(layer.ci_low)}, ${esc(layer.ci_high)}]</td>
-            <td class="num dim">${esc(layer.bh_adjusted_p ?? layer.mcnemar_p ?? "")}</td></tr>`).join("") +
+            <td class="num dim">${esc(layer.bh_p)}</td></tr>`).join("") +
           "</tbody></table></div>";
   } catch (error) { attributionBox.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 

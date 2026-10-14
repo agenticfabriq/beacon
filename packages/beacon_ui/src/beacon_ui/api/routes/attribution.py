@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID  # noqa: TC003
@@ -39,6 +39,15 @@ def _per_k_metric(row: Attribution, key: str, default: float) -> float:
     return default
 
 
+def _delta_pass_at_3(row: Attribution) -> float | None:
+    """The pass@3 delta, or None where the row holds no pass@3 reading -- never a default (B79)."""
+    entry = row.delta_pass_at_k.get("3")
+    if not isinstance(entry, Mapping):
+        return None
+    value = entry.get("delta")
+    return float(value) if isinstance(value, (Decimal, float, int, str)) else None
+
+
 def _has_pass_at_3(row: Attribution) -> bool:
     """Whether this row actually holds a pass@3 reading.
 
@@ -47,12 +56,21 @@ def _has_pass_at_3(row: Attribution) -> bool:
     such a row ``_per_k_metric`` returns its 0.0 default, so ``delta_pass_at_3``
     is published as a confident zero that was never computed.
 
-    That is not fixed here, but the sample counts must not CORROBORATE it. The
-    per-arm counts are scoped to the headline k, so publishing a real n beside
-    a fabricated delta would turn a detectable fiction into a plausible
-    finding -- the precise failure B64 exists to prevent. Absent instead.
+    The delta is now null on such a row (B79), and the sample counts stay
+    absent with it: they are scoped to the headline k, so a real n beside a
+    missing delta would still read as a finding nobody made (B64).
     """
     return isinstance(row.delta_pass_at_k.get("3"), Mapping)
+
+
+def _headline_k(row: Attribution) -> int | None:
+    """The k the row's CI and p-values describe: the engine's headline, min(3, K).
+
+    K is the number of passes the sweep ran, and the engine writes one
+    ``delta_pass_at_k`` entry per k from 1 to K -- so K is the largest key.
+    """
+    ks = [int(key) for key in row.delta_pass_at_k if str(key).isdigit()]
+    return min(3, max(ks)) if ks else None
 
 
 def _per_k_count(row: Attribution, key: str, column: int | None) -> int | None:
@@ -69,11 +87,24 @@ def _per_k_count(row: Attribution, key: str, column: int | None) -> int | None:
     return column if from_entry is None else from_entry
 
 
+def _by_effect(layer: AttributionLayerOut) -> tuple[bool, float]:
+    """Largest effect first; a row with no pass@3 delta last, never sorted as a zero (B79)."""
+    if layer.delta_pass_at_3 is None:
+        return (True, 0.0)
+    return (False, -abs(layer.delta_pass_at_3))
+
+
+def _layers(rows: Iterable[Attribution]) -> list[AttributionLayerOut]:
+    """The snapshot's layers, in the order the endpoint publishes them."""
+    return sorted((_layer_out(row) for row in rows), key=_by_effect)
+
+
 def _layer_out(row: Attribution) -> AttributionLayerOut:
     at_3 = _has_pass_at_3(row)
     return AttributionLayerOut(
         layer=row.layer_name,
-        delta_pass_at_3=_per_k_metric(row, "delta", 0.0),
+        delta_pass_at_3=_delta_pass_at_3(row),
+        k=_headline_k(row),
         ci_low=_per_k_metric(row, "ci_low", float(row.ci_low)),
         ci_high=_per_k_metric(row, "ci_high", float(row.ci_high)),
         mcnemar_p=float(row.mcnemar_p),
@@ -133,7 +164,7 @@ def get_suite_attribution(
         solution_id=sut,
         suite=suite_record.name,
     )
-    layers = sorted((_layer_out(row) for row in rows), key=lambda row: -abs(row.delta_pass_at_3))
+    layers = _layers(rows)
     return AttributionSnapshotOut(
         solution_id=sut,
         suite_id=suite_id,

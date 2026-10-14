@@ -338,7 +338,10 @@ def test_a_K1_sweep_does_not_get_a_real_sample_size_for_a_fabricated_delta(
 
     assert response.status_code == 200, response.text
     ontology = next(row for row in response.json()["layers"] if row["layer"] == "ontology")
-    assert ontology["delta_pass_at_3"] == 0.0, "the pre-existing fabricated default"
+    # B79: no pass@3 reading, so no pass@3 delta -- it was a fabricated 0.0 -- and the row says
+    # which k its real CI and p-values describe.
+    assert ontology["delta_pass_at_3"] is None
+    assert ontology["k"] == 1
     assert ontology["n_compared"] is None
     assert ontology["n_baseline_excluded"] is None
     assert ontology["n_ablated_excluded"] is None
