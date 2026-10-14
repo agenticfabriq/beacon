@@ -85,7 +85,9 @@ def test_the_webui_table_reads_only_fields_the_api_sends() -> None:
     every delta rendered as "" and "p (BH)" showed the unadjusted p. Derived from the schema, so
     a renamed field fails here rather than rendering blank."""
     table = _attribution_table()
-    # Dot and bracket access both; a destructured parameter would hide its fields from this.
+    # What this sees: `layer.x`, `layer["x"]` and `layer['x']`, and an inline destructured
+    # parameter, which it refuses. A computed key, a template-literal key or destructuring inside
+    # a block body get past it -- a lint over the template, not a parser.
     read = {a or b for a, b in re.findall(r"\blayer(?:\.(\w+)|\[[\"'](\w+)[\"']\])", table)}
     assert not re.search(r"layers\.map\(\s*\(\s*\{", table), "destructuring hides the fields read"
     assert read <= set(AttributionLayerOut.model_fields), read - set(
