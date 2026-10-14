@@ -134,7 +134,10 @@ class MnemiqHttpSqlSUT:
         elif deferred:
             output = {"sql": "", "answer": answer_text, "deferred": True, "reason": reason}
             error = None
-        elif narrowed := body.get("narrowed"):
+        elif (narrowed := body.get("narrowed")) and item.query.get("answerable") is not False:
+            # Not for an item declared unanswerable: the composer judges that one by whether the
+            # system answered at all, which needs no SQL, and an error here would turn its FAIL
+            # into an ERROR that rates exclude -- hiding the over-answer (Codex's review of #9).
             # mnemiq #122 (its M51): a caller is shown the SQL AS ASKED, and a row or column
             # policy's rewrite of it stays in the engine's audit trace. When the policy narrowed
             # the answer, re-executing the shown SQL -- what execution-grounded grading does --

@@ -182,3 +182,31 @@ def test_an_answer_the_policy_did_not_narrow_is_graded_as_before(
     result = _sut(stub_server).invoke(_item(), SolutionConfig(model_id="m"))
     assert result.error is None
     assert result.output["sql"] == "SELECT count(*) FROM claim"
+
+
+@pytest.mark.parametrize(
+    ("answerable", "outcome"), [(False, "FAIL"), (True, "ERROR"), (None, "ERROR")]
+)
+def test_a_narrowed_answer_composes_by_what_the_item_judges(
+    stub_server: _StubServer, answerable: bool | None, outcome: str
+) -> None:
+    """Codex's review of #9. A declared-unanswerable item judges whether the system answered at
+    all, which needs no SQL: answering it is FAIL, and the narrowed-answer error must not turn
+    that into an ERROR that rates exclude. Every other item grades the SQL, which for a narrowed
+    answer is not the statement that ran -- ERROR. Through the real composer."""
+    from beacon_graders.composer import VerdictComposer
+    from beacon_graders.types import VerdictOutcome
+
+    stub_server.response_body = {
+        "answer": "2 claims.",
+        "deferred": False,
+        "sql": "SELECT count(*) FROM claim",
+        "narrowed": [{"object": "claim", "rows": True, "columns": False}],
+    }
+    query: dict[str, object] = {"question": "How many claims?"}
+    if answerable is not None:
+        query["answerable"] = answerable
+    item = EvalItem(item_id="i", suite="s", query=query, ground_truth={}, metadata={})
+    result = _sut(stub_server).invoke(item, SolutionConfig(model_id="m"))
+    _, composed = VerdictComposer(graders=[]).compose(item, result)
+    assert composed is VerdictOutcome[outcome], composed
