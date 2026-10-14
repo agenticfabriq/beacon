@@ -84,7 +84,10 @@ def test_the_webui_table_reads_only_fields_the_api_sends() -> None:
     """B80: the table read `delta_pass_at_k` and `bh_adjusted_p`, which the API never sends, so
     every delta rendered as "" and "p (BH)" showed the unadjusted p. Derived from the schema, so
     a renamed field fails here rather than rendering blank."""
-    read = set(re.findall(r"\blayer\.(\w+)", _attribution_table()))
+    table = _attribution_table()
+    # Dot and bracket access both; a destructured parameter would hide its fields from this.
+    read = {a or b for a, b in re.findall(r"\blayer(?:\.(\w+)|\[[\"'](\w+)[\"']\])", table)}
+    assert not re.search(r"layers\.map\(\s*\(\s*\{", table), "destructuring hides the fields read"
     assert read <= set(AttributionLayerOut.model_fields), read - set(
         AttributionLayerOut.model_fields
     )
