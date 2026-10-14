@@ -12,7 +12,13 @@ class AttributionLayerOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     layer: str
-    delta_pass_at_3: float
+    # Null on a row with no pass@3 reading: a sweep of K < 3 passes has none, and a default of 0.0
+    # published a confident zero nobody measured (B79).
+    delta_pass_at_3: float | None
+    # The k the row's CI and p-values describe: the engine's headline, min(3, K). They are real
+    # statistics at that k, and without it nothing on the row said which k (B79). None when the
+    # row holds no per-k readings at all.
+    k: int | None = None
     ci_low: float
     ci_high: float
     mcnemar_p: float

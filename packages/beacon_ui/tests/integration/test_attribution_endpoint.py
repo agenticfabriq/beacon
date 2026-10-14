@@ -298,19 +298,18 @@ def test_a_negative_count_is_refused(
     session.rollback()
 
 
-def test_a_K1_sweep_does_not_get_a_real_sample_size_for_a_fabricated_delta(
+def test_a_K1_sweep_publishes_no_pass_at_3_delta_and_no_k_scoped_counts(
     api_client: TestClient,
     world: _World,
     session: Session,
 ) -> None:
-    """`delta_pass_at_3` on a K=1 row is a default, not a measurement.
+    """A K=1 sweep publishes no pass@3 delta, and keeps its k-scoped counts withheld.
 
     The engine's headline is `min(3, K)`, so a one-pass sweep -- the default of
-    `run_fs_payments_ablation.py` -- stores only a `"1"` entry and
-    `_per_k_metric` falls back to its 0.0. Publishing the real k=1 exclusion
-    counts beside that zero would turn a detectable fiction into a plausible
-    finding: a confident null corroborated by a genuine n. The k-scoped counts
-    are withheld instead.
+    `run_fs_payments_ablation.py` -- stores only a `"1"` entry. `delta_pass_at_3` was read through
+    a 0.0 default and published as a confident zero (B79); it is null now, and `k` says the row's
+    real CI and p-values are at k=1. The k-scoped exclusion counts stay withheld (B64): a real n
+    beside a missing delta would still read as a finding nobody made.
 
     `n_items_submitted` is not withheld, because it is not scoped to a k --
     it is how many items the sweep was asked to run, true on any row.
@@ -338,7 +337,10 @@ def test_a_K1_sweep_does_not_get_a_real_sample_size_for_a_fabricated_delta(
 
     assert response.status_code == 200, response.text
     ontology = next(row for row in response.json()["layers"] if row["layer"] == "ontology")
-    assert ontology["delta_pass_at_3"] == 0.0, "the pre-existing fabricated default"
+    # B79: no pass@3 reading, so no pass@3 delta -- it was a fabricated 0.0 -- and the row says
+    # which k its real CI and p-values describe.
+    assert ontology["delta_pass_at_3"] is None
+    assert ontology["k"] == 1
     assert ontology["n_compared"] is None
     assert ontology["n_baseline_excluded"] is None
     assert ontology["n_ablated_excluded"] is None
