@@ -117,6 +117,7 @@ class MnemiqHttpSqlSUT:
                 "candidates_executed": body.get("candidates_executed"),
                 "enrichment_version": body.get("enrichment_version"),
                 "tables_used": body.get("tables_used"),
+                "narrowed": body.get("narrowed"),
             },
         )
         answer_text = str(body.get("answer", ""))
@@ -133,6 +134,18 @@ class MnemiqHttpSqlSUT:
         elif deferred:
             output = {"sql": "", "answer": answer_text, "deferred": True, "reason": reason}
             error = None
+        elif narrowed := body.get("narrowed"):
+            # mnemiq #122 (its M51): a caller is shown the SQL AS ASKED, and a row or column
+            # policy's rewrite of it stays in the engine's audit trace. When the policy narrowed
+            # the answer, re-executing the shown SQL -- what execution-grounded grading does --
+            # returns rows the answer never held, so a PASS or FAIL would grade a query that did
+            # not run. ERROR, which beacon composes as neither: the harness could not grade it.
+            # The in-process SUT reads the executed statement and grades such an answer.
+            tables = ", ".join(str(n.get("object")) for n in narrowed if isinstance(n, dict))
+            output = {"sql": sql, "item_id": item.item_id, "narrowed": narrowed}
+            error = (f"mnemiq_policy_narrowed: a row or column policy narrowed this answer "
+                     f"({tables}); the SQL shown is the statement as asked, so re-executing it "
+                     f"would not reproduce the answer -- grade this identity in process instead")
         else:
             output = {"sql": sql, "item_id": item.item_id}
             error = None

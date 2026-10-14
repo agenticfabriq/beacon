@@ -147,3 +147,36 @@ def test_validate_config_rejects_layer_overrides(stub_server: _StubServer) -> No
     assert any("no ablation overrides" in e for e in errors)
     assert sut.layers() == []
     assert sut.identity().supported_modes == ["EVAL"]
+
+
+def test_a_policy_narrowed_answer_is_not_graded_on_its_shown_sql(stub_server: _StubServer) -> None:
+    """mnemiq shows a caller the SQL as asked; a row policy's rewrite stays in its audit trace.
+    Execution-grounded grading re-runs the shown SQL, so for a narrowed answer it would grade an
+    unfiltered statement the answer never came from. The SUT reports it ungradeable instead --
+    an ERROR, never a PASS or FAIL -- and keeps what was narrowed in the trace."""
+    narrowed = [{"object": "claim", "rows": True, "columns": False}]
+    stub_server.response_body = {
+        "answer": "2 claims.",
+        "deferred": False,
+        "sql": "SELECT count(*) FROM claim",
+        "narrowed": narrowed,
+    }
+    result = _sut(stub_server).invoke(_item(), SolutionConfig(model_id="m"))
+    assert result.error is not None and result.error.startswith("mnemiq_policy_narrowed")
+    assert "claim" in result.error
+    assert result.trace.outputs["narrowed"] == narrowed
+
+
+@pytest.mark.parametrize("narrowed", [[], None])
+def test_an_answer_the_policy_did_not_narrow_is_graded_as_before(
+    stub_server: _StubServer, narrowed: list | None
+) -> None:
+    """The control: `[]` says the policy narrowed nothing and `null` that it was not evaluated;
+    either way the shown SQL is the executed one, so the answer is graded."""
+    stub_server.response_body = {
+        "answer": "2 claims.", "deferred": False, "sql": "SELECT count(*) FROM claim",
+        "narrowed": narrowed,
+    }
+    result = _sut(stub_server).invoke(_item(), SolutionConfig(model_id="m"))
+    assert result.error is None
+    assert result.output["sql"] == "SELECT count(*) FROM claim"
