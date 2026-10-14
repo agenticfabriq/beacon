@@ -140,7 +140,9 @@ class MnemiqHttpSqlSUT:
             # the answer, re-executing the shown SQL -- what execution-grounded grading does --
             # returns rows the answer never held, so a PASS or FAIL would grade a query that did
             # not run. ERROR, which beacon composes as neither: the harness could not grade it.
-            # The in-process SUT reads the executed statement and grades such an answer.
+            # The in-process SUT grades such an answer: it reads `Trace.target_sql`, which mnemiq
+            # #122 keeps as the executed, post-rewrite statement. A server older than #122 never
+            # sends `narrowed` and showed the executed statement as `sql`, so grading it was right.
             tables = ", ".join(str(n.get("object")) for n in narrowed if isinstance(n, dict))
             output = {"sql": sql, "item_id": item.item_id, "narrowed": narrowed}
             error = (f"mnemiq_policy_narrowed: a row or column policy narrowed this answer "
