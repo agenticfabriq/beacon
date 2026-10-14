@@ -86,9 +86,9 @@ def test_the_webui_table_reads_only_fields_the_api_sends() -> None:
     a renamed field fails here rather than rendering blank."""
     table = _attribution_table()
     # What this sees: `layer.x`, `layer["x"]` and `layer['x']`, and it refuses an inline
-    # destructured arrow parameter to `layers.map`. It is a lint over the template, not a parser, so
-    # other spellings get past it -- optional chaining, an alias, a computed or template-literal key,
-    # other destructuring among them; the required-field check below still fails if none is read.
+    # destructured arrow parameter to `layers.map`. A lint over the template, not a parser:
+    # other spellings get past it -- optional chaining, an alias, a computed or template-literal
+    # key, other destructuring among them; the required-field check still fails if none is read.
     read = {a or b for a, b in re.findall(r"\blayer(?:\.(\w+)|\[[\"'](\w+)[\"']\])", table)}
     assert not re.search(r"layers\.map\(\s*\(\s*\{", table), "destructuring hides the fields read"
     assert read <= set(AttributionLayerOut.model_fields), read - set(
